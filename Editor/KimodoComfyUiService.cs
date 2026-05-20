@@ -65,6 +65,7 @@ namespace KimodoUnityMotionTools.ProjectEditor
             string serverUrl = $"http://{getComfyIp()}:{getComfyPort()}";
             string workflowText = loadWorkflowText();
             JObject workflow = JObject.Parse(workflowText);
+            ValidateWorkflowShape(workflow);
             InjectGenerationInputs(workflow, constraintsFilePath, effectiveSeed);
 
             string promptId = await SubmitPromptAsync(serverUrl, workflow, token);
@@ -127,9 +128,52 @@ namespace KimodoUnityMotionTools.ProjectEditor
             };
             string body = req.ToString(Formatting.None);
             string url = $"{serverUrl}/prompt";
-            string response = await SendJsonRequestAsync(url, "POST", body, token);
+            string response = await SendJsonRequestAsync(
+                url,
+                "POST",
+                body,
+                token,
+                onHttpFailure: failBody =>
+                {
+                    string details = TryBuildPromptFailureDetails(failBody);
+                    throw new Exception(
+                        $"POST {url} rejected by ComfyUI. {details} " +
+                        $"workflow_nodes={BuildWorkflowNodeClassSummary(workflow)}");
+                });
             JObject parsed = JObject.Parse(response);
             return parsed.Value<string>("prompt_id");
+        }
+
+        private static void ValidateWorkflowShape(JObject workflow)
+        {
+            if (workflow == null)
+            {
+                throw new Exception("Workflow JSON is null.");
+            }
+
+            foreach (var prop in workflow.Properties())
+            {
+                if (prop.Value is not JObject node)
+                {
+                    throw new Exception(
+                        $"Workflow node '{prop.Name}' must be an object with class_type/inputs. " +
+                        "This file does not look like ComfyUI API prompt format.");
+                }
+
+                if (string.IsNullOrWhiteSpace(node.Value<string>("class_type")))
+                {
+                    throw new Exception(
+                        $"Workflow node '{prop.Name}' is missing 'class_type'. " +
+                        "This file does not look like ComfyUI API prompt format.");
+                }
+
+                if (node["inputs"] is not JObject)
+                {
+                    throw new Exception(
+                        $"Workflow node '{prop.Name}' is missing object field 'inputs'. " +
+                        "This file does not look like ComfyUI API prompt format.");
+                }
+            }
         }
 
         private async Task<string> PollHistoryUntilDoneAsync(string serverUrl, string promptId, float timeoutSeconds, float pollIntervalSecondsValue, CancellationToken token)
@@ -186,12 +230,14 @@ namespace KimodoUnityMotionTools.ProjectEditor
 
                         if (IsPromptFinished(entry, out string statusSummary))
                         {
+                            string noOutputsHint = BuildNoOutputsHint(entry);
                             throw new Exception(
                                 $"ComfyUI finished prompt_id={promptId} but returned no usable outputs. {statusSummary} " +
                                 $"Output summary: {BuildOutputSummary(entry)}. " +
                                 $"History entry summary: {BuildEntrySummary(entry)}. " +
                                 "This is usually caused by cache hit with no output payload or a workflow output node mismatch. " +
-                                "Try changing seed and ensure the workflow ends at Kimodo_OutputMotionCompact.");
+                                "Try changing seed and ensure the workflow ends at Kimodo_OutputMotionCompact. " +
+                                noOutputsHint);
                         }
                     }
                     else if (historyDebugLogCount < 6)
@@ -233,22 +279,27 @@ namespace KimodoUnityMotionTools.ProjectEditor
                 return false;
             }
 
-            bool topLevelCompleted = string.Equals(entry.Value<string>("status"), "completed", StringComparison.OrdinalIgnoreCase);
-            bool topLevelSuccess = string.Equals(entry.Value<string>("success"), "true", StringComparison.OrdinalIgnoreCase) || entry.Value<bool?>("success") == true;
+            JToken topStatusToken = entry["status"];
+            JToken topSuccessToken = entry["success"];
+            string topStatus = TokenToFlatString(topStatusToken);
+            bool topLevelCompleted =
+                string.Equals(topStatus, "completed", StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(topStatus, "success", StringComparison.OrdinalIgnoreCase);
+            bool topLevelSuccess = TokenToBoolLoose(topSuccessToken);
 
             bool nestedCompleted = false;
             bool nestedSuccess = false;
             string nestedStatus = string.Empty;
             if (entry["status"] is JObject statusObj)
             {
-                nestedStatus = statusObj.Value<string>("status_str") ?? string.Empty;
+                nestedStatus = TokenToFlatString(statusObj["status_str"]);
                 nestedCompleted = string.Equals(nestedStatus, "success", StringComparison.OrdinalIgnoreCase);
-                nestedSuccess = statusObj.Value<bool?>("completed") == true || statusObj.Value<bool?>("success") == true;
+                nestedSuccess = TokenToBoolLoose(statusObj["completed"]) || TokenToBoolLoose(statusObj["success"]);
             }
 
             if (topLevelCompleted || topLevelSuccess || nestedCompleted || nestedSuccess)
             {
-                summary = $"top.status='{entry.Value<string>("status")}', top.success='{entry["success"]}', nested.status_str='{nestedStatus}', has_outputs={HasUsableOutputs(entry)}";
+                summary = $"top.status='{topStatus}', top.success='{TokenToFlatString(topSuccessToken)}', nested.status_str='{nestedStatus}', has_outputs={HasUsableOutputs(entry)}";
                 return true;
             }
 
@@ -414,17 +465,17 @@ namespace KimodoUnityMotionTools.ProjectEditor
             if (entry["status"] is JObject status)
             {
                 parts.Add($"status.keys=[{string.Join(",", status.Properties().Select(p => p.Name))}]");
-                parts.Add($"status.status_str='{status.Value<string>("status_str")}'");
-                parts.Add($"status.completed='{status["completed"]}'");
-                parts.Add($"status.success='{status["success"]}'");
+                parts.Add($"status.status_str='{TokenToFlatString(status["status_str"])}'");
+                parts.Add($"status.completed='{TokenToFlatString(status["completed"])}'");
+                parts.Add($"status.success='{TokenToFlatString(status["success"])}'");
             }
             else
             {
                 parts.Add("status=<missing>");
             }
 
-            parts.Add($"top.status='{entry.Value<string>("status")}'");
-            parts.Add($"top.success='{entry["success"]}'");
+            parts.Add($"top.status='{TokenToFlatString(entry["status"])}'");
+            parts.Add($"top.success='{TokenToFlatString(entry["success"])}'");
 
             if (entry["outputs"] is JObject outputs)
             {
@@ -445,6 +496,56 @@ namespace KimodoUnityMotionTools.ProjectEditor
                 return value;
             }
             return value.Substring(0, maxChars) + "...(truncated)";
+        }
+
+        private static string BuildNoOutputsHint(JObject entry)
+        {
+            if (entry == null)
+            {
+                return string.Empty;
+            }
+
+            try
+            {
+                if (entry["prompt"] is not JArray promptArr || promptArr.Count < 5)
+                {
+                    return "No prompt metadata in /history entry.";
+                }
+
+                JObject promptGraph = promptArr[2] as JObject;
+                JArray executeOutputs = promptArr[4] as JArray;
+                if (promptGraph == null || executeOutputs == null || executeOutputs.Count == 0)
+                {
+                    return "Prompt metadata does not include executable output node ids.";
+                }
+
+                List<string> outputNodes = new List<string>();
+                foreach (JToken idToken in executeOutputs)
+                {
+                    string id = idToken?.ToString();
+                    if (string.IsNullOrWhiteSpace(id))
+                    {
+                        continue;
+                    }
+
+                    string classType = promptGraph[id]?["class_type"]?.ToString() ?? "<unknown>";
+                    outputNodes.Add($"{id}:{classType}");
+                }
+
+                if (outputNodes.Count == 0)
+                {
+                    return "Executable output node ids are empty.";
+                }
+
+                return
+                    $"Executed output nodes=[{string.Join(",", outputNodes)}]. " +
+                    "If outputs is still empty, the custom output node likely did not emit UI payload for ComfyUI history. " +
+                    "For ComfyUI 0.21+, ensure node returns both {'ui': {...}, 'result': (...)} and restart ComfyUI.";
+            }
+            catch (Exception ex)
+            {
+                return $"Failed to build no-outputs hint: {ex.Message}";
+            }
         }
 
         private void CollectMotionJsonCandidates(JToken token, List<string> results)
@@ -558,7 +659,12 @@ namespace KimodoUnityMotionTools.ProjectEditor
             }
         }
 
-        private async Task<string> SendJsonRequestAsync(string url, string method, string body, CancellationToken token)
+        private async Task<string> SendJsonRequestAsync(
+            string url,
+            string method,
+            string body,
+            CancellationToken token,
+            Action<string> onHttpFailure = null)
         {
             using UnityWebRequest request = new UnityWebRequest(url, method);
             if (method == UnityWebRequest.kHttpVerbPOST)
@@ -579,10 +685,125 @@ namespace KimodoUnityMotionTools.ProjectEditor
 
             if (request.result != UnityWebRequest.Result.Success)
             {
-                throw new Exception($"{method} {url} failed: {request.error}");
+                string responseText = request.downloadHandler?.text ?? string.Empty;
+                if (onHttpFailure != null)
+                {
+                    onHttpFailure(responseText);
+                }
+                throw new Exception(
+                    $"{method} {url} failed: {request.error}. " +
+                    $"status_code={request.responseCode}, body={TruncateForLog(responseText, HistoryLogMaxChars)}");
             }
 
             return request.downloadHandler.text;
+        }
+
+        private static bool TokenToBoolLoose(JToken token)
+        {
+            if (token == null || token.Type == JTokenType.Null || token.Type == JTokenType.Undefined)
+            {
+                return false;
+            }
+
+            if (token.Type == JTokenType.Boolean)
+            {
+                return token.Value<bool>();
+            }
+
+            if (token.Type == JTokenType.Integer)
+            {
+                return token.Value<long>() != 0;
+            }
+
+            if (token.Type == JTokenType.Float)
+            {
+                return Math.Abs(token.Value<double>()) > double.Epsilon;
+            }
+
+            if (token.Type == JTokenType.String)
+            {
+                string s = token.Value<string>()?.Trim();
+                return
+                    string.Equals(s, "true", StringComparison.OrdinalIgnoreCase) ||
+                    string.Equals(s, "success", StringComparison.OrdinalIgnoreCase) ||
+                    string.Equals(s, "completed", StringComparison.OrdinalIgnoreCase) ||
+                    string.Equals(s, "1", StringComparison.OrdinalIgnoreCase);
+            }
+
+            return false;
+        }
+
+        private static string TokenToFlatString(JToken token)
+        {
+            if (token == null || token.Type == JTokenType.Null || token.Type == JTokenType.Undefined)
+            {
+                return string.Empty;
+            }
+
+            if (token.Type == JTokenType.String)
+            {
+                return token.Value<string>() ?? string.Empty;
+            }
+
+            return token.ToString(Formatting.None);
+        }
+
+        private static string BuildWorkflowNodeClassSummary(JObject workflow)
+        {
+            if (workflow == null)
+            {
+                return "<null>";
+            }
+
+            List<string> nodes = new List<string>();
+            foreach (var prop in workflow.Properties())
+            {
+                if (prop.Value is JObject node)
+                {
+                    string classType = node.Value<string>("class_type");
+                    nodes.Add($"{prop.Name}:{classType}");
+                }
+            }
+
+            if (nodes.Count == 0)
+            {
+                return "<empty>";
+            }
+
+            const int max = 16;
+            if (nodes.Count > max)
+            {
+                return string.Join(",", nodes.Take(max)) + $",...(+{nodes.Count - max})";
+            }
+            return string.Join(",", nodes);
+        }
+
+        private static string TryBuildPromptFailureDetails(string responseBody)
+        {
+            if (string.IsNullOrWhiteSpace(responseBody))
+            {
+                return "ComfyUI returned an empty error body.";
+            }
+
+            try
+            {
+                JObject parsed = JObject.Parse(responseBody);
+                JObject error = parsed["error"] as JObject;
+                JObject extraInfo = error?["extra_info"] as JObject;
+                string type = error?.Value<string>("type");
+                string message = error?.Value<string>("message");
+                string details = error?.Value<string>("details");
+                string nodeErrors = parsed["node_errors"]?.ToString(Formatting.None);
+                string extra = extraInfo?.ToString(Formatting.None);
+
+                return
+                    $"ComfyUI error_type='{type}', message='{message}', details='{details}', " +
+                    $"extra_info={extra ?? "{}"}, node_errors={nodeErrors ?? "{}"}.";
+            }
+            catch
+            {
+                return $"ComfyUI error body: {TruncateForLog(responseBody, HistoryLogMaxChars)}";
+            }
         }
     }
 }
