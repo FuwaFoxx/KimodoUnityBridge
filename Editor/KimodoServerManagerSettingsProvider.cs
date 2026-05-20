@@ -249,7 +249,7 @@ namespace KimodoUnityMotionTools.ProjectEditor
                 string startScript = KimodoServerRuntimeUtil.ResolveStartScript(runtimeRoot);
                 if (string.IsNullOrWhiteSpace(startScript) || !File.Exists(startScript))
                 {
-                    lastOpStatus = "Start script not found (expected start_server.bat/run_server.bat).";
+                    lastOpStatus = "Start script not found (expected run_server/start_server, with legacy fallback).";
                     return;
                 }
 
@@ -260,14 +260,7 @@ namespace KimodoUnityMotionTools.ProjectEditor
                 }
                 args += " --output console";
 
-                var psi = new System.Diagnostics.ProcessStartInfo
-                {
-                    FileName = "cmd.exe",
-                    Arguments = $"/d /s /k \"\"{startScript}\"{args}\"",
-                    UseShellExecute = true,
-                    CreateNoWindow = false,
-                    WorkingDirectory = runtimeRoot
-                };
+                var psi = BuildScriptStartInfo(startScript, args, keepWindowOpen: true, useShellExecute: true);
                 DiagnosticsProcess.Start(psi);
                 lastOpStatus = $"Start requested: model={selectedModel}, vram={selectedVramMode}.";
             }
@@ -284,16 +277,11 @@ namespace KimodoUnityMotionTools.ProjectEditor
                 return -1;
             }
 
-            var psi = new System.Diagnostics.ProcessStartInfo
-            {
-                FileName = "cmd.exe",
-                Arguments = $"/d /c \"\"{scriptPath}\" {arguments}\"",
-                UseShellExecute = false,
-                RedirectStandardOutput = false,
-                RedirectStandardError = false,
-                CreateNoWindow = false,
-                WorkingDirectory = Path.GetDirectoryName(scriptPath)
-            };
+            var psi = BuildScriptStartInfo(scriptPath, arguments, keepWindowOpen: false, useShellExecute: false);
+            psi.RedirectStandardOutput = false;
+            psi.RedirectStandardError = false;
+            psi.CreateNoWindow = false;
+
             using var proc = DiagnosticsProcess.Start(psi);
             if (proc == null)
             {
@@ -302,6 +290,39 @@ namespace KimodoUnityMotionTools.ProjectEditor
 
             proc.WaitForExit();
             return proc.ExitCode;
+        }
+
+        private static System.Diagnostics.ProcessStartInfo BuildScriptStartInfo(string scriptPath, string arguments, bool keepWindowOpen, bool useShellExecute)
+        {
+            string fullPath = Path.GetFullPath(scriptPath);
+            string ext = Path.GetExtension(fullPath)?.ToLowerInvariant() ?? string.Empty;
+            string workingDir = Path.GetDirectoryName(fullPath) ?? Environment.CurrentDirectory;
+            string safeArgs = arguments ?? string.Empty;
+
+            if (ext == ".bat" || ext == ".cmd")
+            {
+                string mode = keepWindowOpen ? "/k" : "/c";
+                return new System.Diagnostics.ProcessStartInfo
+                {
+                    FileName = "cmd.exe",
+                    Arguments = $"/d /s {mode} \"\"{fullPath}\"{safeArgs}\"",
+                    UseShellExecute = useShellExecute,
+                    WorkingDirectory = workingDir
+                };
+            }
+
+            if (ext == ".sh")
+            {
+                return new System.Diagnostics.ProcessStartInfo
+                {
+                    FileName = "bash",
+                    Arguments = $"\"{fullPath}\"{safeArgs}",
+                    UseShellExecute = useShellExecute,
+                    WorkingDirectory = workingDir
+                };
+            }
+
+            throw new NotSupportedException($"Unsupported script extension: {ext}");
         }
 
         private void TryDeleteAllData()

@@ -75,6 +75,8 @@ namespace KimodoUnityMotionTools
         public float keyReduceScaleError = 0.5f;
         [Range(0f, 1f)]
         public float keyReduceFloatError = 0.5f;
+        [Tooltip("Auto retarget baked animation according to timeline binding animator.")]
+        public bool autoRetargetOnBinding = true;
         
         public string motionData;
         public int frameCount;

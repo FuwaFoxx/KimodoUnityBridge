@@ -1,4 +1,5 @@
 ﻿using System;
+using System.Collections.Generic;
 using System.IO;
 using System.Reflection;
 using System.Threading;
@@ -8,6 +9,7 @@ using UnityEditor;
 using UnityEditor.Timeline;
 using UnityEngine;
 using UnityEngine.Playables;
+using UnityEngine.Timeline;
 using KimodoUnityMotionTools;
 using KimodoUnityMotionTools.ProjectEditor;
 
@@ -19,6 +21,7 @@ namespace KimodoUnityMotionTools.ProjectEditor
         private const float TargetFps = 60f;
         private const string DefaultWorkflowResource = "kimodo-unity-workflow";
         private const string GeneratedClipFolder = "Assets/KimodoGeneratedClips";
+        private const string GeneratedClipNamePrefix = "Kimodo_";
 
         private static readonly IKimodoGenerationBackend ComfyUiBackend = new ComfyUiGenerationBackend();
         private static readonly IKimodoGenerationBackend BridgeBackend = new KimodoBridgeGenerationBackend();
@@ -45,6 +48,7 @@ namespace KimodoUnityMotionTools.ProjectEditor
         private SerializedProperty footIKProp;
         private SerializedProperty loopProp;
         private SerializedProperty savedSkeletonTypeProp;
+        private SerializedProperty autoRetargetOnBindingProp;
 
         private KimodoPlayableClip clip;
         private bool isGenerating;
@@ -53,6 +57,7 @@ namespace KimodoUnityMotionTools.ProjectEditor
         private CancellationTokenSource generationCts;
         private int lastSubmittedSeed = int.MinValue;
         private string lastConstraintsPath = string.Empty;
+        private string lastRetargetMode = "SOMA Fallback";
         private bool bridgeEnvAutoRetryInProgress;
 
         private void OnEnable()
@@ -78,6 +83,7 @@ namespace KimodoUnityMotionTools.ProjectEditor
             footIKProp = serializedObject.FindProperty("m_ApplyFootIK");
             loopProp = serializedObject.FindProperty("m_Loop");
             savedSkeletonTypeProp = serializedObject.FindProperty("savedSkeletonType");
+            autoRetargetOnBindingProp = serializedObject.FindProperty("autoRetargetOnBinding");
             EnsureBridgeLifecycleHooks();
         }
 
@@ -240,6 +246,11 @@ namespace KimodoUnityMotionTools.ProjectEditor
                 EditorGUILayout.PropertyField(savedSkeletonTypeProp, new GUIContent("Skeleton Type"));
             }
 
+            if (autoRetargetOnBindingProp != null)
+            {
+                EditorGUILayout.PropertyField(autoRetargetOnBindingProp, new GUIContent("Auto Retarget On Binding"));
+            }
+
             if (clip != null && clip.savedSkeletonType != KimodoBakeSkeletonType.SOMA)
             {
                 clip.savedSkeletonType = KimodoBakeSkeletonType.SOMA;
@@ -247,6 +258,7 @@ namespace KimodoUnityMotionTools.ProjectEditor
             }
 
             EditorGUILayout.LabelField("Saved As: SOMA", EditorStyles.miniLabel);
+            EditorGUILayout.LabelField($"Retarget Result: {lastRetargetMode}", EditorStyles.miniLabel);
             EditorGUILayout.HelpBox("Baking is now part of 'Generate & Bake'.", MessageType.Info);
 
             EditorGUILayout.EndVertical();
@@ -274,7 +286,6 @@ namespace KimodoUnityMotionTools.ProjectEditor
 
             try
             {
-                EnsureAnimationClipExists();
                 UnityEngine.Timeline.TimelineClip timelineClip = FindTimelineClipForAsset(clip);
                 string constraintsFilePath = string.Empty;
                 if (timelineClip != null)
@@ -297,8 +308,13 @@ namespace KimodoUnityMotionTools.ProjectEditor
                     throw new Exception("No motion json found in workflow outputs.");
                 }
 
+                CreateAndAssignNewAnimationClip();
                 ApplyMotionJsonToClip(motionJson);
                 BakeCurrentMotionData();
+                if (string.IsNullOrEmpty(lastError))
+                {
+                    TrimGeneratedClipsToLimit();
+                }
                 lastStatus = "Generation complete.";
             }
             catch (OperationCanceledException)
@@ -496,20 +512,14 @@ namespace KimodoUnityMotionTools.ProjectEditor
 
         private static string ResolveBridgeLauncherPath(string kimodoRootPath)
         {
-            string bat = Path.Combine(kimodoRootPath, "start_kimodo_bridge_offline.bat");
-            if (File.Exists(bat))
+            string resolved = KimodoServerRuntimeUtil.ResolveStartScript(kimodoRootPath);
+            if (!string.IsNullOrWhiteSpace(resolved) && File.Exists(resolved))
             {
-                return Path.GetFullPath(bat);
-            }
-
-            string sh = Path.Combine(kimodoRootPath, "start_kimodo_bridge_offline.sh");
-            if (File.Exists(sh))
-            {
-                return Path.GetFullPath(sh);
+                return Path.GetFullPath(resolved);
             }
 
             throw new FileNotFoundException(
-                $"Bridge launcher not found under runtime root: {kimodoRootPath}");
+                $"Bridge launcher not found under runtime root: {kimodoRootPath}. Expected run_server/start_server (or legacy fallback).");
         }
 
         private static string ResolveBridgeRootPath()
@@ -674,6 +684,36 @@ namespace KimodoUnityMotionTools.ProjectEditor
             EditorUtility.SetDirty(clip);
             EditorUtility.SetDirty(clip.clip);
             AssetDatabase.SaveAssets();
+
+            lastRetargetMode = "SOMA Fallback";
+            if (clip.autoRetargetOnBinding)
+            {
+                TimelineClip timelineClip = FindTimelineClipForAsset(clip);
+                bool retargetOk = KimodoRetargetPipeline.TryRetargetBakedClip(
+                    clip,
+                    timelineClip,
+                    out KimodoRetargetResultMode retargetMode,
+                    out string retargetDetails);
+
+                if (retargetOk)
+                {
+                    lastRetargetMode = retargetMode switch
+                    {
+                        KimodoRetargetResultMode.HumanoidMuscle => "Humanoid Muscle",
+                        KimodoRetargetResultMode.TargetBone => "Target Bone",
+                        _ => "SOMA Fallback"
+                    };
+                    Debug.Log($"[Kimodo] Retarget success. {retargetDetails}");
+                    EditorUtility.SetDirty(clip.clip);
+                    AssetDatabase.SaveAssets();
+                }
+                else
+                {
+                    lastRetargetMode = "SOMA Fallback";
+                    Debug.LogWarning($"[Kimodo] Retarget fallback to SOMA. {retargetDetails}");
+                }
+            }
+
             RefreshTimelinePreviewGraph();
 
             lastError = string.Empty;
@@ -720,16 +760,11 @@ namespace KimodoUnityMotionTools.ProjectEditor
             EditorGUILayout.EndVertical();
         }
 
-        private void EnsureAnimationClipExists()
+        private void CreateAndAssignNewAnimationClip()
         {
-            if (clip.clip != null)
-            {
-                return;
-            }
-
             var newAnimationClip = new AnimationClip
             {
-                name = $"Kimodo_{DateTime.Now:yyyyMMdd_HHmmss}"
+                name = $"{GeneratedClipNamePrefix}{DateTime.Now:yyyyMMdd_HHmmss_fff}"
             };
 
             if (!AssetDatabase.IsValidFolder(GeneratedClipFolder))
@@ -746,6 +781,124 @@ namespace KimodoUnityMotionTools.ProjectEditor
             EditorUtility.SetDirty(clip.clip);
             AssetDatabase.SaveAssets();
             RefreshTimelinePreviewGraph();
+        }
+
+        private void TrimGeneratedClipsToLimit()
+        {
+            int maxCount = Mathf.Clamp(
+                KimodoPlayableClipGenerationSettings.instance.MaxGeneratedClips,
+                KimodoPlayableClipGenerationSettings.MinGeneratedClipsLimit,
+                KimodoPlayableClipGenerationSettings.MaxGeneratedClipsLimit);
+
+            if (!AssetDatabase.IsValidFolder(GeneratedClipFolder))
+            {
+                return;
+            }
+
+            string[] clipGuids = AssetDatabase.FindAssets("t:AnimationClip", new[] { GeneratedClipFolder });
+            if (clipGuids == null || clipGuids.Length <= maxCount)
+            {
+                return;
+            }
+
+            var clipPaths = new List<string>(clipGuids.Length);
+            foreach (string guid in clipGuids)
+            {
+                string path = AssetDatabase.GUIDToAssetPath(guid);
+                if (string.IsNullOrWhiteSpace(path) || !path.EndsWith(".anim", StringComparison.OrdinalIgnoreCase))
+                {
+                    continue;
+                }
+
+                string name = Path.GetFileNameWithoutExtension(path) ?? string.Empty;
+                if (!name.StartsWith(GeneratedClipNamePrefix, StringComparison.Ordinal))
+                {
+                    continue;
+                }
+
+                clipPaths.Add(path);
+            }
+
+            if (clipPaths.Count <= maxCount)
+            {
+                return;
+            }
+
+            clipPaths.Sort(CompareGeneratedClipPathsByAgeOldestFirst);
+            string activeClipPath = clip.clip != null ? AssetDatabase.GetAssetPath(clip.clip) : string.Empty;
+
+            foreach (string candidatePath in clipPaths)
+            {
+                if (!string.IsNullOrWhiteSpace(activeClipPath) &&
+                    string.Equals(candidatePath, activeClipPath, StringComparison.OrdinalIgnoreCase))
+                {
+                    continue;
+                }
+
+                if (IsAssetReferencedByOtherAssets(candidatePath))
+                {
+                    Debug.Log($"[Kimodo] Generated clip cleanup skipped referenced clip: {candidatePath}");
+                    return;
+                }
+
+                if (AssetDatabase.DeleteAsset(candidatePath))
+                {
+                    AssetDatabase.SaveAssets();
+                }
+                return;
+            }
+        }
+
+        private static int CompareGeneratedClipPathsByAgeOldestFirst(string leftPath, string rightPath)
+        {
+            string leftName = Path.GetFileNameWithoutExtension(leftPath) ?? string.Empty;
+            string rightName = Path.GetFileNameWithoutExtension(rightPath) ?? string.Empty;
+            string leftStamp = leftName.StartsWith(GeneratedClipNamePrefix, StringComparison.Ordinal)
+                ? leftName.Substring(GeneratedClipNamePrefix.Length)
+                : leftName;
+            string rightStamp = rightName.StartsWith(GeneratedClipNamePrefix, StringComparison.Ordinal)
+                ? rightName.Substring(GeneratedClipNamePrefix.Length)
+                : rightName;
+            return string.Compare(leftStamp, rightStamp, StringComparison.Ordinal);
+        }
+
+        private static bool IsAssetReferencedByOtherAssets(string assetPath)
+        {
+            if (string.IsNullOrWhiteSpace(assetPath))
+            {
+                return false;
+            }
+
+            string[] allAssets = AssetDatabase.GetAllAssetPaths();
+            foreach (string path in allAssets)
+            {
+                if (string.IsNullOrWhiteSpace(path) ||
+                    string.Equals(path, assetPath, StringComparison.OrdinalIgnoreCase) ||
+                    !path.StartsWith("Assets/", StringComparison.OrdinalIgnoreCase))
+                {
+                    continue;
+                }
+
+                string[] dependencies;
+                try
+                {
+                    dependencies = AssetDatabase.GetDependencies(path, false);
+                }
+                catch
+                {
+                    continue;
+                }
+
+                for (int i = 0; i < dependencies.Length; i++)
+                {
+                    if (string.Equals(dependencies[i], assetPath, StringComparison.OrdinalIgnoreCase))
+                    {
+                        return true;
+                    }
+                }
+            }
+
+            return false;
         }
 
         private void RefreshTimelinePreviewGraph()

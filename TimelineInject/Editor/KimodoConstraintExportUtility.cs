@@ -690,6 +690,21 @@ namespace KimodoUnityMotionTools.ProjectEditor
                 return pose;
             }
 
+            if (animator != null &&
+                KimodoRetargetPipeline.TryConvertPoseToSomaSpace(
+                    animator,
+                    root,
+                    out Vector3 convertedRoot,
+                    out Vector2 convertedHeading,
+                    out List<Vector3> convertedLocalAxisAngles,
+                    out string convertError))
+            {
+                pose.RootPosition = convertedRoot;
+                pose.RootHeading = convertedHeading;
+                pose.LocalAxisAngles = convertedLocalAxisAngles ?? new List<Vector3>();
+                return pose;
+            }
+
             Transform pelvis = TryResolveTransformBySomaName("Hips", root, animator) ?? root;
 
             Vector3 worldPos = pelvis.position;

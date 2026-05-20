@@ -319,21 +319,40 @@ namespace KimodoUnityMotionTools.ProjectEditor
 
         internal static string ResolveStartScript(string runtimeRoot)
         {
-            string s1 = Path.Combine(runtimeRoot, "start_server.bat");
+            string s1 = Path.Combine(runtimeRoot, "run_server.bat");
             if (File.Exists(s1))
             {
                 return s1;
             }
-            string s2 = Path.Combine(runtimeRoot, "run_server.bat");
+            string s1Sh = Path.Combine(runtimeRoot, "run_server.sh");
+            if (File.Exists(s1Sh))
+            {
+                return s1Sh;
+            }
+
+            string s2 = Path.Combine(runtimeRoot, "start_server.bat");
             if (File.Exists(s2))
             {
                 return s2;
             }
+            string s2Sh = Path.Combine(runtimeRoot, "start_server.sh");
+            if (File.Exists(s2Sh))
+            {
+                return s2Sh;
+            }
+
             string legacy = Path.Combine(runtimeRoot, "start_kimodo_bridge_offline.bat");
             if (File.Exists(legacy))
             {
                 return legacy;
             }
+
+            string legacySh = Path.Combine(runtimeRoot, "start_kimodo_bridge_offline.sh");
+            if (File.Exists(legacySh))
+            {
+                return legacySh;
+            }
+
             return string.Empty;
         }
 
@@ -343,6 +362,11 @@ namespace KimodoUnityMotionTools.ProjectEditor
             if (File.Exists(s1))
             {
                 return s1;
+            }
+            string s1Sh = Path.Combine(runtimeRoot, "setup.sh");
+            if (File.Exists(s1Sh))
+            {
+                return s1Sh;
             }
             string legacy = Path.Combine(runtimeRoot, "setup_kimodo_offline.bat");
             if (File.Exists(legacy))
