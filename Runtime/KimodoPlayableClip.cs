@@ -55,6 +55,8 @@ namespace KimodoUnityMotionTools
         public int diffusionSteps = 100;
         public bool randomSeed = false;
         public int seed = 42;
+        [Tooltip("Enable inbetween interpolation by constraining start/end with neighboring clips on timeline.")]
+        public bool enableInbetweenInterpolation = false;
         [Tooltip("If empty, use Resources/kimodo-unity-workflow.json")]
         public TextAsset workflowJsonAsset;
         [Min(10f)]

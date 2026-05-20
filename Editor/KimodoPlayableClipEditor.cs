@@ -40,6 +40,7 @@ namespace KimodoUnityMotionTools.ProjectEditor
         private SerializedProperty diffusionSteps;
         private SerializedProperty randomSeed;
         private SerializedProperty seed;
+        private SerializedProperty enableInbetweenInterpolation;
         private SerializedProperty workflowJsonAsset;
         private SerializedProperty generationTimeoutSeconds;
         private SerializedProperty pollIntervalSeconds;
@@ -75,6 +76,7 @@ namespace KimodoUnityMotionTools.ProjectEditor
             diffusionSteps = serializedObject.FindProperty("diffusionSteps");
             randomSeed = serializedObject.FindProperty("randomSeed");
             seed = serializedObject.FindProperty("seed");
+            enableInbetweenInterpolation = serializedObject.FindProperty("enableInbetweenInterpolation");
             workflowJsonAsset = serializedObject.FindProperty("workflowJsonAsset");
             generationTimeoutSeconds = serializedObject.FindProperty("generationTimeoutSeconds");
             pollIntervalSeconds = serializedObject.FindProperty("pollIntervalSeconds");
@@ -168,6 +170,12 @@ namespace KimodoUnityMotionTools.ProjectEditor
             seed.intValue = EditorGUILayout.IntField("Seed", seed.intValue);
             EditorGUI.EndDisabledGroup();
             EditorGUILayout.EndHorizontal();
+            if (enableInbetweenInterpolation != null)
+            {
+                EditorGUILayout.PropertyField(
+                    enableInbetweenInterpolation,
+                    new GUIContent("补间补帧", "使用前后邻接片段边界姿态作为约束生成中间动画。"));
+            }
 
             generationTimeoutSeconds.floatValue = Mathf.Max(10f, EditorGUILayout.FloatField("Timeout (sec)", generationTimeoutSeconds.floatValue));
             pollIntervalSeconds.floatValue = Mathf.Max(0.1f, EditorGUILayout.FloatField("Poll Interval (sec)", pollIntervalSeconds.floatValue));
@@ -290,8 +298,10 @@ namespace KimodoUnityMotionTools.ProjectEditor
                 string constraintsFilePath = string.Empty;
                 if (timelineClip != null)
                 {
-                    if (!KimodoConstraintExportUtility.TryBuildAndWriteConstraintsFile(
+                    if (!KimodoInbetweenConstraintUtility.TryBuildAndWriteConstraintsFile(
                         timelineClip,
+                        clip.enableInbetweenInterpolation,
+                        Mathf.Max(1, generationFrames.intValue),
                         out constraintsFilePath,
                         out string constraintError))
                     {

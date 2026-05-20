@@ -249,7 +249,6 @@ namespace KimodoUnityMotionTools.ProjectEditor
                 SkeletonBone[] skeletonBones = allBones.Select(t => new SkeletonBone
                 {
                     name = t.name,
-                    parentName = t.parent != null ? t.parent.name : string.Empty,
                     position = t.localPosition,
                     rotation = t.localRotation,
                     scale = t.localScale

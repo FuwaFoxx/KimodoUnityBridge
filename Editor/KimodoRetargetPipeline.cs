@@ -5,6 +5,7 @@ using UnityEditor.Timeline;
 using UnityEngine;
 using UnityEngine.Playables;
 using UnityEngine.Timeline;
+using KimodoUnityMotionTools.Editor;
 
 namespace KimodoUnityMotionTools.ProjectEditor
 {
@@ -110,7 +111,7 @@ namespace KimodoUnityMotionTools.ProjectEditor
 
                 try
                 {
-                    if (!SOMA2Avatar.MuscleClipToSomaBoneClip(
+                    if (!TryConvertMuscleToTargetBoneClip(
                             muscleClip,
                             targetSamplingAnimator,
                             targetBoneClip,
@@ -380,6 +381,188 @@ namespace KimodoUnityMotionTools.ProjectEditor
             EditorUtility.SetDirty(dst);
         }
 
+        private static bool TryConvertMuscleToTargetBoneClip(
+            AnimationClip muscleClip,
+            Animator targetHumanoidAnimator,
+            AnimationClip outputTargetBoneClip,
+            out string error,
+            float sampleRate = 30f)
+        {
+            error = string.Empty;
+            if (muscleClip == null || targetHumanoidAnimator == null || outputTargetBoneClip == null)
+            {
+                error = "Input clip/animator/output is null.";
+                return false;
+            }
+
+            if (targetHumanoidAnimator.avatar == null || !targetHumanoidAnimator.avatar.isValid || !targetHumanoidAnimator.avatar.isHuman)
+            {
+                error = "Target animator must have valid humanoid avatar.";
+                return false;
+            }
+
+            try
+            {
+                float effectiveRate = sampleRate > 0f ? sampleRate : (muscleClip.frameRate > 0f ? muscleClip.frameRate : 30f);
+                float duration = muscleClip.length > 0f ? muscleClip.length : 1f / Mathf.Max(1f, effectiveRate);
+                int frameCount = Mathf.Max(2, Mathf.RoundToInt(duration * effectiveRate) + 1);
+
+                var curveLookup = BuildAnimatorCurveLookup(muscleClip);
+                HumanPoseHandler poseHandler = new HumanPoseHandler(targetHumanoidAnimator.avatar, targetHumanoidAnimator.transform);
+                HumanPose basePose = new HumanPose();
+                poseHandler.GetHumanPose(ref basePose);
+
+                Transform root = targetHumanoidAnimator.transform;
+                Transform[] all = root.GetComponentsInChildren<Transform>(true);
+                string[] paths = new string[all.Length];
+                for (int i = 0; i < all.Length; i++)
+                {
+                    paths[i] = AnimationUtility.CalculateTransformPath(all[i], root);
+                }
+
+                var px = new AnimationCurve[all.Length];
+                var py = new AnimationCurve[all.Length];
+                var pz = new AnimationCurve[all.Length];
+                var qx = new AnimationCurve[all.Length];
+                var qy = new AnimationCurve[all.Length];
+                var qz = new AnimationCurve[all.Length];
+                var qw = new AnimationCurve[all.Length];
+                for (int i = 0; i < all.Length; i++)
+                {
+                    px[i] = new AnimationCurve();
+                    py[i] = new AnimationCurve();
+                    pz[i] = new AnimationCurve();
+                    qx[i] = new AnimationCurve();
+                    qy[i] = new AnimationCurve();
+                    qz[i] = new AnimationCurve();
+                    qw[i] = new AnimationCurve();
+                }
+
+                for (int frame = 0; frame < frameCount; frame++)
+                {
+                    float t = FrameToTime(frame, frameCount, duration);
+                    HumanPose pose = BuildPoseAtTime(curveLookup, basePose, t);
+                    poseHandler.SetHumanPose(ref pose);
+
+                    for (int i = 0; i < all.Length; i++)
+                    {
+                        Transform bone = all[i];
+                        Vector3 lp = bone.localPosition;
+                        Quaternion lr = bone.localRotation;
+
+                        px[i].AddKey(t, lp.x);
+                        py[i].AddKey(t, lp.y);
+                        pz[i].AddKey(t, lp.z);
+                        qx[i].AddKey(t, lr.x);
+                        qy[i].AddKey(t, lr.y);
+                        qz[i].AddKey(t, lr.z);
+                        qw[i].AddKey(t, lr.w);
+                    }
+                }
+
+                outputTargetBoneClip.ClearCurves();
+                outputTargetBoneClip.legacy = false;
+                outputTargetBoneClip.frameRate = effectiveRate;
+                for (int i = 0; i < all.Length; i++)
+                {
+                    string path = paths[i];
+                    outputTargetBoneClip.SetCurve(path, typeof(Transform), "m_LocalPosition.x", px[i]);
+                    outputTargetBoneClip.SetCurve(path, typeof(Transform), "m_LocalPosition.y", py[i]);
+                    outputTargetBoneClip.SetCurve(path, typeof(Transform), "m_LocalPosition.z", pz[i]);
+                    outputTargetBoneClip.SetCurve(path, typeof(Transform), "m_LocalRotation.x", qx[i]);
+                    outputTargetBoneClip.SetCurve(path, typeof(Transform), "m_LocalRotation.y", qy[i]);
+                    outputTargetBoneClip.SetCurve(path, typeof(Transform), "m_LocalRotation.z", qz[i]);
+                    outputTargetBoneClip.SetCurve(path, typeof(Transform), "m_LocalRotation.w", qw[i]);
+                }
+                outputTargetBoneClip.EnsureQuaternionContinuity();
+                return true;
+            }
+            catch (Exception e)
+            {
+                error = $"Convert muscle->target bone failed: {e.Message}";
+                return false;
+            }
+        }
+
+        private static HumanPose BuildPoseAtTime(Dictionary<string, AnimationCurve> curveLookup, HumanPose basePose, float t)
+        {
+            HumanPose pose = basePose;
+
+            for (int i = 0; i < HumanTrait.MuscleCount && i < pose.muscles.Length; i++)
+            {
+                string prop = MusclePropertyNames[i];
+                if (curveLookup.TryGetValue(prop, out AnimationCurve curve) && curve != null)
+                {
+                    pose.muscles[i] = curve.Evaluate(t);
+                }
+            }
+
+            Vector3 bodyPos = pose.bodyPosition;
+            if (TryEvaluate(curveLookup, "RootT.x", t, out float tx)) bodyPos.x = tx;
+            if (TryEvaluate(curveLookup, "RootT.y", t, out float ty)) bodyPos.y = ty;
+            if (TryEvaluate(curveLookup, "RootT.z", t, out float tz)) bodyPos.z = tz;
+            pose.bodyPosition = bodyPos;
+
+            Quaternion bodyRot = pose.bodyRotation;
+            if (TryEvaluate(curveLookup, "RootQ.x", t, out float qx)) bodyRot.x = qx;
+            if (TryEvaluate(curveLookup, "RootQ.y", t, out float qy)) bodyRot.y = qy;
+            if (TryEvaluate(curveLookup, "RootQ.z", t, out float qz)) bodyRot.z = qz;
+            if (TryEvaluate(curveLookup, "RootQ.w", t, out float qw)) bodyRot.w = qw;
+            if (bodyRot != Quaternion.identity)
+            {
+                bodyRot.Normalize();
+            }
+            pose.bodyRotation = bodyRot;
+            return pose;
+        }
+
+        private static bool TryEvaluate(Dictionary<string, AnimationCurve> lookup, string prop, float t, out float value)
+        {
+            value = 0f;
+            if (!lookup.TryGetValue(prop, out AnimationCurve curve) || curve == null)
+            {
+                return false;
+            }
+
+            value = curve.Evaluate(t);
+            return true;
+        }
+
+        private static Dictionary<string, AnimationCurve> BuildAnimatorCurveLookup(AnimationClip clip)
+        {
+            var lookup = new Dictionary<string, AnimationCurve>(StringComparer.Ordinal);
+            EditorCurveBinding[] bindings = AnimationUtility.GetCurveBindings(clip);
+            for (int i = 0; i < bindings.Length; i++)
+            {
+                EditorCurveBinding binding = bindings[i];
+                if (binding.type != typeof(Animator))
+                {
+                    continue;
+                }
+
+                if (!string.IsNullOrEmpty(binding.path))
+                {
+                    continue;
+                }
+
+                AnimationCurve curve = AnimationUtility.GetEditorCurve(clip, binding);
+                lookup[binding.propertyName] = curve;
+            }
+
+            return lookup;
+        }
+
+        private static float FrameToTime(int frame, int frameCount, float duration)
+        {
+            if (frameCount <= 1)
+            {
+                return 0f;
+            }
+
+            float normalized = frame / (frameCount - 1f);
+            return Mathf.Clamp01(normalized) * Mathf.Max(0f, duration);
+        }
+
         private static Transform FindTransformByName(Transform root, string name)
         {
             if (root == null || string.IsNullOrWhiteSpace(name))
@@ -446,5 +629,30 @@ namespace KimodoUnityMotionTools.ProjectEditor
         {
             -1, 0, 1, 2, 3, 4, 5, 6, 6, 6, 3, 10, 11, 12, 13, 13, 3, 16, 17, 18, 19, 19, 0, 22, 23, 24, 0, 26, 27, 28
         };
+
+        private static readonly string[] MusclePropertyNames = BuildMusclePropertyNames();
+
+        private static string[] BuildMusclePropertyNames()
+        {
+            string[] names = new string[HumanTrait.MuscleCount];
+            for (int i = 0; i < HumanTrait.MuscleCount; i++)
+            {
+                string n = HumanTrait.MuscleName[i];
+                if (i >= 55)
+                {
+                    string[] parts = n.Split(' ');
+                    if (parts.Length == 2)
+                    {
+                        parts[0] += "Hand.";
+                        parts[1] += ".";
+                        n = string.Join(" ", parts);
+                    }
+                }
+
+                names[i] = n;
+            }
+
+            return names;
+        }
     }
 }

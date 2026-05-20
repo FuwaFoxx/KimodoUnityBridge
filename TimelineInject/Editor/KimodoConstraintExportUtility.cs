@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
+using System.Reflection;
 using Newtonsoft.Json;
 using UnityEditor;
 using UnityEditor.Timeline;
@@ -25,6 +26,7 @@ namespace KimodoUnityMotionTools.ProjectEditor
         {
             -1, 0, 1, 2, 3, 4, 5, 6, 6, 6, 3, 10, 11, 12, 13, 13, 3, 16, 17, 18, 19, 19, 0, 22, 23, 24, 0, 26, 27, 28
         };
+        private const string TempSomaBridgeName = "__KimodoConstraintSomaBridge";
 
         public static bool TryBuildAndWriteConstraintsFile(
             TimelineClip sourceClip,
@@ -690,18 +692,11 @@ namespace KimodoUnityMotionTools.ProjectEditor
                 return pose;
             }
 
-            if (animator != null &&
-                KimodoRetargetPipeline.TryConvertPoseToSomaSpace(
-                    animator,
-                    root,
-                    out Vector3 convertedRoot,
-                    out Vector2 convertedHeading,
-                    out List<Vector3> convertedLocalAxisAngles,
-                    out string convertError))
+            if (TryCapturePoseViaHumanoidBridge(animator, out SkeletonPose bridgedPose))
             {
-                pose.RootPosition = convertedRoot;
-                pose.RootHeading = convertedHeading;
-                pose.LocalAxisAngles = convertedLocalAxisAngles ?? new List<Vector3>();
+                pose.RootPosition = bridgedPose.RootPosition;
+                pose.RootHeading = bridgedPose.RootHeading;
+                pose.LocalAxisAngles = bridgedPose.LocalAxisAngles ?? new List<Vector3>();
                 return pose;
             }
 
@@ -754,6 +749,464 @@ namespace KimodoUnityMotionTools.ProjectEditor
             }
 
             return pose;
+        }
+
+        private static bool TryCapturePoseViaHumanoidBridge(Animator animator, out SkeletonPose pose)
+        {
+            pose = new SkeletonPose();
+            if (animator == null)
+            {
+                return false;
+            }
+
+            GameObject somaTempRoot = null;
+            GameObject sourceTempRoot = null;
+            Avatar ensuredAvatar = null;
+            Avatar generatedTempAvatar = null;
+            try
+            {
+                if (!TryEnsureHumanoidAvatarForConstraint(animator, out ensuredAvatar, out generatedTempAvatar))
+                {
+                    return false;
+                }
+
+                GameObject somaPrefab = Resources.Load<GameObject>("SOMA_somaskel77_neutral");
+                if (somaPrefab == null)
+                {
+                    return false;
+                }
+
+                somaTempRoot = UnityEngine.Object.Instantiate(somaPrefab);
+                somaTempRoot.name = TempSomaBridgeName;
+                somaTempRoot.hideFlags = HideFlags.HideAndDontSave;
+                somaTempRoot.transform.SetPositionAndRotation(Vector3.zero, Quaternion.identity);
+                somaTempRoot.transform.localScale = Vector3.one;
+
+                Animator somaAnimator = somaTempRoot.GetComponent<Animator>();
+                if (somaAnimator == null || somaAnimator.avatar == null || !somaAnimator.avatar.isValid || !somaAnimator.avatar.isHuman)
+                {
+                    return false;
+                }
+
+                sourceTempRoot = UnityEngine.Object.Instantiate(animator.gameObject);
+                sourceTempRoot.hideFlags = HideFlags.HideAndDontSave;
+                sourceTempRoot.transform.SetPositionAndRotation(Vector3.zero, Quaternion.identity);
+                sourceTempRoot.transform.localScale = Vector3.one;
+                Animator sourceTempAnimator = sourceTempRoot.GetComponent<Animator>();
+                if (sourceTempAnimator == null)
+                {
+                    return false;
+                }
+                sourceTempAnimator.avatar = ensuredAvatar;
+                sourceTempAnimator.enabled = false;
+
+                HumanPoseHandler sourcePoseHandler = new HumanPoseHandler(sourceTempAnimator.avatar, sourceTempAnimator.transform);
+                HumanPoseHandler somaPoseHandler = new HumanPoseHandler(somaAnimator.avatar, somaAnimator.transform);
+                HumanPose humanPose = new HumanPose();
+                sourcePoseHandler.GetHumanPose(ref humanPose);
+                somaPoseHandler.SetHumanPose(ref humanPose);
+
+                Transform somaRoot = somaAnimator.transform;
+                Transform pelvis = TryResolveTransformBySomaName("Hips", somaRoot, somaAnimator) ?? somaRoot;
+                Vector3 worldPos = pelvis.position;
+                pose.RootPosition = new Vector3(-worldPos.x, worldPos.y, worldPos.z);
+
+                Vector3 forward = pelvis.forward;
+                Vector2 heading = new Vector2(-forward.x, forward.z);
+                if (heading.sqrMagnitude <= 1e-8f)
+                {
+                    heading = new Vector2(1f, 0f);
+                }
+                else
+                {
+                    heading.Normalize();
+                }
+                pose.RootHeading = heading;
+
+                Transform[] joints = ResolveSoma30JointTransforms(somaRoot, somaAnimator);
+                Quaternion[] worldRots = new Quaternion[joints.Length];
+                for (int i = 0; i < joints.Length; i++)
+                {
+                    worldRots[i] = joints[i] != null ? joints[i].rotation : Quaternion.identity;
+                }
+
+                for (int i = 0; i < joints.Length; i++)
+                {
+                    int parent = Soma30Parents[i];
+                    Quaternion local = parent >= 0 && parent < worldRots.Length
+                        ? Quaternion.Inverse(worldRots[parent]) * worldRots[i]
+                        : worldRots[i];
+
+                    Quaternion q = new Quaternion(local.x, -local.y, -local.z, local.w);
+                    pose.LocalAxisAngles.Add(QuaternionToAxisAngleVector(q));
+                }
+
+                return true;
+            }
+            catch
+            {
+                return false;
+            }
+            finally
+            {
+                if (sourceTempRoot != null)
+                {
+                    UnityEngine.Object.DestroyImmediate(sourceTempRoot);
+                }
+                if (somaTempRoot != null)
+                {
+                    UnityEngine.Object.DestroyImmediate(somaTempRoot);
+                }
+                if (generatedTempAvatar != null)
+                {
+                    UnityEngine.Object.DestroyImmediate(generatedTempAvatar);
+                }
+            }
+        }
+
+        private static bool TryEnsureHumanoidAvatarForConstraint(Animator animator, out Avatar avatar, out Avatar generatedTempAvatar)
+        {
+            avatar = null;
+            generatedTempAvatar = null;
+
+            if (animator == null)
+            {
+                return false;
+            }
+
+            if (animator.avatar != null && animator.avatar.isValid && animator.avatar.isHuman)
+            {
+                avatar = animator.avatar;
+                return true;
+            }
+
+            GameObject avatarRoot = animator.avatarRoot != null ? animator.avatarRoot.gameObject : animator.gameObject;
+            if (avatarRoot == null)
+            {
+                return false;
+            }
+
+            ModelImporter importer = GetModelImporter(avatarRoot, out string importerPath);
+            if (importer != null && !string.IsNullOrWhiteSpace(importerPath))
+            {
+                Avatar importerAvatar = AssetDatabase.LoadAssetAtPath<Avatar>(importerPath);
+                if (importerAvatar != null && importerAvatar.isValid && importerAvatar.isHuman)
+                {
+                    avatar = importerAvatar;
+                    return true;
+                }
+            }
+
+            generatedTempAvatar = GenerateHumanoidAvatarTemp(avatarRoot);
+            if (generatedTempAvatar != null && generatedTempAvatar.isValid && generatedTempAvatar.isHuman)
+            {
+                avatar = generatedTempAvatar;
+                return true;
+            }
+
+            return false;
+        }
+
+        private static ModelImporter GetModelImporter(GameObject gameObject, out string modelImporterPath)
+        {
+            modelImporterPath = string.Empty;
+            if (gameObject == null)
+            {
+                return null;
+            }
+
+            string prefabPath = PrefabUtility.GetPrefabAssetPathOfNearestInstanceRoot(gameObject);
+            if (string.IsNullOrEmpty(prefabPath))
+            {
+                return null;
+            }
+
+            GameObject prefabAsset = AssetDatabase.LoadAssetAtPath<GameObject>(prefabPath);
+            if (prefabAsset == null)
+            {
+                return null;
+            }
+
+            PrefabAssetType prefabAssetType = PrefabUtility.GetPrefabAssetType(prefabAsset);
+            if (prefabAssetType == PrefabAssetType.Variant)
+            {
+                GameObject parentVariant = PrefabUtility.GetCorrespondingObjectFromSource(prefabAsset);
+                if (parentVariant == null)
+                {
+                    return null;
+                }
+
+                string parentPath = AssetDatabase.GetAssetPath(parentVariant);
+                modelImporterPath = parentPath;
+                return AssetImporter.GetAtPath(parentPath) as ModelImporter;
+            }
+
+            modelImporterPath = prefabPath;
+            return AssetImporter.GetAtPath(prefabPath) as ModelImporter;
+        }
+
+        private static Avatar GenerateHumanoidAvatarTemp(GameObject sourceRoot)
+        {
+            if (sourceRoot == null)
+            {
+                return null;
+            }
+
+            GameObject editable = null;
+            try
+            {
+                editable = UnityEngine.Object.Instantiate(sourceRoot);
+                editable.hideFlags = HideFlags.HideAndDontSave;
+                editable.transform.SetPositionAndRotation(Vector3.zero, Quaternion.identity);
+                editable.transform.localScale = Vector3.one;
+
+                TryForceTPoseReflective(editable);
+                Dictionary<int, Transform> map = TryMappingHumanoidLikeReflective(editable.transform);
+                if (map == null || map.Count == 0)
+                {
+                    map = BuildFallbackBoneMapping(editable.transform);
+                }
+
+                if (map == null || map.Count == 0)
+                {
+                    return null;
+                }
+
+                HumanBone[] human = map
+                    .Select(pair => CreateHumanBone(pair.Key, pair.Value))
+                    .Where(h => !string.IsNullOrWhiteSpace(h.boneName))
+                    .ToArray();
+                if (human.Length == 0)
+                {
+                    return null;
+                }
+
+                SkeletonBone[] skeleton = editable.GetComponentsInChildren<Transform>(true)
+                    .Select(t => new SkeletonBone
+                    {
+                        name = t.name,
+                        position = t.localPosition,
+                        rotation = t.localRotation,
+                        scale = t.localScale
+                    })
+                    .ToArray();
+
+                HumanDescription desc = new HumanDescription
+                {
+                    upperArmTwist = 1f,
+                    lowerArmTwist = 0f,
+                    upperLegTwist = 1f,
+                    lowerLegTwist = 0f,
+                    armStretch = 0f,
+                    legStretch = 0f,
+                    feetSpacing = 0f,
+                    hasTranslationDoF = false,
+                    human = human,
+                    skeleton = skeleton
+                };
+
+                Avatar avatar = AvatarBuilder.BuildHumanAvatar(editable, desc);
+                if (avatar == null || !avatar.isValid || !avatar.isHuman)
+                {
+                    return null;
+                }
+
+                avatar.name = $"{sourceRoot.name}_TempHumanoid";
+                return avatar;
+            }
+            catch
+            {
+                return null;
+            }
+            finally
+            {
+                if (editable != null)
+                {
+                    UnityEngine.Object.DestroyImmediate(editable);
+                }
+            }
+        }
+
+        private static HumanBone CreateHumanBone(int humanBoneId, Transform bone)
+        {
+            if (bone == null || humanBoneId < 0 || humanBoneId >= HumanTrait.BoneCount)
+            {
+                return default;
+            }
+
+            HumanBone hb = new HumanBone
+            {
+                boneName = bone.name,
+                humanName = HumanTrait.BoneName[humanBoneId]
+            };
+            hb.limit.useDefaultValues = true;
+            return hb;
+        }
+
+        private static void TryForceTPoseReflective(GameObject root)
+        {
+            if (root == null)
+            {
+                return;
+            }
+
+            try
+            {
+                Type setupTool = GetAvatarSetupToolType();
+                if (setupTool == null)
+                {
+                    return;
+                }
+
+                MethodInfo forceTPose = setupTool.GetMethod(
+                    "ForceTPose",
+                    BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Static,
+                    null,
+                    new[] { typeof(GameObject), typeof(Transform) },
+                    null);
+                forceTPose?.Invoke(null, new object[] { root, root.transform });
+            }
+            catch
+            {
+                // fallback mapping still applies
+            }
+        }
+
+        private static Dictionary<int, Transform> TryMappingHumanoidLikeReflective(Transform root)
+        {
+            if (root == null)
+            {
+                return null;
+            }
+
+            try
+            {
+                Type setupTool = GetAvatarSetupToolType();
+                if (setupTool == null)
+                {
+                    return null;
+                }
+
+                MethodInfo mappingMethod = setupTool.GetMethod(
+                    "MappingHumanoidLike",
+                    BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Static,
+                    null,
+                    new[] { typeof(Transform) },
+                    null);
+                if (mappingMethod == null)
+                {
+                    return null;
+                }
+
+                object result = mappingMethod.Invoke(null, new object[] { root });
+                if (result is System.Collections.IDictionary dictionary)
+                {
+                    var output = new Dictionary<int, Transform>();
+                    foreach (System.Collections.DictionaryEntry entry in dictionary)
+                    {
+                        if (entry.Key is int key && entry.Value is Transform value && !output.ContainsKey(key))
+                        {
+                            output[key] = value;
+                        }
+                    }
+                    return output;
+                }
+            }
+            catch
+            {
+                return null;
+            }
+
+            return null;
+        }
+
+        private static Type GetAvatarSetupToolType()
+        {
+            Assembly[] assemblies = AppDomain.CurrentDomain.GetAssemblies();
+            for (int i = 0; i < assemblies.Length; i++)
+            {
+                Type t = assemblies[i].GetType("UnityEditor.AvatarSetupTool");
+                if (t != null)
+                {
+                    return t;
+                }
+            }
+            return null;
+        }
+
+        private static Dictionary<int, Transform> BuildFallbackBoneMapping(Transform root)
+        {
+            var output = new Dictionary<int, Transform>();
+            Dictionary<string, Transform> names = BuildNameLookup(root);
+
+            AddBone(output, HumanBodyBones.Hips, names, "Hips", "Pelvis");
+            AddBone(output, HumanBodyBones.Spine, names, "Spine", "Spine1");
+            AddBone(output, HumanBodyBones.Chest, names, "Chest", "Spine2", "Spine3");
+            AddBone(output, HumanBodyBones.Neck, names, "Neck", "Neck1");
+            AddBone(output, HumanBodyBones.Head, names, "Head");
+
+            AddBone(output, HumanBodyBones.LeftShoulder, names, "LeftShoulder", "L_Clavicle");
+            AddBone(output, HumanBodyBones.LeftUpperArm, names, "LeftArm", "LeftUpperArm", "L_Shoulder");
+            AddBone(output, HumanBodyBones.LeftLowerArm, names, "LeftForeArm", "LeftLowerArm", "L_Elbow");
+            AddBone(output, HumanBodyBones.LeftHand, names, "LeftHand", "L_Hand");
+
+            AddBone(output, HumanBodyBones.RightShoulder, names, "RightShoulder", "R_Clavicle");
+            AddBone(output, HumanBodyBones.RightUpperArm, names, "RightArm", "RightUpperArm", "R_Shoulder");
+            AddBone(output, HumanBodyBones.RightLowerArm, names, "RightForeArm", "RightLowerArm", "R_Elbow");
+            AddBone(output, HumanBodyBones.RightHand, names, "RightHand", "R_Hand");
+
+            AddBone(output, HumanBodyBones.LeftUpperLeg, names, "LeftUpLeg", "LeftLeg", "L_Hip");
+            AddBone(output, HumanBodyBones.LeftLowerLeg, names, "LeftLeg", "LeftShin", "L_Knee");
+            AddBone(output, HumanBodyBones.LeftFoot, names, "LeftFoot", "L_Foot");
+            AddBone(output, HumanBodyBones.LeftToes, names, "LeftToeBase", "L_Toes");
+
+            AddBone(output, HumanBodyBones.RightUpperLeg, names, "RightUpLeg", "RightLeg", "R_Hip");
+            AddBone(output, HumanBodyBones.RightLowerLeg, names, "RightLeg", "RightShin", "R_Knee");
+            AddBone(output, HumanBodyBones.RightFoot, names, "RightFoot", "R_Foot");
+            AddBone(output, HumanBodyBones.RightToes, names, "RightToeBase", "R_Toes");
+
+            return output;
+        }
+
+        private static Dictionary<string, Transform> BuildNameLookup(Transform root)
+        {
+            var dict = new Dictionary<string, Transform>(StringComparer.OrdinalIgnoreCase);
+            if (root == null)
+            {
+                return dict;
+            }
+
+            Transform[] all = root.GetComponentsInChildren<Transform>(true);
+            for (int i = 0; i < all.Length; i++)
+            {
+                if (!dict.ContainsKey(all[i].name))
+                {
+                    dict[all[i].name] = all[i];
+                }
+            }
+            return dict;
+        }
+
+        private static void AddBone(
+            Dictionary<int, Transform> output,
+            HumanBodyBones bone,
+            Dictionary<string, Transform> names,
+            params string[] candidates)
+        {
+            int id = (int)bone;
+            if (output.ContainsKey(id))
+            {
+                return;
+            }
+
+            for (int i = 0; i < candidates.Length; i++)
+            {
+                if (names.TryGetValue(candidates[i], out Transform t) && t != null)
+                {
+                    output[id] = t;
+                    return;
+                }
+            }
         }
 
         private static Transform[] ResolveSoma30JointTransforms(Transform root, Animator animator)
