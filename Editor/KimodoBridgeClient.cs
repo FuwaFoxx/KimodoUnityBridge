@@ -500,10 +500,7 @@ namespace KimodoUnityMotionTools.ProjectEditor
             string ext = Path.GetExtension(launcherPath)?.ToLowerInvariant() ?? string.Empty;
             string modelArg = $" --model \"{(string.IsNullOrWhiteSpace(modelName) ? "Kimodo-SOMA-RP-v1" : modelName.Trim())}\"";
             string vramArg = highVram ? " --highvram" : string.Empty;
-            string kimodoRootArg = string.IsNullOrWhiteSpace(kimodoRootPath)
-                ? string.Empty
-                : $" --kimodo-root \"{Path.GetFullPath(kimodoRootPath.Trim())}\"";
-            string args = modelArg + vramArg + kimodoRootArg;
+            string args = modelArg + vramArg;
 
             if (ext == ".bat" || ext == ".cmd")
             {

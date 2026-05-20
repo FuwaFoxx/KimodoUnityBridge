@@ -249,7 +249,7 @@ namespace KimodoUnityMotionTools.ProjectEditor
                 string startScript = KimodoServerRuntimeUtil.ResolveStartScript(runtimeRoot);
                 if (string.IsNullOrWhiteSpace(startScript) || !File.Exists(startScript))
                 {
-                    lastOpStatus = "Start script not found (expected run_server/start_server, with legacy fallback).";
+                    lastOpStatus = "Start script not found.";
                     return;
                 }
 

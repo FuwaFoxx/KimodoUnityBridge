@@ -529,7 +529,7 @@ namespace KimodoUnityMotionTools.ProjectEditor
             }
 
             throw new FileNotFoundException(
-                $"Bridge launcher not found under runtime root: {kimodoRootPath}. Expected run_server/start_server (or legacy fallback).");
+                $"Bridge launcher not found under runtime root: {kimodoRootPath}. Expected new pipeline launcher: run_server.bat or bash/start_server.bat.");
         }
 
         private static string ResolveBridgeRootPath()

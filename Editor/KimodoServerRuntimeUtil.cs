@@ -297,8 +297,7 @@ namespace KimodoUnityMotionTools.ProjectEditor
         internal static int EstimateMissingConfigPoints(string runtimeRoot, bool highVram, string selectedModel)
         {
             int points = 0;
-            bool firstSetup = !File.Exists(Path.Combine(runtimeRoot, ".setup_new_complete"))
-                              && !File.Exists(Path.Combine(runtimeRoot, ".kimodo_offline_setup_complete"));
+            bool firstSetup = !File.Exists(Path.Combine(runtimeRoot, ".setup_new_complete"));
             if (firstSetup)
             {
                 points += 5;
@@ -330,24 +329,34 @@ namespace KimodoUnityMotionTools.ProjectEditor
                 return s1Sh;
             }
 
-            string s2 = Path.Combine(runtimeRoot, "start_server.bat");
+            string s2 = Path.Combine(runtimeRoot, "bash", "start_server.bat");
             if (File.Exists(s2))
             {
                 return s2;
             }
-            string s2Sh = Path.Combine(runtimeRoot, "start_server.sh");
+            string s2Root = Path.Combine(runtimeRoot, "start_server.bat");
+            if (File.Exists(s2Root))
+            {
+                return s2Root;
+            }
+
+            string s2Sh = Path.Combine(runtimeRoot, "bash", "start_server.sh");
             if (File.Exists(s2Sh))
             {
                 return s2Sh;
             }
+            string s2RootSh = Path.Combine(runtimeRoot, "start_server.sh");
+            if (File.Exists(s2RootSh))
+            {
+                return s2RootSh;
+            }
 
             string legacy = Path.Combine(runtimeRoot, "start_kimodo_bridge_offline.bat");
+            string legacySh = Path.Combine(runtimeRoot, "start_kimodo_bridge_offline.sh");
             if (File.Exists(legacy))
             {
                 return legacy;
             }
-
-            string legacySh = Path.Combine(runtimeRoot, "start_kimodo_bridge_offline.sh");
             if (File.Exists(legacySh))
             {
                 return legacySh;
@@ -358,16 +367,28 @@ namespace KimodoUnityMotionTools.ProjectEditor
 
         internal static string ResolveSetupScript(string runtimeRoot)
         {
-            string s1 = Path.Combine(runtimeRoot, "setup.bat");
+            string s1 = Path.Combine(runtimeRoot, "bash", "setup.bat");
             if (File.Exists(s1))
             {
                 return s1;
             }
-            string s1Sh = Path.Combine(runtimeRoot, "setup.sh");
+            string s1Root = Path.Combine(runtimeRoot, "setup.bat");
+            if (File.Exists(s1Root))
+            {
+                return s1Root;
+            }
+
+            string s1Sh = Path.Combine(runtimeRoot, "bash", "setup.sh");
             if (File.Exists(s1Sh))
             {
                 return s1Sh;
             }
+            string s1RootSh = Path.Combine(runtimeRoot, "setup.sh");
+            if (File.Exists(s1RootSh))
+            {
+                return s1RootSh;
+            }
+
             string legacy = Path.Combine(runtimeRoot, "setup_kimodo_offline.bat");
             if (File.Exists(legacy))
             {
