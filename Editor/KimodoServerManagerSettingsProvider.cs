@@ -1,11 +1,11 @@
 using System;
 using System.Collections.Generic;
-using DiagnosticsProcess = System.Diagnostics.Process;
 using System.IO;
+using System.Threading;
+using System.Threading.Tasks;
 using UnityEditor;
 using UnityEngine;
 using UnityEngine.UIElements;
-using KimodoUnityMotionTools;
 
 namespace KimodoUnityMotionTools.ProjectEditor
 {
@@ -15,17 +15,36 @@ namespace KimodoUnityMotionTools.ProjectEditor
         {
             public string Name;
             public string DirectoryPath;
-            public long SizeBytes;
         }
 
-        private string runtimeRoot;
+        private enum ServerState
+        {
+            Disabled = 0,
+            Detecting = 1,
+            Enabled = 2
+        }
+
+        private const double ServerStatusQueryCooldownSeconds = 2.0;
+
+        private string runtimeRoot = string.Empty;
+        private string resolvedModelsRoot = string.Empty;
         private Vector2 scroll;
         private List<InstalledModelInfoView> models = new List<InstalledModelInfoView>();
         private bool runtimeExists;
-        private bool serverRunning;
+        private bool usingCustomModelsPath;
+
+        private ServerState serverState = ServerState.Disabled;
+        private bool serverStatusQueryInFlight;
+        private int serverStatusQueryVersion;
+        private double nextServerStatusQueryAt;
         private string serverHost = "127.0.0.1";
         private int serverPort = -1;
-        private string lastOpStatus = string.Empty;
+
+        private bool operationInProgress;
+        private string operationStatus = string.Empty;
+        private string lastError = string.Empty;
+        private string modelError = string.Empty;
+
         private string selectedModel = "Kimodo-SOMA-RP-v1";
         private KimodoBridgeVramMode selectedVramMode = KimodoBridgeVramMode.Low;
 
@@ -36,13 +55,14 @@ namespace KimodoUnityMotionTools.ProjectEditor
         {
             return new KimodoServerManagerSettingsProvider("Project/Kimodo Server Manager", SettingsScope.Project)
             {
-                keywords = new HashSet<string>(new[] { "Kimodo", "Server", "Model", "Bridge", "VRAM" })
+                keywords = new HashSet<string>(new[] { "Kimodo", "Server", "Model", "Bridge", "VRAM", "Cache", "Runtime" })
             };
         }
 
         public override void OnActivate(string searchContext, VisualElement rootElement)
         {
             Refresh();
+            ScheduleServerStateQuery(force: true);
         }
 
         public override void OnGUI(string searchContext)
@@ -52,6 +72,8 @@ namespace KimodoUnityMotionTools.ProjectEditor
                 runtimeRoot = KimodoServerLifecycleManager.GetRuntimeRootPath();
             }
 
+            ScheduleServerStateQuery(force: false);
+
             EditorGUILayout.LabelField("Kimodo Server Manager", EditorStyles.boldLabel);
             EditorGUILayout.Space(4f);
             EditorGUILayout.LabelField("Runtime Root", runtimeRoot, EditorStyles.wordWrappedMiniLabel);
@@ -60,22 +82,36 @@ namespace KimodoUnityMotionTools.ProjectEditor
             if (GUILayout.Button("Refresh", GUILayout.Width(100f)))
             {
                 Refresh();
+                ScheduleServerStateQuery(force: true);
             }
+
             if (!runtimeExists)
             {
                 if (GUILayout.Button("Create Kimodo Server", GUILayout.Width(180f)))
                 {
-                    bool ok = KimodoServerLifecycleManager.EnsureRuntimeRootExists();
-                    lastOpStatus = ok ? "Runtime root created." : "Failed to create runtime root from package template.";
+                    try
+                    {
+                        bool ok = KimodoServerLifecycleManager.EnsureRuntimeRootExists();
+                        if (!ok)
+                        {
+                            throw new InvalidOperationException("Failed to create runtime root from package template.");
+                        }
+
+                        operationStatus = "Runtime root created.";
+                        lastError = string.Empty;
+                    }
+                    catch (Exception e)
+                    {
+                        lastError = e.Message;
+                    }
+
                     Refresh();
+                    ScheduleServerStateQuery(force: true);
                 }
             }
             EditorGUILayout.EndHorizontal();
 
-            if (!string.IsNullOrWhiteSpace(lastOpStatus))
-            {
-                EditorGUILayout.HelpBox(lastOpStatus, MessageType.Info);
-            }
+            DrawStatusMessages();
 
             if (!runtimeExists)
             {
@@ -85,9 +121,21 @@ namespace KimodoUnityMotionTools.ProjectEditor
 
             DrawStartupSection();
             DrawServerSection();
-            DrawStorageSection();
             DrawModelSection();
             DrawActionsSection();
+        }
+
+        private void DrawStatusMessages()
+        {
+            if (!string.IsNullOrWhiteSpace(lastError))
+            {
+                EditorGUILayout.HelpBox(lastError, MessageType.Error);
+            }
+
+            if (!string.IsNullOrWhiteSpace(operationStatus))
+            {
+                EditorGUILayout.HelpBox(operationStatus, MessageType.Info);
+            }
         }
 
         private void DrawStartupSection()
@@ -98,21 +146,68 @@ namespace KimodoUnityMotionTools.ProjectEditor
 
             string[] options = KimodoServerLifecycleManager.SupportedModelNames;
             int idx = Array.IndexOf(options, selectedModel);
-            if (idx < 0) idx = 0;
+            if (idx < 0)
+            {
+                idx = 0;
+            }
+
             int newIdx = EditorGUILayout.Popup("Model", idx, options);
             selectedModel = options[Mathf.Clamp(newIdx, 0, options.Length - 1)];
             selectedVramMode = (KimodoBridgeVramMode)EditorGUILayout.EnumPopup(
                 new GUIContent("VRAM Mode", "Low: quantized encoder (~4G). High: full model stack (~16G)."),
                 selectedVramMode);
-            KimodoPlayableClipGenerationSettings lifecycleSettings = KimodoPlayableClipGenerationSettings.instance;
+
+            KimodoPlayableClipGenerationSettings settings = KimodoPlayableClipGenerationSettings.instance;
+
+            EditorGUI.BeginChangeCheck();
+            int newLimit = EditorGUILayout.IntSlider(
+                new GUIContent("Max Cached Clip", "Range: 1-1000"),
+                settings.MaxGeneratedClips,
+                KimodoPlayableClipGenerationSettings.MinGeneratedClipsLimit,
+                KimodoPlayableClipGenerationSettings.MaxGeneratedClipsLimit);
+            if (EditorGUI.EndChangeCheck())
+            {
+                settings.MaxGeneratedClips = newLimit;
+                settings.SaveSettings();
+            }
+
             EditorGUI.BeginChangeCheck();
             bool closeOnPlay = EditorGUILayout.Toggle(
                 new GUIContent("Close On Enter Play Mode", "When enabled, entering Play Mode will close Kimodo bridge server."),
-                lifecycleSettings.CloseBridgeServerOnEnterPlayMode);
+                settings.CloseBridgeServerOnEnterPlayMode);
             if (EditorGUI.EndChangeCheck())
             {
-                lifecycleSettings.CloseBridgeServerOnEnterPlayMode = closeOnPlay;
-                lifecycleSettings.SaveSettings();
+                settings.CloseBridgeServerOnEnterPlayMode = closeOnPlay;
+                settings.SaveSettings();
+            }
+
+            string localModelsPath = settings.LocalModelsPath;
+            EditorGUILayout.BeginHorizontal();
+            EditorGUI.BeginChangeCheck();
+            localModelsPath = EditorGUILayout.TextField(
+                new GUIContent("Local Models Path", "Optional. Use this path for model detection list only."),
+                localModelsPath);
+            bool textChanged = EditorGUI.EndChangeCheck();
+
+            if (GUILayout.Button("Browse...", GUILayout.Width(90f)))
+            {
+                string startDir = string.IsNullOrWhiteSpace(localModelsPath)
+                    ? runtimeRoot
+                    : localModelsPath;
+                string selected = EditorUtility.OpenFolderPanel("Select Local Models Folder", startDir, string.Empty);
+                if (!string.IsNullOrWhiteSpace(selected))
+                {
+                    localModelsPath = selected;
+                    textChanged = true;
+                }
+            }
+            EditorGUILayout.EndHorizontal();
+
+            if (textChanged)
+            {
+                settings.LocalModelsPath = localModelsPath;
+                settings.SaveSettings();
+                RefreshModelList();
             }
 
             int encoderVramGb = selectedVramMode == KimodoBridgeVramMode.High ? 16 : 4;
@@ -120,14 +215,10 @@ namespace KimodoUnityMotionTools.ProjectEditor
             EditorGUILayout.HelpBox(
                 $"Estimated VRAM for selected mode: ~{totalVramGb} GB (core 2 GB + encoder {encoderVramGb} GB).",
                 MessageType.Info);
+
             if (KimodoServerLifecycleManager.TryGetModelMissingSetupMinutes(runtimeRoot, selectedVramMode == KimodoBridgeVramMode.High, selectedModel, out int minutes))
             {
                 EditorGUILayout.HelpBox($"Model missing detected, update required, approximately {minutes} minutes.", MessageType.None);
-            }
-
-            if (GUILayout.Button("Start Server", GUILayout.Width(140f)))
-            {
-                StartServerWithSelectedOptions();
             }
 
             EditorGUILayout.EndVertical();
@@ -139,61 +230,83 @@ namespace KimodoUnityMotionTools.ProjectEditor
             EditorGUILayout.LabelField("Server", EditorStyles.boldLabel);
             EditorGUILayout.BeginVertical("box");
 
-            if (serverRunning)
+            switch (serverState)
             {
-                EditorGUILayout.HelpBox($"Running at {serverHost}:{serverPort}", MessageType.Info);
-                if (GUILayout.Button("Stop Server", GUILayout.Width(120f)))
+                case ServerState.Enabled:
+                    EditorGUILayout.HelpBox($"Running at {serverHost}:{serverPort}", MessageType.Info);
+                    break;
+                case ServerState.Detecting:
+                    EditorGUILayout.HelpBox("Checking server status...", MessageType.None);
+                    break;
+                default:
+                    EditorGUILayout.HelpBox("Server is not running.", MessageType.None);
+                    break;
+            }
+
+            bool stopMode = serverState == ServerState.Enabled || serverState == ServerState.Detecting;
+            string buttonLabel = operationInProgress ? "Processing..." : (stopMode ? "Stop Server" : "Start Server");
+
+            using (new EditorGUI.DisabledScope(operationInProgress))
+            {
+                if (GUILayout.Button(buttonLabel, GUILayout.Width(140f)))
                 {
-                    bool ok = KimodoServerLifecycleManager.TrySendQuit(serverHost, serverPort);
-                    lastOpStatus = ok ? "Quit signal sent." : "Failed to send quit command.";
-                    Refresh();
+                    if (stopMode)
+                    {
+                        _ = StopServerAsync();
+                    }
+                    else
+                    {
+                        _ = StartServerAsync();
+                    }
                 }
             }
-            else
-            {
-                EditorGUILayout.HelpBox("Server is not running.", MessageType.None);
-            }
 
-            EditorGUILayout.EndVertical();
-        }
-
-        private void DrawStorageSection()
-        {
-            EditorGUILayout.Space(8f);
-            EditorGUILayout.LabelField("Storage", EditorStyles.boldLabel);
-            EditorGUILayout.BeginVertical("box");
-            long size = KimodoServerLifecycleManager.GetDirectorySizeSafe(runtimeRoot);
-            EditorGUILayout.LabelField("Kimodo Data Size", KimodoServerLifecycleManager.FormatBytes(size));
             EditorGUILayout.EndVertical();
         }
 
         private void DrawModelSection()
         {
             EditorGUILayout.Space(8f);
-            EditorGUILayout.LabelField("Installed Models", EditorStyles.boldLabel);
+            EditorGUILayout.LabelField("Detected Models", EditorStyles.boldLabel);
             EditorGUILayout.BeginVertical("box");
+
+            EditorGUILayout.LabelField("Source", string.IsNullOrWhiteSpace(resolvedModelsRoot) ? "<none>" : resolvedModelsRoot, EditorStyles.wordWrappedMiniLabel);
+            if (usingCustomModelsPath)
+            {
+                EditorGUILayout.HelpBox("Custom models path is active. Delete is disabled.", MessageType.None);
+            }
 
             if (models.Count == 0)
             {
-                EditorGUILayout.LabelField("No model detected.");
+                EditorGUILayout.LabelField("No model folder detected.");
             }
             else
             {
-                scroll = EditorGUILayout.BeginScrollView(scroll, GUILayout.MinHeight(120f), GUILayout.MaxHeight(220f));
-                foreach (var model in models)
+                scroll = EditorGUILayout.BeginScrollView(scroll, GUILayout.MinHeight(120f), GUILayout.MaxHeight(260f));
+                for (int i = 0; i < models.Count; i++)
                 {
+                    InstalledModelInfoView model = models[i];
                     EditorGUILayout.BeginHorizontal();
-                    EditorGUILayout.LabelField(model.Name, GUILayout.MinWidth(250f));
-                    EditorGUILayout.LabelField(KimodoServerLifecycleManager.FormatBytes(model.SizeBytes), GUILayout.Width(90f));
-                    if (GUILayout.Button("Clean", GUILayout.Width(70f)))
+                    EditorGUILayout.LabelField(model.Name, GUILayout.MinWidth(260f));
+
+                    using (new EditorGUI.DisabledScope(usingCustomModelsPath || operationInProgress))
                     {
-                        TryMoveToTrash(model.DirectoryPath);
-                        Refresh();
-                        GUIUtility.ExitGUI();
+                        if (GUILayout.Button("Delete", GUILayout.Width(70f)))
+                        {
+                            TryDeleteModelDirectory(model.DirectoryPath, model.Name);
+                            RefreshModelList();
+                            GUIUtility.ExitGUI();
+                        }
                     }
+
                     EditorGUILayout.EndHorizontal();
                 }
                 EditorGUILayout.EndScrollView();
+            }
+
+            if (!string.IsNullOrWhiteSpace(modelError))
+            {
+                EditorGUILayout.HelpBox(modelError, MessageType.Error);
             }
 
             EditorGUILayout.EndVertical();
@@ -205,124 +318,215 @@ namespace KimodoUnityMotionTools.ProjectEditor
             EditorGUILayout.LabelField("Actions", EditorStyles.boldLabel);
             EditorGUILayout.BeginVertical("box");
 
-            if (GUILayout.Button("Try Fix (delete and reconfigure)", GUILayout.Height(24f)))
+            using (new EditorGUI.DisabledScope(operationInProgress))
             {
-                TryFix();
-                Refresh();
-            }
-
-            if (GUILayout.Button("Delete All Data", GUILayout.Height(24f)))
-            {
-                if (EditorUtility.DisplayDialog("Delete All Data", "Delete entire Kimodo runtime folder? This cannot be undone.", "Delete", "Cancel"))
+                if (GUILayout.Button("Try Fix (delete and reconfigure)", GUILayout.Height(24f)))
                 {
-                    TryDeleteAllData();
-                    Refresh();
+                    TryFix();
+                }
+
+                if (GUILayout.Button("Delete All Data", GUILayout.Height(24f)))
+                {
+                    if (EditorUtility.DisplayDialog("Delete All Data", "Delete entire Kimodo runtime folder? This cannot be undone.", "Delete", "Cancel"))
+                    {
+                        _ = DeleteAllDataAsync();
+                    }
                 }
             }
 
             EditorGUILayout.EndVertical();
         }
 
-        private void TryFix()
+        private async Task StartServerAsync()
         {
+            if (operationInProgress)
+            {
+                return;
+            }
+
+            operationInProgress = true;
+            operationStatus = "Starting server...";
+            lastError = string.Empty;
             try
             {
-                if (serverRunning)
+                string launcherPath = KimodoServerLifecycleManager.ResolveStartScriptOrThrow(runtimeRoot);
+                string modelsRootForServer = ResolveModelsRootForServer();
+                string ready = await KimodoServerLifecycleManager.StartServerAsync(
+                    launcherPath,
+                    selectedModel,
+                    selectedVramMode == KimodoBridgeVramMode.High,
+                    runtimeRoot,
+                    modelsRootForServer,
+                    progress =>
+                    {
+                        operationStatus = progress;
+                        if (!string.IsNullOrWhiteSpace(progress))
+                        {
+                            Debug.Log("[Kimodo] " + progress);
+                        }
+                    },
+                    CancellationToken.None);
+
+                operationStatus = string.IsNullOrWhiteSpace(ready) ? "Server started." : ready;
+            }
+            catch (Exception e)
+            {
+                lastError = "Start failed: " + e.Message;
+            }
+            finally
+            {
+                operationInProgress = false;
+                Refresh();
+                ScheduleServerStateQuery(force: true);
+            }
+        }
+
+        private async Task StopServerAsync()
+        {
+            if (operationInProgress)
+            {
+                return;
+            }
+
+            operationInProgress = true;
+            operationStatus = "Stopping server...";
+            lastError = string.Empty;
+            try
+            {
+                await KimodoServerLifecycleManager.CloseServerAsync();
+                operationStatus = "Server stop requested.";
+            }
+            catch (Exception e)
+            {
+                lastError = "Stop failed: " + e.Message;
+            }
+            finally
+            {
+                operationInProgress = false;
+                Refresh();
+                ScheduleServerStateQuery(force: true);
+            }
+        }
+
+        private async Task DeleteAllDataAsync()
+        {
+            if (operationInProgress)
+            {
+                return;
+            }
+
+            operationInProgress = true;
+            operationStatus = "Deleting runtime data...";
+            lastError = string.Empty;
+            try
+            {
+                await KimodoServerLifecycleManager.CloseServerAsync();
+                if (Directory.Exists(runtimeRoot))
                 {
-                    KimodoServerLifecycleManager.TrySendQuit(serverHost, serverPort);
+                    Directory.Delete(runtimeRoot, recursive: true);
+                    operationStatus = "Runtime data deleted.";
                 }
+                else
+                {
+                    operationStatus = "Runtime root not found.";
+                }
+            }
+            catch (Exception e)
+            {
+                lastError = "Delete failed: " + e.Message;
+            }
+            finally
+            {
+                operationInProgress = false;
+                Refresh();
+                ScheduleServerStateQuery(force: true);
+            }
+        }
+
+        private void TryFix()
+        {
+            _ = TryFixAsync();
+        }
+
+        private async Task TryFixAsync()
+        {
+            if (operationInProgress)
+            {
+                return;
+            }
+
+            operationInProgress = true;
+            operationStatus = "TryFix running...";
+            lastError = string.Empty;
+
+            try
+            {
+                await KimodoServerLifecycleManager.CloseServerAsync();
 
                 if (Directory.Exists(runtimeRoot))
                 {
-                    string broken = runtimeRoot + ".broken." + DateTime.Now.ToString("yyyyMMddHHmmss");
-                    Directory.Move(runtimeRoot, broken);
+                    try
+                    {
+                        Directory.Delete(runtimeRoot, recursive: true);
+                    }
+                    catch (Exception e)
+                    {
+                        throw new InvalidOperationException(
+                            "Runtime folder is currently in use. Please reboot and retry TryFix. " + e.Message,
+                            e);
+                    }
                 }
 
                 bool ok = KimodoServerLifecycleManager.EnsureRuntimeRootExists();
                 if (!ok)
                 {
-                    lastOpStatus = "TryFix failed: cannot bootstrap runtime.";
-                    return;
+                    throw new InvalidOperationException("TryFix failed: cannot bootstrap runtime.");
                 }
 
                 string setup = KimodoServerLifecycleManager.ResolveSetupScriptOrThrow(runtimeRoot);
                 int rc = KimodoServerLifecycleManager.RunScriptBlocking(setup, "--output console");
-                lastOpStatus = rc == 0
-                    ? "TryFix complete: runtime reset and setup finished."
-                    : $"TryFix partial: setup exited with code {rc}.";
+                if (rc != 0)
+                {
+                    throw new InvalidOperationException($"TryFix failed: setup exited with code {rc}.");
+                }
+
+                operationStatus = "TryFix complete: runtime reset and setup finished.";
             }
             catch (Exception e)
             {
-                lastOpStatus = $"TryFix failed: {e.Message}";
+                lastError = e.Message;
+            }
+            finally
+            {
+                operationInProgress = false;
+                Refresh();
+                ScheduleServerStateQuery(force: true);
             }
         }
 
-        private void StartServerWithSelectedOptions()
+        private void TryDeleteModelDirectory(string path, string modelName)
         {
-            try
+            modelError = string.Empty;
+            if (usingCustomModelsPath)
             {
-                string startScript = KimodoServerLifecycleManager.ResolveStartScriptOrThrow(runtimeRoot);
-
-                string args = $" --model \"{selectedModel}\"";
-                if (selectedVramMode == KimodoBridgeVramMode.High)
-                {
-                    args += " --highvram";
-                }
-                args += " --output console";
-
-                var psi = KimodoServerLifecycleManager.BuildScriptStartInfo(startScript, args, keepWindowOpen: true, useShellExecute: true);
-                DiagnosticsProcess.Start(psi);
-                lastOpStatus = $"Start requested: model={selectedModel}, vram={selectedVramMode}.";
+                modelError = "Delete is disabled for custom models path.";
+                return;
             }
-            catch (Exception e)
-            {
-                lastOpStatus = $"Start failed: {e.Message}";
-            }
-        }
 
-        private void TryDeleteAllData()
-        {
-            try
-            {
-                if (serverRunning)
-                {
-                    KimodoServerLifecycleManager.TrySendQuit(serverHost, serverPort);
-                }
-
-                if (Directory.Exists(runtimeRoot))
-                {
-                    string deleted = runtimeRoot + ".deleted." + DateTime.Now.ToString("yyyyMMddHHmmss");
-                    Directory.Move(runtimeRoot, deleted);
-                    lastOpStatus = $"Deleted runtime data by moving to: {deleted}";
-                }
-                else
-                {
-                    lastOpStatus = "Runtime root not found.";
-                }
-            }
-            catch (Exception e)
-            {
-                lastOpStatus = $"DeleteAllData failed: {e.Message}";
-            }
-        }
-
-        private void TryMoveToTrash(string path)
-        {
             try
             {
                 if (!Directory.Exists(path))
                 {
-                    lastOpStatus = $"Model path not found: {path}";
+                    modelError = $"Model path not found: {modelName}";
                     return;
                 }
 
-                string dst = path + ".removed." + DateTime.Now.ToString("yyyyMMddHHmmss");
-                Directory.Move(path, dst);
-                lastOpStatus = $"Model moved out: {Path.GetFileName(path)}";
+                Directory.Delete(path, recursive: true);
+                operationStatus = $"Model deleted: {modelName}";
             }
             catch (Exception e)
             {
-                lastOpStatus = $"Model clean failed: {e.Message}";
+                modelError = $"Delete model failed ({modelName}): {e.Message}";
             }
         }
 
@@ -330,45 +534,157 @@ namespace KimodoUnityMotionTools.ProjectEditor
         {
             runtimeRoot = KimodoServerLifecycleManager.GetRuntimeRootPath();
             runtimeExists = Directory.Exists(runtimeRoot);
+            RefreshModelList();
 
-            serverRunning = false;
             serverHost = "127.0.0.1";
             serverPort = -1;
-            if (runtimeExists && KimodoServerLifecycleManager.TryReadServerPort(runtimeRoot, out string host, out int port))
+            serverState = ServerState.Disabled;
+        }
+
+        private void RefreshModelList()
+        {
+            models = new List<InstalledModelInfoView>();
+            modelError = string.Empty;
+
+            KimodoPlayableClipGenerationSettings settings = KimodoPlayableClipGenerationSettings.instance;
+            string customPath = settings.LocalModelsPath?.Trim() ?? string.Empty;
+            usingCustomModelsPath = !string.IsNullOrWhiteSpace(customPath);
+
+            if (usingCustomModelsPath)
             {
-                if (KimodoServerLifecycleManager.IsServerResponsive(host, port))
+                resolvedModelsRoot = customPath;
+                if (!Directory.Exists(resolvedModelsRoot))
                 {
-                    serverRunning = true;
-                    serverHost = host;
-                    serverPort = port;
+                    modelError = "Custom models path does not exist.";
+                    return;
+                }
+            }
+            else
+            {
+                resolvedModelsRoot = Path.Combine(runtimeRoot ?? string.Empty, "models");
+                if (!Directory.Exists(resolvedModelsRoot))
+                {
+                    return;
                 }
             }
 
-            models = runtimeExists
-                ? ConvertInstalledModels(KimodoServerLifecycleManager.GetInstalledModels(runtimeRoot))
-                : new List<InstalledModelInfoView>();
+            try
+            {
+                string[] dirs = Directory.GetDirectories(resolvedModelsRoot);
+                Array.Sort(dirs, StringComparer.OrdinalIgnoreCase);
+                for (int i = 0; i < dirs.Length; i++)
+                {
+                    string dir = dirs[i];
+                    string name = Path.GetFileName(dir);
+                    if (!ShouldDisplayModelDirectory(name))
+                    {
+                        continue;
+                    }
+
+                    models.Add(new InstalledModelInfoView
+                    {
+                        Name = name,
+                        DirectoryPath = dir
+                    });
+                }
+            }
+            catch (Exception e)
+            {
+                modelError = "Scan models failed: " + e.Message;
+            }
         }
 
-        private static List<InstalledModelInfoView> ConvertInstalledModels(IReadOnlyList<KimodoServerLifecycleManager.InstalledModelInfo> source)
+        private static bool ShouldDisplayModelDirectory(string name)
         {
-            var result = new List<InstalledModelInfoView>();
-            if (source == null)
+            if (string.IsNullOrWhiteSpace(name))
             {
-                return result;
+                return false;
             }
 
-            for (int i = 0; i < source.Count; i++)
+            return
+                name.StartsWith("Kimodo-", StringComparison.OrdinalIgnoreCase) ||
+                name.IndexOf("kimodo", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                name.IndexOf("llama", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                name.IndexOf("llm2vec", StringComparison.OrdinalIgnoreCase) >= 0;
+        }
+
+        private string ResolveModelsRootForServer()
+        {
+            string customPath = KimodoPlayableClipGenerationSettings.instance.LocalModelsPath?.Trim() ?? string.Empty;
+            if (string.IsNullOrWhiteSpace(customPath))
             {
-                KimodoServerLifecycleManager.InstalledModelInfo model = source[i];
-                result.Add(new InstalledModelInfoView
+                return string.Empty;
+            }
+
+            return Path.GetFullPath(customPath);
+        }
+
+        private void ScheduleServerStateQuery(bool force)
+        {
+            if (!runtimeExists)
+            {
+                serverState = ServerState.Disabled;
+                serverStatusQueryInFlight = false;
+                return;
+            }
+
+            double now = EditorApplication.timeSinceStartup;
+            if (!force && (serverStatusQueryInFlight || now < nextServerStatusQueryAt))
+            {
+                return;
+            }
+
+            serverStatusQueryInFlight = true;
+            serverState = ServerState.Detecting;
+            nextServerStatusQueryAt = now + ServerStatusQueryCooldownSeconds;
+            int queryVersion = ++serverStatusQueryVersion;
+            string root = runtimeRoot;
+
+            _ = QueryServerStateAsync(root, queryVersion);
+        }
+
+        private async Task QueryServerStateAsync(string root, int queryVersion)
+        {
+            bool running = false;
+            string host = "127.0.0.1";
+            int port = -1;
+
+            try
+            {
+                await Task.Run(() =>
                 {
-                    Name = model.Name,
-                    DirectoryPath = model.DirectoryPath,
-                    SizeBytes = model.SizeBytes
+                    if (!Directory.Exists(root))
+                    {
+                        return;
+                    }
+
+                    if (!KimodoServerLifecycleManager.TryReadServerPort(root, out string readHost, out int readPort))
+                    {
+                        return;
+                    }
+
+                    if (KimodoServerLifecycleManager.IsServerResponsive(readHost, readPort))
+                    {
+                        running = true;
+                        host = readHost;
+                        port = readPort;
+                    }
                 });
             }
+            catch
+            {
+                running = false;
+            }
 
-            return result;
+            if (queryVersion != serverStatusQueryVersion)
+            {
+                return;
+            }
+
+            serverStatusQueryInFlight = false;
+            serverHost = host;
+            serverPort = port;
+            serverState = running ? ServerState.Enabled : ServerState.Disabled;
         }
     }
 }

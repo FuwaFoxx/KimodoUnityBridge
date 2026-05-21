@@ -12,6 +12,8 @@ using UnityEngine.Playables;
 using UnityEngine.Timeline;
 using KimodoUnityMotionTools;
 using KimodoUnityMotionTools.ProjectEditor;
+using KimodoUnityMotionTools.Bridge;
+using KimodoUnityMotionTools.Generation;
 
 namespace KimodoUnityMotionTools.ProjectEditor
 {
@@ -19,12 +21,8 @@ namespace KimodoUnityMotionTools.ProjectEditor
     public class KimodoPlayableClipEditor : UnityEditor.Editor
     {
         private const float TargetFps = 60f;
-        private const string DefaultWorkflowResource = "kimodo-unity-workflow";
         private const string GeneratedClipFolder = "Assets/KimodoGeneratedClips";
         private const string GeneratedClipNamePrefix = "Kimodo_";
-
-        private static readonly IKimodoGenerationBackend ComfyUiBackend = new ComfyUiGenerationBackend();
-        private static readonly IKimodoGenerationBackend BridgeBackend = new KimodoBridgeGenerationBackend();
 
         private SerializedProperty generationBackend;
         private SerializedProperty comfyuiIP;
@@ -189,7 +187,7 @@ namespace KimodoUnityMotionTools.ProjectEditor
             {
                 comfyuiIP.stringValue = EditorGUILayout.TextField("ComfyUI IP", comfyuiIP.stringValue);
                 comfyuiPort.intValue = EditorGUILayout.IntField("ComfyUI Port", comfyuiPort.intValue);
-                EditorGUILayout.PropertyField(workflowJsonAsset, new GUIContent("Workflow JSON Asset"));
+                EditorGUILayout.HelpBox("Workflow source is fixed to Runtime/Resources/kimodo-unity-workflow.json.", MessageType.Info);
             }
 
             motionPrompt.stringValue = EditorGUILayout.TextArea(motionPrompt.stringValue, GUILayout.Height(60));
@@ -388,8 +386,7 @@ namespace KimodoUnityMotionTools.ProjectEditor
                 }
                 int effectiveSeed = ResolveEffectiveSeed();
                 lastConstraintsPath = constraintsFilePath;
-                IKimodoGenerationBackend backend = ResolveGenerationBackend();
-                string motionJson = await backend.GenerateMotionJsonAsync(this, constraintsFilePath, effectiveSeed, generationCts.Token);
+                string motionJson = await GenerateMotionJsonViaRuntimeServiceAsync(constraintsFilePath, effectiveSeed, generationCts.Token);
                 if (string.IsNullOrWhiteSpace(motionJson))
                 {
                     throw new Exception("No motion json found in workflow outputs.");
@@ -488,13 +485,6 @@ namespace KimodoUnityMotionTools.ProjectEditor
             }
         }
 
-        private IKimodoGenerationBackend ResolveGenerationBackend()
-        {
-            return clip.generationBackend == KimodoGenerationBackend.KimodoBridge
-                ? BridgeBackend
-                : ComfyUiBackend;
-        }
-
         private int ResolveEffectiveSeed()
         {
             int effectiveSeed = randomSeed.boolValue
@@ -517,26 +507,7 @@ namespace KimodoUnityMotionTools.ProjectEditor
             return effectiveSeed;
         }
 
-        internal async Task<string> GenerateMotionJsonViaComfyUiBackendAsync(string constraintsFilePath, int effectiveSeed, CancellationToken token)
-        {
-            var service = new KimodoComfyUiService(
-                getMotionPrompt: () => motionPrompt.stringValue,
-                getGenerationFrames: () => generationFrames.intValue,
-                getSemanticFps: () => TargetFps,
-                getNumSamples: () => numSamples.intValue,
-                getDiffusionSteps: () => diffusionSteps.intValue,
-                getComfyIp: () => comfyuiIP.stringValue,
-                getComfyPort: () => comfyuiPort.intValue,
-                getTimeoutSeconds: () => generationTimeoutSeconds.floatValue,
-                getPollIntervalSeconds: () => pollIntervalSeconds.floatValue,
-                loadWorkflowText: LoadWorkflowText,
-                setStatus: s => lastStatus = s,
-                repaint: Repaint);
-
-            return await service.GenerateMotionJsonAsync(constraintsFilePath, effectiveSeed, token);
-        }
-
-        internal async Task<string> GenerateMotionJsonViaBridgeBackendAsync(string constraintsFilePath, int effectiveSeed, CancellationToken token)
+        private async Task<string> GenerateMotionJsonViaRuntimeServiceAsync(string constraintsFilePath, int effectiveSeed, CancellationToken token)
         {
             string expectedRuntimeRoot = KimodoServerLifecycleManager.GetRuntimeRootPath();
             if (!Directory.Exists(expectedRuntimeRoot))
@@ -554,11 +525,56 @@ namespace KimodoUnityMotionTools.ProjectEditor
 
             Debug.Log($"[Kimodo] Prompt: {motionPrompt.stringValue}");
 
-            await KimodoServerLifecycleManager.StartServerAsync(
-                launcherPath,
-                modelName,
-                highVram,
-                kimodoRootPath,
+            var settings = new KimodoRuntimeGenerationSettings
+            {
+                bridgeSettings = new BridgeRuntimeSettings
+                {
+                    runtimeRoot = kimodoRootPath,
+                    launcherPath = launcherPath,
+                    modelName = modelName,
+                    highVram = highVram,
+                    modelsRoot = KimodoPlayableClipGenerationSettings.instance.LocalModelsPath?.Trim(),
+                    startupTimeoutMs = ComputeBridgeStartupTimeoutMs(kimodoRootPath, highVram, modelName)
+                },
+                comfyHost = comfyuiIP.stringValue,
+                comfyPort = comfyuiPort.intValue,
+                comfyTimeoutSeconds = generationTimeoutSeconds.floatValue,
+                comfyPollIntervalSeconds = pollIntervalSeconds.floatValue,
+                comfyWorkflowResourceName = "kimodo-unity-workflow"
+            };
+
+            KimodoBackendType backendType = clip.generationBackend == KimodoGenerationBackend.KimodoBridge
+                ? KimodoBackendType.Bridge
+                : KimodoBackendType.ComfyUi;
+
+            using var runtimeService = new KimodoRuntimeGenerationService(settings);
+            if (backendType == KimodoBackendType.Bridge)
+            {
+                await runtimeService.StartAsync(
+                    backendType,
+                    progress =>
+                    {
+                        lastStatus = progress;
+                        Repaint();
+                    },
+                    token);
+            }
+
+            lastStatus = $"Generating: {motionPrompt.stringValue}";
+            Repaint();
+
+            var request = new KimodoGenerationRequestDto
+            {
+                prompt = motionPrompt.stringValue,
+                duration = durationSeconds,
+                seed = effectiveSeed,
+                steps = diffusionSteps.intValue,
+                constraints_json = constraintsFilePath ?? string.Empty
+            };
+
+            KimodoGenerationResultDto result = await runtimeService.GenerateAsync(
+                request,
+                backendType,
                 progress =>
                 {
                     lastStatus = progress;
@@ -566,20 +582,28 @@ namespace KimodoUnityMotionTools.ProjectEditor
                 },
                 token);
 
-            lastStatus = $"Generating: {motionPrompt.stringValue}";
-            Repaint();
-            return await KimodoServerLifecycleManager.GenerateAsync(
-                motionPrompt.stringValue,
-                durationSeconds,
-                effectiveSeed,
-                diffusionSteps.intValue,
-                constraintsFilePath ?? string.Empty,
-                progress =>
-                {
-                    lastStatus = progress;
-                    Repaint();
-                },
-                token);
+            if (result == null || string.IsNullOrWhiteSpace(result.motionJsonCompact))
+            {
+                throw new Exception(result?.message ?? "No motion json found in runtime generation result.");
+            }
+
+            return result.motionJsonCompact;
+        }
+
+        private int ComputeBridgeStartupTimeoutMs(string runtimeRoot, bool highVram, string modelName)
+        {
+            int requestedMs = Math.Max(30000, Mathf.RoundToInt(generationTimeoutSeconds.floatValue * 1000f));
+            int timeoutMs = requestedMs;
+
+            int points = KimodoServerRuntimeUtil.EstimateMissingConfigPoints(runtimeRoot, highVram, modelName);
+            if (points > 0)
+            {
+                int minutes = Math.Max(3, points * 3);
+                int dynamicMs = (int)Math.Round(Math.Max(600f, minutes * 60f) * 1000f);
+                timeoutMs = Math.Max(timeoutMs, dynamicMs);
+            }
+
+            return timeoutMs;
         }
 
         private void DrawBridgeModelSelector()
@@ -631,21 +655,6 @@ namespace KimodoUnityMotionTools.ProjectEditor
             {
                 cts.Dispose();
             }
-        }
-
-        private string LoadWorkflowText()
-        {
-            if (workflowJsonAsset != null && workflowJsonAsset.objectReferenceValue is TextAsset customWorkflow && !string.IsNullOrWhiteSpace(customWorkflow.text))
-            {
-                return customWorkflow.text;
-            }
-
-            TextAsset defaultAsset = Resources.Load<TextAsset>(DefaultWorkflowResource);
-            if (defaultAsset == null || string.IsNullOrWhiteSpace(defaultAsset.text))
-            {
-                throw new Exception($"Cannot load workflow asset '{DefaultWorkflowResource}'.");
-            }
-            return defaultAsset.text;
         }
 
         private void ApplyMotionJsonToClip(string motionJson)

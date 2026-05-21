@@ -8,6 +8,8 @@ using System.Net.Sockets;
 using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
+using KimodoUnityMotionTools.Bridge;
+using KimodoUnityMotionTools.Generation;
 using KimodoUnityMotionTools.ProjectEditor;
 using Newtonsoft.Json.Linq;
 using NUnit.Framework;
@@ -115,7 +117,34 @@ namespace KimodoUnityMotionTools.Tests
             }
         }
 
-        internal static async Task<KimodoBridgeClient> StartClientOrIgnoreAsync(KimodoRuntimeScope scope)
+        internal static KimodoRuntimeGenerationService CreateRuntimeGenerationService(
+            KimodoRuntimeScope scope,
+            string modelName = DefaultModel,
+            bool highVram = false,
+            float comfyTimeoutSeconds = 120f,
+            float comfyPollIntervalSeconds = 1f,
+            int startupTimeoutMs = 600000)
+        {
+            string launcher = KimodoServerRuntimeUtil.ResolveStartScript(scope.RuntimeRoot);
+            return new KimodoRuntimeGenerationService(new KimodoRuntimeGenerationSettings
+            {
+                bridgeSettings = new BridgeRuntimeSettings
+                {
+                    runtimeRoot = scope.RuntimeRoot,
+                    launcherPath = launcher,
+                    modelName = string.IsNullOrWhiteSpace(modelName) ? DefaultModel : modelName,
+                    highVram = highVram,
+                    startupTimeoutMs = Math.Max(30000, startupTimeoutMs)
+                },
+                comfyTimeoutSeconds = comfyTimeoutSeconds,
+                comfyPollIntervalSeconds = comfyPollIntervalSeconds,
+                comfyWorkflowResourceName = "kimodo-unity-workflow"
+            });
+        }
+
+        internal static async Task<KimodoRuntimeGenerationService> StartBridgeRuntimeServiceOrIgnoreAsync(
+            KimodoRuntimeScope scope,
+            float startupTimeoutSeconds = 600f)
         {
             string launcher = KimodoServerRuntimeUtil.ResolveStartScript(scope.RuntimeRoot);
             if (string.IsNullOrWhiteSpace(launcher) || !File.Exists(launcher))
@@ -123,30 +152,66 @@ namespace KimodoUnityMotionTools.Tests
                 Assert.Ignore("start script not found in runtime root.");
             }
 
-            var client = new KimodoBridgeClient();
+            KimodoRuntimeGenerationService service = CreateRuntimeGenerationService(
+                scope,
+                modelName: DefaultModel,
+                highVram: false,
+                startupTimeoutMs: (int)Math.Round(Math.Max(30f, startupTimeoutSeconds) * 1000f));
             try
             {
-                await client.StartAsync(
-                    launcher,
-                    DefaultModel,
-                    false,
-                    scope.RuntimeRoot,
-                    600f,
+                _ = await service.StartAsync(
+                    KimodoBackendType.Bridge,
                     progress => scope.Log("StartAsync: " + progress),
                     CancellationToken.None);
 
-                scope.Log("Client started.");
-                return client;
+                scope.Log("Runtime generation service started (Bridge).");
+                return service;
             }
             catch (Exception ex)
             {
-                scope.Log("Client start failed: " + ex.Message);
+                scope.Log("Service start failed: " + ex.Message);
                 string downloadLog = Path.Combine(scope.RuntimeRoot, "log", "download_model.log");
                 string setupLog = Path.Combine(scope.RuntimeRoot, "log", "setup.log");
                 string hint = BuildCommonFailureHint(downloadLog, setupLog);
+                try { service.Dispose(); } catch { }
                 Assert.Ignore("Runtime start unavailable in current environment. " + hint);
                 throw;
             }
+        }
+
+        internal static async Task<string> GenerateBridgeAsync(
+            KimodoRuntimeGenerationService service,
+            string prompt,
+            float durationSeconds,
+            int? seed,
+            int diffusionSteps,
+            string constraintsJson,
+            Action<string> progress,
+            CancellationToken token)
+        {
+            KimodoGenerationResultDto result = await service.GenerateAsync(
+                new KimodoGenerationRequestDto
+                {
+                    prompt = prompt,
+                    duration = durationSeconds,
+                    seed = seed,
+                    steps = diffusionSteps,
+                    constraints_json = constraintsJson
+                },
+                KimodoBackendType.Bridge,
+                progress,
+                token);
+            return result?.motionJsonCompact;
+        }
+
+        internal static Task StopBridgeAsync(KimodoRuntimeGenerationService service, CancellationToken token)
+        {
+            return service.StopAsync(KimodoBackendType.Bridge, token);
+        }
+
+        internal static Task KillBridgeAsync(KimodoRuntimeGenerationService service, CancellationToken token)
+        {
+            return service.KillAsync(KimodoBackendType.Bridge, token);
         }
 
         internal static async Task CleanupScopeAsync(KimodoRuntimeScope scope)
@@ -317,18 +382,6 @@ namespace KimodoUnityMotionTools.Tests
                 scope.Log("Killing runtime process: " + snapshot.ToDisplayString());
                 TryKillTree(snapshot.ProcessId);
             }
-        }
-
-        internal static int GetClientPidForTests(KimodoBridgeClient client)
-        {
-            var field = typeof(KimodoBridgeClient).GetField("processId", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic);
-            if (field == null)
-            {
-                return -1;
-            }
-
-            object value = field.GetValue(client);
-            return value is int pid ? pid : -1;
         }
 
         internal static List<ProcessSnapshot> GetRuntimeProcessSnapshots(string runtimeRoot)

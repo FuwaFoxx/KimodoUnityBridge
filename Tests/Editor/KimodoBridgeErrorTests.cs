@@ -5,7 +5,7 @@ using System.Net.Sockets;
 using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
-using KimodoUnityMotionTools;
+using KimodoUnityMotionTools.Generation;
 using KimodoUnityMotionTools.ProjectEditor;
 using NUnit.Framework;
 using UnityEditor;
@@ -83,11 +83,19 @@ namespace KimodoUnityMotionTools.Tests
             File.WriteAllText(portFile, "invalid_port_value");
             scope.Log("Wrote invalid serverport content.");
 
-            var client = new KimodoBridgeClient();
+            using KimodoRuntimeGenerationService service = KimodoBridgeTestHarness.CreateRuntimeGenerationService(scope);
             Exception ex = null;
             try
             {
-                await client.GenerateAsync("test", 2f, 1, 20, string.Empty, _ => { }, CancellationToken.None);
+                _ = await KimodoBridgeTestHarness.GenerateBridgeAsync(
+                    service,
+                    "test",
+                    2f,
+                    1,
+                    20,
+                    string.Empty,
+                    _ => { },
+                    CancellationToken.None);
             }
             catch (Exception e)
             {
@@ -96,8 +104,7 @@ namespace KimodoUnityMotionTools.Tests
             }
             finally
             {
-                await client.StopAsync(CancellationToken.None);
-                client.Dispose();
+                await KimodoBridgeTestHarness.StopBridgeAsync(service, CancellationToken.None);
             }
 
             Assert.IsNotNull(ex);
@@ -114,11 +121,19 @@ namespace KimodoUnityMotionTools.Tests
             File.WriteAllText(portFile, "127.0.0.1:6553");
             scope.Log("Wrote unreachable serverport endpoint.");
 
-            var client = new KimodoBridgeClient();
+            using KimodoRuntimeGenerationService service = KimodoBridgeTestHarness.CreateRuntimeGenerationService(scope);
             Exception ex = null;
             try
             {
-                await client.GenerateAsync("walk", 2f, 10, 30, string.Empty, _ => { }, CancellationToken.None);
+                _ = await KimodoBridgeTestHarness.GenerateBridgeAsync(
+                    service,
+                    "walk",
+                    2f,
+                    10,
+                    30,
+                    string.Empty,
+                    _ => { },
+                    CancellationToken.None);
             }
             catch (Exception e)
             {
@@ -127,8 +142,7 @@ namespace KimodoUnityMotionTools.Tests
             }
             finally
             {
-                await client.StopAsync(CancellationToken.None);
-                client.Dispose();
+                await KimodoBridgeTestHarness.StopBridgeAsync(service, CancellationToken.None);
             }
 
             Assert.IsNotNull(ex);
@@ -140,13 +154,14 @@ namespace KimodoUnityMotionTools.Tests
         public async Task GenerateBoundaryInputs_WhenServerReturnsError_ShouldNotDeadlock()
         {
             await KimodoBridgeTestHarness.EnsureSetupOrIgnoreAsync(scope);
-            KimodoBridgeClient client = await KimodoBridgeTestHarness.StartClientOrIgnoreAsync(scope, 90f);
+            using KimodoRuntimeGenerationService service = await KimodoBridgeTestHarness.StartBridgeRuntimeServiceOrIgnoreAsync(scope, 90f);
 
             using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(20));
             Exception ex = null;
             try
             {
-                _ = await client.GenerateAsync(
+                _ = await KimodoBridgeTestHarness.GenerateBridgeAsync(
+                    service,
                     prompt: "",
                     durationSeconds: 0.01f,
                     seed: int.MaxValue,
@@ -162,8 +177,7 @@ namespace KimodoUnityMotionTools.Tests
             }
             finally
             {
-                await client.StopAsync(CancellationToken.None);
-                client.Dispose();
+                await KimodoBridgeTestHarness.StopBridgeAsync(service, CancellationToken.None);
             }
 
             Assert.IsNotNull(ex, "Boundary-input generate should fail or be canceled in constrained environments.");
@@ -215,11 +229,19 @@ namespace KimodoUnityMotionTools.Tests
                 responder(writer);
             });
 
-            var client = new KimodoBridgeClient();
+            using KimodoRuntimeGenerationService service = KimodoBridgeTestHarness.CreateRuntimeGenerationService(scope);
             Exception ex = null;
             try
             {
-                await client.GenerateAsync("synthetic", 2f, 1, 20, string.Empty, _ => { }, CancellationToken.None);
+                _ = await KimodoBridgeTestHarness.GenerateBridgeAsync(
+                    service,
+                    "synthetic",
+                    2f,
+                    1,
+                    20,
+                    string.Empty,
+                    _ => { },
+                    CancellationToken.None);
             }
             catch (Exception e)
             {
@@ -228,8 +250,7 @@ namespace KimodoUnityMotionTools.Tests
             }
             finally
             {
-                await client.StopAsync(CancellationToken.None);
-                client.Dispose();
+                await KimodoBridgeTestHarness.StopBridgeAsync(service, CancellationToken.None);
                 listener.Stop();
                 try
                 {

@@ -4,6 +4,7 @@ using System.IO;
 using System.Reflection;
 using System.Threading;
 using System.Threading.Tasks;
+using KimodoUnityMotionTools.Generation;
 using KimodoUnityMotionTools.ProjectEditor;
 using NUnit.Framework;
 using UnityEditor;
@@ -42,7 +43,7 @@ namespace KimodoUnityMotionTools.Tests
         public async Task HighFrequencyGenerateClicks_ShouldKeepSingleActiveGenerationAndNoLeaks()
         {
             await KimodoBridgeTestHarness.EnsureSetupOrIgnoreAsync(scope);
-            KimodoBridgeClient client = await KimodoBridgeTestHarness.StartClientOrIgnoreAsync(scope, 90f);
+            using KimodoRuntimeGenerationService service = await KimodoBridgeTestHarness.StartBridgeRuntimeServiceOrIgnoreAsync(scope, 90f);
 
             using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
             Task<string>[] tasks = new Task<string>[5];
@@ -53,7 +54,8 @@ namespace KimodoUnityMotionTools.Tests
                 {
                     try
                     {
-                        return await client.GenerateAsync(
+                        return await KimodoBridgeTestHarness.GenerateBridgeAsync(
+                            service,
                             prompt: "chaos click " + idx,
                             durationSeconds: 2.0f,
                             seed: 100 + idx,
@@ -71,7 +73,7 @@ namespace KimodoUnityMotionTools.Tests
             }
 
             await Task.Delay(600);
-            await client.StopAsync(CancellationToken.None);
+            await KimodoBridgeTestHarness.StopBridgeAsync(service, CancellationToken.None);
 
             int done = 0;
             int failed = 0;
@@ -91,7 +93,6 @@ namespace KimodoUnityMotionTools.Tests
             scope.Log($"High frequency result: done={done}, failed={failed}");
             Assert.GreaterOrEqual(failed, 1, "At least some concurrent requests should fail after forced stop.");
 
-            client.Dispose();
             await KimodoBridgeTestHarness.AssertNoOrphanProcessAndRecoverableAsync(scope);
         }
 
@@ -99,10 +100,11 @@ namespace KimodoUnityMotionTools.Tests
         public async Task GenerateThenImmediateCancel_ShouldFinishQuicklyAndAllowRestart()
         {
             await KimodoBridgeTestHarness.EnsureSetupOrIgnoreAsync(scope);
-            KimodoBridgeClient client = await KimodoBridgeTestHarness.StartClientOrIgnoreAsync(scope, 90f);
+            using KimodoRuntimeGenerationService service = await KimodoBridgeTestHarness.StartBridgeRuntimeServiceOrIgnoreAsync(scope, 90f);
 
             using var cts = new CancellationTokenSource();
-            Task<string> generating = client.GenerateAsync(
+            Task<string> generating = KimodoBridgeTestHarness.GenerateBridgeAsync(
+                service,
                 "cancel test",
                 2.5f,
                 77,
@@ -128,12 +130,10 @@ namespace KimodoUnityMotionTools.Tests
 
             Assert.IsNotNull(canceledEx, "Generate should cancel/fail promptly after cancel request.");
 
-            await client.StopAsync(CancellationToken.None);
-            client.Dispose();
+            await KimodoBridgeTestHarness.StopBridgeAsync(service, CancellationToken.None);
 
-            KimodoBridgeClient restarted = await KimodoBridgeTestHarness.StartClientOrIgnoreAsync(scope, 90f);
-            await restarted.StopAsync(CancellationToken.None);
-            restarted.Dispose();
+            using KimodoRuntimeGenerationService restarted = await KimodoBridgeTestHarness.StartBridgeRuntimeServiceOrIgnoreAsync(scope, 90f);
+            await KimodoBridgeTestHarness.StopBridgeAsync(restarted, CancellationToken.None);
             await KimodoBridgeTestHarness.AssertNoOrphanProcessAndRecoverableAsync(scope);
         }
 
@@ -141,9 +141,10 @@ namespace KimodoUnityMotionTools.Tests
         public async Task GenerateThenImmediateStopServer_ShouldFailControlledAndStateRecovered()
         {
             await KimodoBridgeTestHarness.EnsureSetupOrIgnoreAsync(scope);
-            KimodoBridgeClient client = await KimodoBridgeTestHarness.StartClientOrIgnoreAsync(scope, 90f);
+            using KimodoRuntimeGenerationService service = await KimodoBridgeTestHarness.StartBridgeRuntimeServiceOrIgnoreAsync(scope, 90f);
 
-            Task<string> generation = client.GenerateAsync(
+            Task<string> generation = KimodoBridgeTestHarness.GenerateBridgeAsync(
+                service,
                 "stop server now",
                 3.0f,
                 101,
@@ -153,7 +154,7 @@ namespace KimodoUnityMotionTools.Tests
                 CancellationToken.None);
 
             await Task.Delay(300);
-            await client.StopAsync(CancellationToken.None);
+            await KimodoBridgeTestHarness.StopBridgeAsync(service, CancellationToken.None);
 
             Exception ex = null;
             try
@@ -167,7 +168,6 @@ namespace KimodoUnityMotionTools.Tests
             }
 
             Assert.IsNotNull(ex, "Generate should fail when server is stopped immediately.");
-            client.Dispose();
             await KimodoBridgeTestHarness.AssertNoOrphanProcessAndRecoverableAsync(scope);
         }
 
@@ -175,9 +175,10 @@ namespace KimodoUnityMotionTools.Tests
         public async Task GenerateThenTryFixConflict_ShouldNotDeadlockAndCanRestart()
         {
             await KimodoBridgeTestHarness.EnsureSetupOrIgnoreAsync(scope);
-            KimodoBridgeClient client = await KimodoBridgeTestHarness.StartClientOrIgnoreAsync(scope, 90f);
+            using KimodoRuntimeGenerationService service = await KimodoBridgeTestHarness.StartBridgeRuntimeServiceOrIgnoreAsync(scope, 90f);
 
-            Task<string> generation = client.GenerateAsync(
+            Task<string> generation = KimodoBridgeTestHarness.GenerateBridgeAsync(
+                service,
                 "tryfix conflict",
                 2.5f,
                 202,
@@ -201,13 +202,11 @@ namespace KimodoUnityMotionTools.Tests
                 scope.Log("Generation exception in tryfix conflict: " + e.Message);
             }
 
-            await client.StopAsync(CancellationToken.None);
-            client.Dispose();
+            await KimodoBridgeTestHarness.StopBridgeAsync(service, CancellationToken.None);
 
             Assert.IsTrue(tryFixResult || ex != null, "Either TryFix should run or generation should fail controlled.");
-            KimodoBridgeClient restarted = await KimodoBridgeTestHarness.StartClientOrIgnoreAsync(scope, 90f);
-            await restarted.StopAsync(CancellationToken.None);
-            restarted.Dispose();
+            using KimodoRuntimeGenerationService restarted = await KimodoBridgeTestHarness.StartBridgeRuntimeServiceOrIgnoreAsync(scope, 90f);
+            await KimodoBridgeTestHarness.StopBridgeAsync(restarted, CancellationToken.None);
             await KimodoBridgeTestHarness.AssertNoOrphanProcessAndRecoverableAsync(scope);
         }
 

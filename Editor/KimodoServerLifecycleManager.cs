@@ -6,6 +6,8 @@ using System.Threading;
 using System.Threading.Tasks;
 using UnityEditor;
 using KimodoUnityMotionTools;
+using KimodoUnityMotionTools.Bridge;
+using KimodoUnityMotionTools.Generation;
 
 namespace KimodoUnityMotionTools.ProjectEditor
 {
@@ -19,7 +21,12 @@ namespace KimodoUnityMotionTools.ProjectEditor
             public long SizeBytes;
         }
 
-        private static KimodoBridgeClient sharedBridgeClient;
+        private static KimodoRuntimeGenerationService sharedRuntimeGenerationService;
+        private static string currentServiceRuntimeRoot = string.Empty;
+        private static string currentServiceLauncherPath = string.Empty;
+        private static string currentServiceModelName = string.Empty;
+        private static string currentServiceModelsRoot = string.Empty;
+        private static bool currentServiceHighVram;
         private static bool isClosing;
         private static bool isRecovering;
 
@@ -34,11 +41,6 @@ namespace KimodoUnityMotionTools.ProjectEditor
         {
             get
             {
-                if (sharedBridgeClient != null && sharedBridgeClient.IsRunning)
-                {
-                    return true;
-                }
-
                 string runtimeRoot = GetRuntimeRootPath();
                 if (!Directory.Exists(runtimeRoot))
                 {
@@ -119,8 +121,14 @@ namespace KimodoUnityMotionTools.ProjectEditor
                 return false;
             }
 
-            string setupLockPath = Path.Combine(runtimeRoot, ".setup_new.lock");
-            return File.Exists(setupLockPath);
+            string setupLockPath = Path.Combine(runtimeRoot, ".setup.lock");
+            if (File.Exists(setupLockPath))
+            {
+                return true;
+            }
+
+            string setupNewLockPath = Path.Combine(runtimeRoot, ".setup_new.lock");
+            return File.Exists(setupNewLockPath);
         }
 
         internal static bool TryReadServerPort(string runtimeRoot, out string host, out int port)
@@ -189,14 +197,62 @@ namespace KimodoUnityMotionTools.ProjectEditor
             return true;
         }
 
-        private static KimodoBridgeClient GetOrCreateClient()
+        private static KimodoRuntimeGenerationService GetOrCreateRuntimeGenerationService(
+            string runtimeRoot,
+            string launcherPath,
+            string modelName,
+            bool highVram,
+            string modelsRoot,
+            int startupTimeoutMs = 600000)
         {
-            if (sharedBridgeClient == null)
+            string resolvedRuntimeRoot = Path.GetFullPath(runtimeRoot ?? string.Empty);
+            string resolvedLauncherPath = Path.GetFullPath(launcherPath ?? string.Empty);
+            string resolvedModelName = string.IsNullOrWhiteSpace(modelName) ? "Kimodo-SOMA-RP-v1" : modelName.Trim();
+            string resolvedModelsRoot = string.IsNullOrWhiteSpace(modelsRoot) ? string.Empty : Path.GetFullPath(modelsRoot.Trim());
+
+            bool reusable =
+                sharedRuntimeGenerationService != null &&
+                string.Equals(currentServiceRuntimeRoot, resolvedRuntimeRoot, StringComparison.OrdinalIgnoreCase) &&
+                string.Equals(currentServiceLauncherPath, resolvedLauncherPath, StringComparison.OrdinalIgnoreCase) &&
+                string.Equals(currentServiceModelName, resolvedModelName, StringComparison.Ordinal) &&
+                currentServiceHighVram == highVram &&
+                string.Equals(currentServiceModelsRoot, resolvedModelsRoot, StringComparison.OrdinalIgnoreCase);
+
+            if (reusable)
             {
-                sharedBridgeClient = new KimodoBridgeClient();
+                return sharedRuntimeGenerationService;
             }
 
-            return sharedBridgeClient;
+            try
+            {
+                sharedRuntimeGenerationService?.Dispose();
+            }
+            catch
+            {
+                // ignore disposal failure
+            }
+
+            var settings = new KimodoRuntimeGenerationSettings
+            {
+                bridgeSettings = new BridgeRuntimeSettings
+                {
+                    runtimeRoot = resolvedRuntimeRoot,
+                    launcherPath = resolvedLauncherPath,
+                    modelName = resolvedModelName,
+                    highVram = highVram,
+                    modelsRoot = resolvedModelsRoot,
+                    startupTimeoutMs = Math.Max(30000, startupTimeoutMs)
+                },
+                comfyWorkflowResourceName = "kimodo-unity-workflow"
+            };
+
+            sharedRuntimeGenerationService = new KimodoRuntimeGenerationService(settings);
+            currentServiceRuntimeRoot = resolvedRuntimeRoot;
+            currentServiceLauncherPath = resolvedLauncherPath;
+            currentServiceModelName = resolvedModelName;
+            currentServiceHighVram = highVram;
+            currentServiceModelsRoot = resolvedModelsRoot;
+            return sharedRuntimeGenerationService;
         }
 
         private static async void RecoverBridgeAfterDomainReload()
@@ -225,11 +281,24 @@ namespace KimodoUnityMotionTools.ProjectEditor
                     return;
                 }
 
-                KimodoBridgeClient bridge = GetOrCreateClient();
-                await bridge.AttachToExistingServerAsync(
-                    runtimeRoot,
-                    message => UnityEngine.Debug.Log($"[KimodoBridge] {message}"),
-                    CancellationToken.None);
+                string launcherPath = ResolveStartScript(runtimeRoot);
+                if (string.IsNullOrWhiteSpace(launcherPath) || !File.Exists(launcherPath))
+                {
+                    return;
+                }
+
+                var settings = new KimodoRuntimeGenerationSettings
+                {
+                    bridgeSettings = new BridgeRuntimeSettings
+                    {
+                        runtimeRoot = runtimeRoot,
+                        launcherPath = launcherPath,
+                        modelName = "Kimodo-SOMA-RP-v1",
+                        highVram = false
+                    }
+                };
+                using var bridge = new KimodoBridgeService(settings.bridgeSettings);
+                _ = await bridge.AttachAsync(message => UnityEngine.Debug.Log($"[KimodoBridge] {message}"), CancellationToken.None);
             }
             catch
             {
@@ -246,6 +315,7 @@ namespace KimodoUnityMotionTools.ProjectEditor
             string modelName,
             bool highVram,
             string kimodoRootPath,
+            string modelsRoot,
             Action<string> progress,
             CancellationToken token)
         {
@@ -259,33 +329,15 @@ namespace KimodoUnityMotionTools.ProjectEditor
                 startupTimeoutSeconds = Math.Max(600f, minutes * 60f);
             }
 
-            KimodoBridgeClient bridge = GetOrCreateClient();
-            return await bridge.StartAsync(
+            KimodoRuntimeGenerationService runtimeService = GetOrCreateRuntimeGenerationService(
+                kimodoRootPath,
                 launcherPath,
                 modelName,
                 highVram,
-                kimodoRootPath,
-                startupTimeoutSeconds,
-                progress,
-                token);
-        }
-
-        internal static async Task<string> GenerateAsync(
-            string prompt,
-            float durationSeconds,
-            int? seed,
-            int diffusionSteps,
-            string constraintsJson,
-            Action<string> progress,
-            CancellationToken token)
-        {
-            KimodoBridgeClient bridge = GetOrCreateClient();
-            return await bridge.GenerateAsync(
-                prompt,
-                durationSeconds,
-                seed,
-                diffusionSteps,
-                constraintsJson,
+                modelsRoot,
+                startupTimeoutMs: (int)Math.Round(startupTimeoutSeconds * 1000f));
+            return await runtimeService.StartAsync(
+                KimodoBackendType.Bridge,
                 progress,
                 token);
         }
@@ -355,13 +407,13 @@ namespace KimodoUnityMotionTools.ProjectEditor
             isClosing = true;
             try
             {
-                KimodoBridgeClient bridge = sharedBridgeClient;
-                sharedBridgeClient = null;
                 try
                 {
-                    if (bridge != null)
+                    KimodoRuntimeGenerationService runtimeService = sharedRuntimeGenerationService;
+                    sharedRuntimeGenerationService = null;
+                    if (runtimeService != null)
                     {
-                        await bridge.KillServerTreeAsync(CancellationToken.None);
+                        await runtimeService.KillAsync(KimodoBackendType.Bridge, CancellationToken.None);
                     }
                     else
                     {
@@ -379,7 +431,12 @@ namespace KimodoUnityMotionTools.ProjectEditor
                 }
                 finally
                 {
-                    try { bridge?.Dispose(); } catch { }
+                    try { sharedRuntimeGenerationService?.Dispose(); } catch { }
+                    currentServiceRuntimeRoot = string.Empty;
+                    currentServiceLauncherPath = string.Empty;
+                    currentServiceModelName = string.Empty;
+                    currentServiceModelsRoot = string.Empty;
+                    currentServiceHighVram = false;
                 }
             }
             finally

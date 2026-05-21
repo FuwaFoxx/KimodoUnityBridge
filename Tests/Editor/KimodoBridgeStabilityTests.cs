@@ -3,6 +3,7 @@ using System.IO;
 using System.Diagnostics;
 using System.Threading;
 using System.Threading.Tasks;
+using KimodoUnityMotionTools.Generation;
 using KimodoUnityMotionTools.ProjectEditor;
 using NUnit.Framework;
 
@@ -39,11 +40,12 @@ namespace KimodoUnityMotionTools.Tests
         public async Task Generate_WhenServerKilledMidFlight_ShouldFailControlledAndNoOrphans()
         {
             await KimodoBridgeTestHarness.EnsureSetupOrIgnoreAsync(scope);
-            KimodoBridgeClient client = await KimodoBridgeTestHarness.StartClientOrIgnoreAsync(scope, 90f);
-            int pid = KimodoBridgeTestHarness.GetClientPidForTests(client);
-            Assert.Greater(pid, 0, "Client pid must be captured after startup.");
+            using KimodoRuntimeGenerationService service = await KimodoBridgeTestHarness.StartBridgeRuntimeServiceOrIgnoreAsync(scope, 90f);
+            var startedSnapshots = KimodoBridgeTestHarness.GetRuntimeProcessSnapshots(scope.RuntimeRoot);
+            Assert.IsNotEmpty(startedSnapshots, "Bridge runtime process should exist after startup.");
 
-            Task<string> generateTask = client.GenerateAsync(
+            Task<string> generateTask = KimodoBridgeTestHarness.GenerateBridgeAsync(
+                service,
                 "walk forward and turn left",
                 2.5f,
                 42,
@@ -68,8 +70,7 @@ namespace KimodoUnityMotionTools.Tests
             }
 
             Assert.IsNotNull(ex, "Generate should fail when server is killed mid-flight.");
-            await client.StopAsync(CancellationToken.None);
-            client.Dispose();
+            await KimodoBridgeTestHarness.StopBridgeAsync(service, CancellationToken.None);
             await KimodoBridgeTestHarness.AssertNoOrphanProcessAndRecoverableAsync(scope);
         }
 
@@ -102,16 +103,12 @@ namespace KimodoUnityMotionTools.Tests
                 process.Dispose();
             }
 
-            var client = new KimodoBridgeClient();
+            using KimodoRuntimeGenerationService service = KimodoBridgeTestHarness.CreateRuntimeGenerationService(scope, startupTimeoutMs: 30000);
             Exception ex = null;
             try
             {
-                await client.StartAsync(
-                    launcher,
-                    "Kimodo-SOMA-RP-v1",
-                    false,
-                    scope.RuntimeRoot,
-                    30f,
+                _ = await service.StartAsync(
+                    KimodoBackendType.Bridge,
                     progress => scope.Log("Client StartAsync progress: " + progress),
                     CancellationToken.None);
             }
@@ -122,8 +119,7 @@ namespace KimodoUnityMotionTools.Tests
             }
             finally
             {
-                await client.StopAsync(CancellationToken.None);
-                client.Dispose();
+                await KimodoBridgeTestHarness.StopBridgeAsync(service, CancellationToken.None);
             }
 
             Assert.IsNotNull(ex, "StartAsync should fail in startup kill scenario.");
@@ -134,7 +130,7 @@ namespace KimodoUnityMotionTools.Tests
         public async Task StopAndKillTree_WhenRepeatedAndConnectionBroken_ShouldRemainIdempotent()
         {
             await KimodoBridgeTestHarness.EnsureSetupOrIgnoreAsync(scope);
-            KimodoBridgeClient client = await KimodoBridgeTestHarness.StartClientOrIgnoreAsync(scope, 90f);
+            using KimodoRuntimeGenerationService service = await KimodoBridgeTestHarness.StartBridgeRuntimeServiceOrIgnoreAsync(scope, 90f);
 
             string portFile = Path.Combine(scope.RuntimeRoot, "serverport");
             if (File.Exists(portFile))
@@ -145,11 +141,10 @@ namespace KimodoUnityMotionTools.Tests
 
             KimodoBridgeTestHarness.KillRuntimeProcesses(scope.RuntimeRoot, scope);
 
-            await client.StopAsync(CancellationToken.None);
-            await client.StopAsync(CancellationToken.None);
-            await client.KillServerTreeAsync(CancellationToken.None);
-            await client.KillServerTreeAsync(CancellationToken.None);
-            client.Dispose();
+            await KimodoBridgeTestHarness.StopBridgeAsync(service, CancellationToken.None);
+            await KimodoBridgeTestHarness.StopBridgeAsync(service, CancellationToken.None);
+            await KimodoBridgeTestHarness.KillBridgeAsync(service, CancellationToken.None);
+            await KimodoBridgeTestHarness.KillBridgeAsync(service, CancellationToken.None);
 
             await KimodoBridgeTestHarness.AssertNoOrphanProcessAndRecoverableAsync(scope);
         }
