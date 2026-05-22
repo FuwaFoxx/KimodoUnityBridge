@@ -1,5 +1,4 @@
 using System;
-using System.Diagnostics;
 using System.IO;
 using System.Text;
 using System.Threading;
@@ -11,6 +10,7 @@ namespace KimodoUnityMotionTools.Bridge
     {
         private CancellationTokenSource cts;
         private Task pumpTask;
+        private SynchronizationContext callbackContext;
         private bool disposed;
 
         public void Start(string logPath, Action<string> onLine)
@@ -22,7 +22,8 @@ namespace KimodoUnityMotionTools.Bridge
             }
 
             cts = new CancellationTokenSource();
-            pumpTask = Task.Run(() => PumpAsync(logPath, onLine, cts.Token));
+            callbackContext = SynchronizationContext.Current;
+            pumpTask = Task.Run(() => PumpAsync(logPath, onLine, cts.Token, callbackContext));
         }
 
         public void Stop()
@@ -35,6 +36,7 @@ namespace KimodoUnityMotionTools.Bridge
                 current.Dispose();
             }
             pumpTask = null;
+            callbackContext = null;
         }
 
         public void Dispose()
@@ -47,31 +49,31 @@ namespace KimodoUnityMotionTools.Bridge
             Stop();
         }
 
-        private static async Task PumpAsync(string logPath, Action<string> onLine, CancellationToken token)
+        private static async Task PumpAsync(
+            string logPath,
+            Action<string> onLine,
+            CancellationToken token,
+            SynchronizationContext callbackContext)
         {
             try
             {
-                string fullLogPath = Path.GetFullPath(logPath);
-                string logFileName = Path.GetFileName(fullLogPath);
-                var waitWatch = Stopwatch.StartNew();
-                const int waitTimeoutMs = 120000;
-                while (!token.IsCancellationRequested && !File.Exists(fullLogPath))
+                DateTime waitUntil = DateTime.UtcNow.AddSeconds(20);
+                while (!token.IsCancellationRequested && !File.Exists(logPath))
                 {
-                    if (waitWatch.ElapsedMilliseconds >= waitTimeoutMs)
+                    if (DateTime.UtcNow >= waitUntil)
                     {
-                        onLine($"[BridgeLogPump] wait timeout for '{logFileName}'.");
                         return;
                     }
 
                     await Task.Delay(100, token);
                 }
 
-                if (!File.Exists(fullLogPath))
+                if (!File.Exists(logPath))
                 {
                     return;
                 }
 
-                using var fs = new FileStream(fullLogPath, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete);
+                using var fs = new FileStream(logPath, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete);
                 if (fs.CanSeek)
                 {
                     fs.Seek(0, SeekOrigin.End);
@@ -85,7 +87,7 @@ namespace KimodoUnityMotionTools.Bridge
                         string trimmed = line.Trim();
                         if (!string.IsNullOrWhiteSpace(trimmed))
                         {
-                            onLine(trimmed);
+                            EmitLine(onLine, callbackContext, trimmed);
                         }
                         continue;
                     }
@@ -111,14 +113,14 @@ namespace KimodoUnityMotionTools.Bridge
                                 string trimmed = parts[i].Trim();
                                 if (!string.IsNullOrWhiteSpace(trimmed))
                                 {
-                                    onLine(trimmed);
+                                    EmitLine(onLine, callbackContext, trimmed);
                                 }
                             }
                         }
                         continue;
                     }
 
-                    await Task.Delay(100, token);
+                    await Task.Delay(10, token);
                 }
             }
             catch (OperationCanceledException)
@@ -127,7 +129,40 @@ namespace KimodoUnityMotionTools.Bridge
             }
             catch (Exception e)
             {
-                onLine($"[BridgeLogPump] stopped: {e.Message}");
+                EmitLine(onLine, callbackContext, $"[BridgeLogPump] stopped: {e.Message}");
+            }
+        }
+
+        private static void EmitLine(Action<string> onLine, SynchronizationContext callbackContext, string line)
+        {
+            if (onLine == null || string.IsNullOrWhiteSpace(line))
+            {
+                return;
+            }
+
+            if (callbackContext != null)
+            {
+                callbackContext.Post(_ =>
+                {
+                    try
+                    {
+                        onLine(line);
+                    }
+                    catch
+                    {
+                        // ignore callback failures
+                    }
+                }, null);
+                return;
+            }
+
+            try
+            {
+                onLine(line);
+            }
+            catch
+            {
+                // ignore callback failures
             }
         }
     }
