@@ -27,6 +27,7 @@ namespace KimodoUnityMotionTools.ProjectEditor
         private static string currentServiceModelName = string.Empty;
         private static string currentServiceModelsRoot = string.Empty;
         private static bool currentServiceHighVram;
+        private static bool currentServiceForceSetup;
         private static bool isClosing;
         private static bool isRecovering;
         private static int runtimeMaintenanceDepth;
@@ -212,6 +213,7 @@ namespace KimodoUnityMotionTools.ProjectEditor
             string modelName,
             bool highVram,
             string modelsRoot,
+            bool forceSetup = false,
             int startupTimeoutMs = 600000)
         {
             string resolvedRuntimeRoot = Path.GetFullPath(runtimeRoot ?? string.Empty);
@@ -225,6 +227,7 @@ namespace KimodoUnityMotionTools.ProjectEditor
                 string.Equals(currentServiceLauncherPath, resolvedLauncherPath, StringComparison.OrdinalIgnoreCase) &&
                 string.Equals(currentServiceModelName, resolvedModelName, StringComparison.Ordinal) &&
                 currentServiceHighVram == highVram &&
+                currentServiceForceSetup == forceSetup &&
                 string.Equals(currentServiceModelsRoot, resolvedModelsRoot, StringComparison.OrdinalIgnoreCase);
 
             if (reusable)
@@ -249,6 +252,7 @@ namespace KimodoUnityMotionTools.ProjectEditor
                     launcherPath = resolvedLauncherPath,
                     modelName = resolvedModelName,
                     highVram = highVram,
+                    forceSetup = forceSetup,
                     modelsRoot = resolvedModelsRoot,
                     startupTimeoutMs = Math.Max(30000, startupTimeoutMs)
                 },
@@ -260,6 +264,7 @@ namespace KimodoUnityMotionTools.ProjectEditor
             currentServiceLauncherPath = resolvedLauncherPath;
             currentServiceModelName = resolvedModelName;
             currentServiceHighVram = highVram;
+            currentServiceForceSetup = forceSetup;
             currentServiceModelsRoot = resolvedModelsRoot;
             return sharedRuntimeGenerationService;
         }
@@ -325,6 +330,7 @@ namespace KimodoUnityMotionTools.ProjectEditor
             bool highVram,
             string kimodoRootPath,
             string modelsRoot,
+            bool forceSetup,
             Action<string> progress,
             CancellationToken token)
         {
@@ -344,6 +350,7 @@ namespace KimodoUnityMotionTools.ProjectEditor
                 modelName,
                 highVram,
                 modelsRoot,
+                forceSetup,
                 startupTimeoutMs: (int)Math.Round(startupTimeoutSeconds * 1000f));
             return await runtimeService.StartAsync(
                 KimodoBackendType.Bridge,
@@ -450,6 +457,7 @@ namespace KimodoUnityMotionTools.ProjectEditor
                     currentServiceModelName = string.Empty;
                     currentServiceModelsRoot = string.Empty;
                     currentServiceHighVram = false;
+                    currentServiceForceSetup = false;
                 }
             }
             finally

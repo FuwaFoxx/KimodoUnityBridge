@@ -355,6 +355,7 @@ namespace KimodoUnityMotionTools.ProjectEditor
                     selectedVramMode == KimodoBridgeVramMode.High,
                     runtimeRoot,
                     modelsRootForServer,
+                    forceSetup: false,
                     progress =>
                     {
                         operationStatus = progress;
@@ -481,14 +482,28 @@ namespace KimodoUnityMotionTools.ProjectEditor
                     throw new InvalidOperationException("TryFix failed: cannot bootstrap runtime.");
                 }
 
-                string setup = KimodoBridgeController.ResolveSetupScriptOrThrow(runtimeRoot);
-                int rc = KimodoBridgeController.RunScriptBlocking(setup, "--output console");
-                if (rc != 0)
-                {
-                    throw new InvalidOperationException($"TryFix failed: setup exited with code {rc}.");
-                }
+                string launcherPath = KimodoBridgeController.ResolveStartScriptOrThrow(runtimeRoot);
+                string modelName = selectedModel;
+                bool highVram = selectedVramMode == KimodoBridgeVramMode.High;
+                string modelsRootForServer = ResolveModelsRootForServer();
+                await KimodoBridgeController.StartServerAsync(
+                    launcherPath,
+                    modelName,
+                    highVram,
+                    runtimeRoot,
+                    modelsRootForServer,
+                    forceSetup: true,
+                    progress =>
+                    {
+                        operationStatus = progress;
+                        if (!string.IsNullOrWhiteSpace(progress))
+                        {
+                            Debug.Log("[Kimodo] " + progress);
+                        }
+                    },
+                    CancellationToken.None);
 
-                operationStatus = "TryFix complete: runtime reset and setup finished.";
+                operationStatus = "TryFix complete: runtime reset and server started.";
             }
             catch (Exception e)
             {

@@ -12,7 +12,7 @@ namespace KimodoUnityMotionTools.Bridge
             return Application.platform == RuntimePlatform.LinuxEditor || Application.platform == RuntimePlatform.LinuxPlayer;
         }
 
-        public ProcessStartInfo BuildLauncherStartInfo(string launcherPath, string modelName, bool highVram, string modelsRoot, string logPath)
+        public ProcessStartInfo BuildLauncherStartInfo(string launcherPath, string modelName, bool highVram, bool forceSetup, string modelsRoot, string logPath)
         {
             string ext = Path.GetExtension(launcherPath)?.ToLowerInvariant() ?? string.Empty;
             if (ext != ".sh" && ext != ".bat")
@@ -24,9 +24,10 @@ namespace KimodoUnityMotionTools.Bridge
 
             string modelArg = $" --model \"{(string.IsNullOrWhiteSpace(modelName) ? "Kimodo-SOMA-RP-v1" : modelName.Trim())}\"";
             string vramArg = highVram ? " --highvram" : string.Empty;
+            string forceSetupArg = forceSetup ? " --force-setup" : string.Empty;
             string modelsArg = string.IsNullOrWhiteSpace(modelsRoot) ? string.Empty : $" --models-root \"{modelsRoot.Trim()}\"";
             string outputArg = $" --output file --log \"{logPath}\"";
-            string args = modelArg + vramArg + modelsArg + outputArg;
+            string args = modelArg + vramArg + forceSetupArg + modelsArg + outputArg;
 
             return new ProcessStartInfo
             {

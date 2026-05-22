@@ -100,6 +100,7 @@ namespace KimodoUnityMotionTools.Bridge
                 settings.launcherPath,
                 settings.modelName,
                 settings.highVram,
+                settings.forceSetup,
                 settings.modelsRoot,
                 currentLogPath);
             StartLogPump(currentLogPath, progress);

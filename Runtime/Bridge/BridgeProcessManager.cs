@@ -39,7 +39,7 @@ namespace KimodoUnityMotionTools.Bridge
 
         public int ProcessId => processId;
 
-        public Process Start(string launcherPath, string modelName, bool highVram, string modelsRoot, string logPath)
+        public Process Start(string launcherPath, string modelName, bool highVram, bool forceSetup, string modelsRoot, string logPath)
         {
             ThrowIfDisposed();
 
@@ -58,6 +58,7 @@ namespace KimodoUnityMotionTools.Bridge
                 resolvedLauncher,
                 modelName,
                 highVram,
+                forceSetup,
                 modelsRoot,
                 logPath);
             var proc = new Process { StartInfo = psi, EnableRaisingEvents = true };

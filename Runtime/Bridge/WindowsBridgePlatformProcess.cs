@@ -12,7 +12,7 @@ namespace KimodoUnityMotionTools.Bridge
             return Application.platform == RuntimePlatform.WindowsEditor || Application.platform == RuntimePlatform.WindowsPlayer;
         }
 
-        public ProcessStartInfo BuildLauncherStartInfo(string launcherPath, string modelName, bool highVram, string modelsRoot, string logPath)
+        public ProcessStartInfo BuildLauncherStartInfo(string launcherPath, string modelName, bool highVram, bool forceSetup, string modelsRoot, string logPath)
         {
             string ext = Path.GetExtension(launcherPath)?.ToLowerInvariant() ?? string.Empty;
             if (ext != ".bat" && ext != ".cmd")
@@ -26,7 +26,8 @@ namespace KimodoUnityMotionTools.Bridge
             string modelsArg = string.IsNullOrWhiteSpace(modelsRoot)
                 ? string.Empty
                 : $" --models-root {QuoteForCmd(modelsRoot.Trim())}";
-            string args = $"--model {qModel}{(highVram ? " --highvram" : string.Empty)}{modelsArg} --output file --log {qLog}";
+            string forceSetupArg = forceSetup ? " --force-setup" : string.Empty;
+            string args = $"--model {qModel}{(highVram ? " --highvram" : string.Empty)}{modelsArg}{forceSetupArg} --output file --log {qLog}";
 
             return new ProcessStartInfo
             {
