@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Globalization;
 using System.IO;
@@ -314,7 +314,7 @@ namespace KimodoUnityMotionTools.ProjectEditor
         internal static int EstimateMissingConfigPoints(string runtimeRoot, bool highVram, string selectedModel)
         {
             int points = 0;
-            bool firstSetup = !File.Exists(Path.Combine(runtimeRoot, ".setup_new_complete"));
+            bool firstSetup = !File.Exists(Path.Combine(runtimeRoot, ".setup.complete"));
             if (firstSetup)
             {
                 points += 5;
@@ -426,3 +426,5 @@ namespace KimodoUnityMotionTools.ProjectEditor
         }
     }
 }
+
+

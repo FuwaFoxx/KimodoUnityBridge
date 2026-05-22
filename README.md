@@ -94,7 +94,7 @@ Model aliases accepted by runtime scripts include `soma`, `g1`, `smplx`, `soma-s
 
 Under runtime root (`NvlabKimodoQuickServer` or template root while testing):
 - `.setup_new.lock`
-- `.setup_new_complete`
+- `.setup.complete`
 - `serverport`
 - `log\setup.log`
 - `log\download_model.log`
@@ -111,3 +111,5 @@ For automation agents:
 2. Treat `serverport` as source-of-truth endpoint.
 3. Protocol flow:
 - ping until ready/loading resolves -> generate -> quit.
+
+

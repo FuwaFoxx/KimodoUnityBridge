@@ -1,4 +1,4 @@
-using UnityEditor;
+﻿using UnityEditor;
 using UnityEngine;
 
 namespace KimodoUnityMotionTools.ProjectEditor
@@ -11,19 +11,12 @@ namespace KimodoUnityMotionTools.ProjectEditor
         internal const int DefaultGeneratedClipsLimit = 400;
 
         [SerializeField] private int maxGeneratedClips = DefaultGeneratedClipsLimit;
-        [SerializeField] private bool closeBridgeServerOnEnterPlayMode = true;
         [SerializeField] private string localModelsPath = string.Empty;
 
         internal int MaxGeneratedClips
         {
             get => Mathf.Clamp(maxGeneratedClips, MinGeneratedClipsLimit, MaxGeneratedClipsLimit);
             set => maxGeneratedClips = Mathf.Clamp(value, MinGeneratedClipsLimit, MaxGeneratedClipsLimit);
-        }
-
-        internal bool CloseBridgeServerOnEnterPlayMode
-        {
-            get => closeBridgeServerOnEnterPlayMode;
-            set => closeBridgeServerOnEnterPlayMode = value;
         }
 
         internal string LocalModelsPath
@@ -40,4 +33,5 @@ namespace KimodoUnityMotionTools.ProjectEditor
         }
     }
 }
+
 

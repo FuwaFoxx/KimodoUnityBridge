@@ -16,7 +16,7 @@ namespace KimodoUnityMotionTools.Bridge
         {
             string logDir = Path.Combine(runtimeRoot, "log");
             Directory.CreateDirectory(logDir);
-            return Path.Combine(logDir, $"unity_bridge_{DateTime.Now:yyyyMMdd_HHmmss_fff}.log");
+            return Path.Combine(logDir, "run_server.log");
         }
 
         public static string ResolveAttachLogPath(string runtimeRoot)
@@ -34,13 +34,6 @@ namespace KimodoUnityMotionTools.Bridge
 
             try
             {
-                string[] bridgeLogs = Directory.GetFiles(logDir, "unity_bridge_*.log");
-                if (bridgeLogs.Length > 0)
-                {
-                    Array.Sort(bridgeLogs, (a, b) => File.GetLastWriteTimeUtc(b).CompareTo(File.GetLastWriteTimeUtc(a)));
-                    return bridgeLogs[0];
-                }
-
                 string runServerLog = Path.Combine(logDir, "run_server.log");
                 if (File.Exists(runServerLog))
                 {
@@ -51,6 +44,13 @@ namespace KimodoUnityMotionTools.Bridge
                 if (File.Exists(bridgeRuntimeLog))
                 {
                     return bridgeRuntimeLog;
+                }
+
+                string[] bridgeLogs = Directory.GetFiles(logDir, "unity_bridge_*.log");
+                if (bridgeLogs.Length > 0)
+                {
+                    Array.Sort(bridgeLogs, (a, b) => File.GetLastWriteTimeUtc(b).CompareTo(File.GetLastWriteTimeUtc(a)));
+                    return bridgeLogs[0];
                 }
             }
             catch

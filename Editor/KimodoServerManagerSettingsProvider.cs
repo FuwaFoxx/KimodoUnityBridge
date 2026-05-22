@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Threading;
@@ -20,8 +20,7 @@ namespace KimodoUnityMotionTools.ProjectEditor
         private enum ServerState
         {
             Disabled = 0,
-            Detecting = 1,
-            Enabled = 2
+            Enabled = 1
         }
 
         private const double ServerStatusQueryCooldownSeconds = 2.0;
@@ -37,6 +36,7 @@ namespace KimodoUnityMotionTools.ProjectEditor
         private bool serverStatusQueryInFlight;
         private int serverStatusQueryVersion;
         private double nextServerStatusQueryAt;
+        private double detectHintUntilTime;
         private string serverHost = "127.0.0.1";
         private int serverPort = -1;
 
@@ -62,6 +62,7 @@ namespace KimodoUnityMotionTools.ProjectEditor
         public override void OnActivate(string searchContext, VisualElement rootElement)
         {
             Refresh();
+            detectHintUntilTime = EditorApplication.timeSinceStartup + 2.0;
             ScheduleServerStateQuery(force: true);
         }
 
@@ -69,7 +70,7 @@ namespace KimodoUnityMotionTools.ProjectEditor
         {
             if (string.IsNullOrWhiteSpace(runtimeRoot))
             {
-                runtimeRoot = KimodoServerLifecycleManager.GetRuntimeRootPath();
+                runtimeRoot = KimodoBridgeController.GetRuntimeRootPath();
             }
 
             ScheduleServerStateQuery(force: false);
@@ -91,7 +92,7 @@ namespace KimodoUnityMotionTools.ProjectEditor
                 {
                     try
                     {
-                        bool ok = KimodoServerLifecycleManager.EnsureRuntimeRootExists();
+                        bool ok = KimodoBridgeController.EnsureRuntimeRootExists();
                         if (!ok)
                         {
                             throw new InvalidOperationException("Failed to create runtime root from package template.");
@@ -144,7 +145,7 @@ namespace KimodoUnityMotionTools.ProjectEditor
             EditorGUILayout.LabelField("Startup", EditorStyles.boldLabel);
             EditorGUILayout.BeginVertical("box");
 
-            string[] options = KimodoServerLifecycleManager.SupportedModelNames;
+            string[] options = KimodoBridgeController.SupportedModelNames;
             int idx = Array.IndexOf(options, selectedModel);
             if (idx < 0)
             {
@@ -168,16 +169,6 @@ namespace KimodoUnityMotionTools.ProjectEditor
             if (EditorGUI.EndChangeCheck())
             {
                 settings.MaxGeneratedClips = newLimit;
-                settings.SaveSettings();
-            }
-
-            EditorGUI.BeginChangeCheck();
-            bool closeOnPlay = EditorGUILayout.Toggle(
-                new GUIContent("Close On Enter Play Mode", "When enabled, entering Play Mode will close Kimodo bridge server."),
-                settings.CloseBridgeServerOnEnterPlayMode);
-            if (EditorGUI.EndChangeCheck())
-            {
-                settings.CloseBridgeServerOnEnterPlayMode = closeOnPlay;
                 settings.SaveSettings();
             }
 
@@ -216,7 +207,7 @@ namespace KimodoUnityMotionTools.ProjectEditor
                 $"Estimated VRAM for selected mode: ~{totalVramGb} GB (core 2 GB + encoder {encoderVramGb} GB).",
                 MessageType.Info);
 
-            if (KimodoServerLifecycleManager.TryGetModelMissingSetupMinutes(runtimeRoot, selectedVramMode == KimodoBridgeVramMode.High, selectedModel, out int minutes))
+            if (KimodoBridgeController.TryGetModelMissingSetupMinutes(runtimeRoot, selectedVramMode == KimodoBridgeVramMode.High, selectedModel, out int minutes))
             {
                 EditorGUILayout.HelpBox($"Model missing detected, update required, approximately {minutes} minutes.", MessageType.None);
             }
@@ -230,20 +221,22 @@ namespace KimodoUnityMotionTools.ProjectEditor
             EditorGUILayout.LabelField("Server", EditorStyles.boldLabel);
             EditorGUILayout.BeginVertical("box");
 
-            switch (serverState)
+            bool showDetectHint = EditorApplication.timeSinceStartup < detectHintUntilTime;
+            if (showDetectHint)
             {
-                case ServerState.Enabled:
-                    EditorGUILayout.HelpBox($"Running at {serverHost}:{serverPort}", MessageType.Info);
-                    break;
-                case ServerState.Detecting:
-                    EditorGUILayout.HelpBox("Checking server status...", MessageType.None);
-                    break;
-                default:
-                    EditorGUILayout.HelpBox("Server is not running.", MessageType.None);
-                    break;
+                EditorGUILayout.HelpBox("detect...", MessageType.None);
             }
+            else if (serverState == ServerState.Enabled)
+            {
+                EditorGUILayout.HelpBox($"Running at {serverHost}:{serverPort}", MessageType.Info);
+            }
+            else
+            {
+                EditorGUILayout.HelpBox("Server is not running.", MessageType.None);
+            }
+            EditorGUILayout.LabelField("Status", serverState == ServerState.Enabled ? "enable" : "disable", EditorStyles.miniLabel);
 
-            bool stopMode = serverState == ServerState.Enabled || serverState == ServerState.Detecting;
+            bool stopMode = serverState == ServerState.Enabled;
             string buttonLabel = operationInProgress ? "Processing..." : (stopMode ? "Stop Server" : "Start Server");
 
             using (new EditorGUI.DisabledScope(operationInProgress))
@@ -349,9 +342,9 @@ namespace KimodoUnityMotionTools.ProjectEditor
             lastError = string.Empty;
             try
             {
-                string launcherPath = KimodoServerLifecycleManager.ResolveStartScriptOrThrow(runtimeRoot);
+                string launcherPath = KimodoBridgeController.ResolveStartScriptOrThrow(runtimeRoot);
                 string modelsRootForServer = ResolveModelsRootForServer();
-                string ready = await KimodoServerLifecycleManager.StartServerAsync(
+                string ready = await KimodoBridgeController.StartServerAsync(
                     launcherPath,
                     selectedModel,
                     selectedVramMode == KimodoBridgeVramMode.High,
@@ -393,7 +386,7 @@ namespace KimodoUnityMotionTools.ProjectEditor
             lastError = string.Empty;
             try
             {
-                await KimodoServerLifecycleManager.CloseServerAsync();
+                await KimodoBridgeController.CloseServerAsync();
                 operationStatus = "Server stop requested.";
             }
             catch (Exception e)
@@ -420,7 +413,7 @@ namespace KimodoUnityMotionTools.ProjectEditor
             lastError = string.Empty;
             try
             {
-                await KimodoServerLifecycleManager.CloseServerAsync();
+                await KimodoBridgeController.CloseServerAsync();
                 if (Directory.Exists(runtimeRoot))
                 {
                     Directory.Delete(runtimeRoot, recursive: true);
@@ -461,7 +454,7 @@ namespace KimodoUnityMotionTools.ProjectEditor
 
             try
             {
-                await KimodoServerLifecycleManager.CloseServerAsync();
+                await KimodoBridgeController.CloseServerAsync();
 
                 if (Directory.Exists(runtimeRoot))
                 {
@@ -477,14 +470,14 @@ namespace KimodoUnityMotionTools.ProjectEditor
                     }
                 }
 
-                bool ok = KimodoServerLifecycleManager.EnsureRuntimeRootExists();
+                bool ok = KimodoBridgeController.EnsureRuntimeRootExists();
                 if (!ok)
                 {
                     throw new InvalidOperationException("TryFix failed: cannot bootstrap runtime.");
                 }
 
-                string setup = KimodoServerLifecycleManager.ResolveSetupScriptOrThrow(runtimeRoot);
-                int rc = KimodoServerLifecycleManager.RunScriptBlocking(setup, "--output console");
+                string setup = KimodoBridgeController.ResolveSetupScriptOrThrow(runtimeRoot);
+                int rc = KimodoBridgeController.RunScriptBlocking(setup, "--output console");
                 if (rc != 0)
                 {
                     throw new InvalidOperationException($"TryFix failed: setup exited with code {rc}.");
@@ -532,7 +525,7 @@ namespace KimodoUnityMotionTools.ProjectEditor
 
         private void Refresh()
         {
-            runtimeRoot = KimodoServerLifecycleManager.GetRuntimeRootPath();
+            runtimeRoot = KimodoBridgeController.GetRuntimeRootPath();
             runtimeExists = Directory.Exists(runtimeRoot);
             RefreshModelList();
 
@@ -635,7 +628,6 @@ namespace KimodoUnityMotionTools.ProjectEditor
             }
 
             serverStatusQueryInFlight = true;
-            serverState = ServerState.Detecting;
             nextServerStatusQueryAt = now + ServerStatusQueryCooldownSeconds;
             int queryVersion = ++serverStatusQueryVersion;
             string root = runtimeRoot;
@@ -658,12 +650,12 @@ namespace KimodoUnityMotionTools.ProjectEditor
                         return;
                     }
 
-                    if (!KimodoServerLifecycleManager.TryReadServerPort(root, out string readHost, out int readPort))
+                    if (!KimodoBridgeController.TryReadServerPort(root, out string readHost, out int readPort))
                     {
                         return;
                     }
 
-                    if (KimodoServerLifecycleManager.IsServerResponsive(readHost, readPort))
+                    if (KimodoBridgeController.IsServerResponsive(readHost, readPort))
                     {
                         running = true;
                         host = readHost;
@@ -688,4 +680,5 @@ namespace KimodoUnityMotionTools.ProjectEditor
         }
     }
 }
+
 

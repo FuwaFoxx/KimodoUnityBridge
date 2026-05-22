@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.Globalization;
@@ -223,7 +223,7 @@ namespace KimodoUnityMotionTools.Tests
 
             try
             {
-                await KimodoServerLifecycleManager.CloseServerAsync();
+                await KimodoBridgeController.CloseServerAsync();
             }
             catch (Exception ex)
             {
@@ -678,3 +678,4 @@ namespace KimodoUnityMotionTools.Tests
         }
     }
 }
+

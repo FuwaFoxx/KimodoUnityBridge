@@ -242,11 +242,11 @@ namespace KimodoUnityMotionTools.ProjectEditor
 
             if (useBridge)
             {
-                bool bridgeRunning = KimodoServerLifecycleManager.IsServerRunning;
+                bool bridgeRunning = KimodoBridgeController.IsServerRunning;
                 EditorGUI.BeginDisabledGroup(!bridgeRunning);
                 if (GUILayout.Button("Close Bridge Server", GUILayout.Height(22)))
                 {
-                    _ = KimodoServerLifecycleManager.CloseServerAsync();
+                    _ = KimodoBridgeController.CloseServerAsync();
                 }
                 EditorGUI.EndDisabledGroup();
             }
@@ -445,8 +445,8 @@ namespace KimodoUnityMotionTools.ProjectEditor
                 return false;
             }
 
-            string runtimeRoot = KimodoServerLifecycleManager.GetRuntimeRootPath();
-            if (KimodoServerLifecycleManager.IsSetupRunning(runtimeRoot))
+            string runtimeRoot = KimodoBridgeController.GetRuntimeRootPath();
+            if (KimodoBridgeController.IsSetupRunning(runtimeRoot))
             {
                 return false;
             }
@@ -464,7 +464,7 @@ namespace KimodoUnityMotionTools.ProjectEditor
             bridgeEnvAutoRetryInProgress = true;
             try
             {
-                await KimodoServerLifecycleManager.CloseServerAsync();
+                await KimodoBridgeController.CloseServerAsync();
                 if (Directory.Exists(runtimeRoot))
                 {
                     Directory.Delete(runtimeRoot, true);
@@ -509,7 +509,7 @@ namespace KimodoUnityMotionTools.ProjectEditor
 
         private async Task<string> GenerateMotionJsonViaRuntimeServiceAsync(string constraintsFilePath, int effectiveSeed, CancellationToken token)
         {
-            string expectedRuntimeRoot = KimodoServerLifecycleManager.GetRuntimeRootPath();
+            string expectedRuntimeRoot = KimodoBridgeController.GetRuntimeRootPath();
             if (!Directory.Exists(expectedRuntimeRoot))
             {
                 lastStatus = "First setup: preparing NvlabKimodoQuickServer...";
@@ -517,13 +517,22 @@ namespace KimodoUnityMotionTools.ProjectEditor
                 Debug.Log("[Kimodo] First setup: runtime root missing, bootstrapping from package template.");
             }
 
-            string kimodoRootPath = KimodoServerLifecycleManager.ResolveRuntimeRootOrThrow();
-            string launcherPath = KimodoServerLifecycleManager.ResolveStartScriptOrThrow(kimodoRootPath);
+            string kimodoRootPath = KimodoBridgeController.ResolveRuntimeRootOrThrow();
+            string launcherPath = KimodoBridgeController.ResolveStartScriptOrThrow(kimodoRootPath);
             string modelName = string.IsNullOrWhiteSpace(clip.bridgeModelName) ? "Kimodo-SOMA-RP-v1" : clip.bridgeModelName.Trim();
             bool highVram = clip.bridgeVramMode == KimodoBridgeVramMode.High;
             float durationSeconds = generationFrames.intValue / TargetFps;
+            string modelsRoot = KimodoPlayableClipGenerationSettings.instance.LocalModelsPath?.Trim();
+            if (!string.IsNullOrWhiteSpace(modelsRoot))
+            {
+                modelsRoot = Path.GetFullPath(modelsRoot);
+            }
 
             Debug.Log($"[Kimodo] Prompt: {motionPrompt.stringValue}");
+            if (!string.IsNullOrWhiteSpace(modelsRoot))
+            {
+                Debug.Log($"[Kimodo] Using custom models root: {modelsRoot}");
+            }
 
             var settings = new KimodoRuntimeGenerationSettings
             {
@@ -533,7 +542,7 @@ namespace KimodoUnityMotionTools.ProjectEditor
                     launcherPath = launcherPath,
                     modelName = modelName,
                     highVram = highVram,
-                    modelsRoot = KimodoPlayableClipGenerationSettings.instance.LocalModelsPath?.Trim(),
+                    modelsRoot = modelsRoot,
                     startupTimeoutMs = ComputeBridgeStartupTimeoutMs(kimodoRootPath, highVram, modelName)
                 },
                 comfyHost = comfyuiIP.stringValue,
@@ -609,7 +618,7 @@ namespace KimodoUnityMotionTools.ProjectEditor
         private void DrawBridgeModelSelector()
         {
             string current = string.IsNullOrWhiteSpace(bridgeModelName.stringValue) ? "Kimodo-SOMA-RP-v1" : bridgeModelName.stringValue.Trim();
-            string[] options = KimodoServerLifecycleManager.SupportedModelNames;
+            string[] options = KimodoBridgeController.SupportedModelNames;
             int idx = Array.IndexOf(options, current);
             if (idx < 0)
             {
@@ -622,10 +631,10 @@ namespace KimodoUnityMotionTools.ProjectEditor
 
         private void DrawEstimatedSetupTimeHint()
         {
-            string runtimeRoot = KimodoServerLifecycleManager.GetRuntimeRootPath();
+            string runtimeRoot = KimodoBridgeController.GetRuntimeRootPath();
             bool highVram = clip != null && clip.bridgeVramMode == KimodoBridgeVramMode.High;
             string modelName = clip == null || string.IsNullOrWhiteSpace(clip.bridgeModelName) ? "Kimodo-SOMA-RP-v1" : clip.bridgeModelName.Trim();
-            if (!KimodoServerLifecycleManager.TryGetModelMissingSetupMinutes(runtimeRoot, highVram, modelName, out int minutes))
+            if (!KimodoBridgeController.TryGetModelMissingSetupMinutes(runtimeRoot, highVram, modelName, out int minutes))
             {
                 return;
             }
@@ -1158,4 +1167,5 @@ namespace KimodoUnityMotionTools.ProjectEditor
 
     }
 }
+
 
