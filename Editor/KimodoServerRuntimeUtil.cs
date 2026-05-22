@@ -1,10 +1,7 @@
 ﻿using System;
 using System.Collections.Generic;
 using System.IO;
-using System.Net.Sockets;
-using System.Text;
 using KimodoUnityMotionTools.Bridge;
-using Newtonsoft.Json.Linq;
 using UnityEditor;
 using UnityEditor.PackageManager;
 using PackageInfo = UnityEditor.PackageManager.PackageInfo;
@@ -19,7 +16,6 @@ namespace KimodoUnityMotionTools.ProjectEditor
         {
             public string Name;
             public string DirectoryPath;
-            public long SizeBytes;
         }
 
         internal static readonly string[] SupportedModelNames =
@@ -130,78 +126,6 @@ namespace KimodoUnityMotionTools.ProjectEditor
             }
         }
 
-        internal static bool TryReadServerPort(string runtimeRoot, out string host, out int port)
-        {
-            string portFile = Path.Combine(runtimeRoot, "serverport");
-            return BridgeEndpointResolver.TryReadServerEndpointFromFile(
-                portFile,
-                "127.0.0.1",
-                out host,
-                out port,
-                out _);
-        }
-
-        internal static bool IsServerResponsive(string host, int port)
-        {
-            try
-            {
-                const int connectTimeoutMs = 1500;
-                const int ioTimeoutMs = 1200;
-                using var client = new TcpClient();
-                IAsyncResult ar = client.BeginConnect(host, port, null, null);
-                if (!ar.AsyncWaitHandle.WaitOne(TimeSpan.FromMilliseconds(connectTimeoutMs)))
-                {
-                    return false;
-                }
-                client.EndConnect(ar);
-                client.ReceiveTimeout = ioTimeoutMs;
-                client.SendTimeout = ioTimeoutMs;
-                using NetworkStream stream = client.GetStream();
-                stream.ReadTimeout = ioTimeoutMs;
-                stream.WriteTimeout = ioTimeoutMs;
-                using var writer = new StreamWriter(stream, new UTF8Encoding(false), 1024, leaveOpen: true) { AutoFlush = true };
-                using var reader = new StreamReader(stream, Encoding.UTF8, false, 1024, leaveOpen: true);
-                writer.WriteLine("{\"cmd\":\"ping\"}");
-                string line = reader.ReadLine();
-                if (string.IsNullOrWhiteSpace(line))
-                {
-                    return false;
-                }
-
-                JObject obj = JObject.Parse(line);
-                string status = obj.Value<string>("status") ?? string.Empty;
-                return string.Equals(status, "pong", StringComparison.OrdinalIgnoreCase)
-                    || string.Equals(status, "loading", StringComparison.OrdinalIgnoreCase);
-            }
-            catch
-            {
-                return false;
-            }
-        }
-
-        internal static bool TrySendQuit(string host, int port)
-        {
-            try
-            {
-                const int ioTimeoutMs = 1200;
-                using var client = new TcpClient(host, port);
-                client.ReceiveTimeout = ioTimeoutMs;
-                client.SendTimeout = ioTimeoutMs;
-                using NetworkStream stream = client.GetStream();
-                stream.ReadTimeout = ioTimeoutMs;
-                stream.WriteTimeout = ioTimeoutMs;
-                using var writer = new StreamWriter(stream, new UTF8Encoding(false), 1024, leaveOpen: true) { AutoFlush = true };
-                using var reader = new StreamReader(stream, Encoding.UTF8, false, 1024, leaveOpen: true);
-                writer.WriteLine("{\"cmd\":\"quit\"}");
-                _ = reader.ReadLine();
-                return true;
-            }
-            catch
-            {
-                return false;
-            }
-        }
-
         internal static List<InstalledModelInfo> GetInstalledModels(string runtimeRoot)
         {
             var result = new List<InstalledModelInfo>();
@@ -225,56 +149,12 @@ namespace KimodoUnityMotionTools.ProjectEditor
                 result.Add(new InstalledModelInfo
                 {
                     Name = name,
-                    DirectoryPath = dir,
-                    SizeBytes = GetDirectorySizeSafe(dir)
+                    DirectoryPath = dir
                 });
             }
 
             result.Sort((a, b) => string.Compare(a.Name, b.Name, StringComparison.OrdinalIgnoreCase));
             return result;
-        }
-
-        internal static long GetDirectorySizeSafe(string root)
-        {
-            if (!Directory.Exists(root))
-            {
-                return 0L;
-            }
-
-            long total = 0L;
-            try
-            {
-                foreach (string file in Directory.GetFiles(root, "*", SearchOption.AllDirectories))
-                {
-                    try
-                    {
-                        total += new FileInfo(file).Length;
-                    }
-                    catch
-                    {
-                        // ignore
-                    }
-                }
-            }
-            catch
-            {
-                // ignore
-            }
-
-            return total;
-        }
-
-        internal static string FormatBytes(long bytes)
-        {
-            double v = bytes;
-            string[] units = { "B", "KB", "MB", "GB", "TB" };
-            int idx = 0;
-            while (v >= 1024.0 && idx < units.Length - 1)
-            {
-                v /= 1024.0;
-                idx++;
-            }
-            return $"{v:0.##} {units[idx]}";
         }
 
         internal static bool IsSelectedBridgeModelInstalled(string runtimeRoot, string modelName)

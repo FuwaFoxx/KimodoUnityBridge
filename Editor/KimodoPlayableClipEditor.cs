@@ -59,11 +59,11 @@ namespace KimodoUnityMotionTools.ProjectEditor
         private int lastSubmittedSeed = int.MinValue;
         private string lastConstraintsPath = string.Empty;
         private string lastRetargetMode = "SOMA Fallback";
-        private bool bridgeEnvAutoRetryInProgress;
         private bool bridgeStatusQueryInFlight;
         private int bridgeStatusQueryVersion;
         private double nextBridgeStatusQueryAt;
         private bool bridgeRunningCached;
+        private bool bridgePortDiscoveredCached;
         private bool bridgeStatusReady;
 
         private void OnEnable()
@@ -258,7 +258,8 @@ namespace KimodoUnityMotionTools.ProjectEditor
                     EditorGUILayout.LabelField("Bridge status: checking...", EditorStyles.miniLabel);
                 }
 
-                EditorGUI.BeginDisabledGroup(!bridgeRunningCached);
+                bool closeAllowed = bridgeRunningCached || bridgePortDiscoveredCached || isGenerating;
+                EditorGUI.BeginDisabledGroup(!closeAllowed);
                 if (GUILayout.Button("Close Bridge Server", GUILayout.Height(22)))
                 {
                     _ = CloseBridgeServerAndRefreshStatusAsync();
@@ -298,6 +299,7 @@ namespace KimodoUnityMotionTools.ProjectEditor
         private async Task QueryBridgeStatusAsync(string runtimeRoot, int queryVersion)
         {
             bool running = false;
+            bool hasPort = false;
             try
             {
                 running = await Task.Run(() =>
@@ -312,12 +314,14 @@ namespace KimodoUnityMotionTools.ProjectEditor
                         return false;
                     }
 
+                    hasPort = true;
                     return KimodoBridgeController.IsServerResponsive(host, port);
                 });
             }
             catch
             {
                 running = false;
+                hasPort = false;
             }
 
             if (queryVersion != bridgeStatusQueryVersion)
@@ -326,6 +330,7 @@ namespace KimodoUnityMotionTools.ProjectEditor
             }
 
             bridgeRunningCached = running;
+            bridgePortDiscoveredCached = hasPort;
             bridgeStatusReady = true;
             bridgeStatusQueryInFlight = false;
             Repaint();
@@ -436,8 +441,6 @@ namespace KimodoUnityMotionTools.ProjectEditor
             lastStatus = $"Generating: {motionPrompt.stringValue}";
             generationCts = new CancellationTokenSource();
             Repaint();
-            bool retryAfterReset = false;
-
             try
             {
                 UnityEngine.Timeline.TimelineClip timelineClip = FindTimelineClipForAsset(clip);
@@ -481,7 +484,6 @@ namespace KimodoUnityMotionTools.ProjectEditor
                 lastError = e.Message;
                 lastStatus = "Generation failed.";
                 Debug.LogError($"[Kimodo] Generate failed: {e}");
-                retryAfterReset = await TryHandleBridgeBuildFailureAndMaybeRetryAsync();
             }
             finally
             {
@@ -489,70 +491,6 @@ namespace KimodoUnityMotionTools.ProjectEditor
                 CancelGenerationInternal();
                 EditorUtility.ClearProgressBar();
                 Repaint();
-            }
-
-            if (retryAfterReset)
-            {
-                try
-                {
-                    await GenerateAsync();
-                }
-                finally
-                {
-                    bridgeEnvAutoRetryInProgress = false;
-                }
-            }
-        }
-
-        private async Task<bool> TryHandleBridgeBuildFailureAndMaybeRetryAsync()
-        {
-            if (clip == null || clip.generationBackend != KimodoGenerationBackend.KimodoBridge)
-            {
-                return false;
-            }
-
-            if (bridgeEnvAutoRetryInProgress)
-            {
-                return false;
-            }
-
-            string runtimeRoot = KimodoBridgeController.GetRuntimeRootPath();
-            if (KimodoBridgeController.IsSetupRunning(runtimeRoot))
-            {
-                return false;
-            }
-
-            bool shouldReset = EditorUtility.DisplayDialog(
-                "Kimodo",
-                $"Build environment failed. Delete [{runtimeRoot}] and regenerate?",
-                "Delete and Retry",
-                "Cancel");
-            if (!shouldReset)
-            {
-                return false;
-            }
-
-            bridgeEnvAutoRetryInProgress = true;
-            try
-            {
-                await KimodoBridgeController.CloseServerAsync();
-                if (Directory.Exists(runtimeRoot))
-                {
-                    Directory.Delete(runtimeRoot, true);
-                }
-
-                lastError = string.Empty;
-                lastStatus = "Runtime folder removed. Regenerating...";
-                Repaint();
-                return true;
-            }
-            catch (Exception deleteException)
-            {
-                bridgeEnvAutoRetryInProgress = false;
-                lastError = $"Failed to reset runtime folder: {deleteException.Message}";
-                lastStatus = "Generation failed.";
-                Repaint();
-                return false;
             }
         }
 
@@ -684,6 +622,7 @@ namespace KimodoUnityMotionTools.ProjectEditor
         {
             await KimodoBridgeController.CloseServerAsync();
             bridgeRunningCached = false;
+            bridgePortDiscoveredCached = false;
             bridgeStatusReady = true;
             ScheduleBridgeStatusQuery(force: true);
             Repaint();

@@ -321,7 +321,7 @@ namespace KimodoUnityMotionTools.Tests
                 throw new NotSupportedException($"Unsupported script extension: {ext}");
             }
 
-            return Process.Start(psi);
+            return BridgeProcessLauncher.StartWithLogging(psi);
         }
 
         internal static async Task WaitForNoRuntimeProcessesAsync(string runtimeRoot, TimeSpan timeout, KimodoRuntimeScope scope)
@@ -357,7 +357,7 @@ namespace KimodoUnityMotionTools.Tests
                     return;
                 }
 
-                if (!KimodoServerRuntimeUtil.TryReadServerPort(runtimeRoot, out string host, out int port))
+                if (!BridgeRuntimeControl.TryReadServerEndpoint(runtimeRoot, out string host, out int port))
                 {
                     return;
                 }
@@ -370,7 +370,7 @@ namespace KimodoUnityMotionTools.Tests
                 await Task.Delay(250);
             }
 
-            if (!KimodoServerRuntimeUtil.TryReadServerPort(runtimeRoot, out string finalHost, out int finalPort))
+            if (!BridgeRuntimeControl.TryReadServerEndpoint(runtimeRoot, out string finalHost, out int finalPort))
             {
                 return;
             }

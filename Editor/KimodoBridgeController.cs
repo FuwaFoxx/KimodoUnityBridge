@@ -17,7 +17,6 @@ namespace KimodoUnityMotionTools.ProjectEditor
         {
             public string Name;
             public string DirectoryPath;
-            public long SizeBytes;
         }
 
         private static KimodoRuntimeGenerationService sharedRuntimeGenerationService;
@@ -72,11 +71,6 @@ namespace KimodoUnityMotionTools.ProjectEditor
             return KimodoServerRuntimeUtil.ResolveStartScript(runtimeRoot);
         }
 
-        internal static string ResolveSetupScript(string runtimeRoot)
-        {
-            return KimodoServerRuntimeUtil.ResolveSetupScript(runtimeRoot);
-        }
-
         internal static string ResolveRuntimeRootOrThrow()
         {
             string runtimeRoot = GetRuntimeRootPath();
@@ -101,29 +95,6 @@ namespace KimodoUnityMotionTools.ProjectEditor
                 $"Bridge launcher not found under runtime root: {runtimeRoot}. Expected new pipeline launcher: run_server.bat or bash/start_server.bat.");
         }
 
-        internal static string ResolveSetupScriptOrThrow(string runtimeRoot)
-        {
-            string setup = ResolveSetupScript(runtimeRoot);
-            if (!string.IsNullOrWhiteSpace(setup) && File.Exists(setup))
-            {
-                return Path.GetFullPath(setup);
-            }
-
-            throw new FileNotFoundException(
-                $"Setup script not found under runtime root: {runtimeRoot}. Only new pipeline setup is supported.");
-        }
-
-        internal static bool IsSetupRunning(string runtimeRoot)
-        {
-            if (string.IsNullOrWhiteSpace(runtimeRoot))
-            {
-                return false;
-            }
-
-            string setupLockPath = Path.Combine(runtimeRoot, ".setup.lock");
-            return File.Exists(setupLockPath);
-        }
-
         internal static bool IsRuntimeMaintenanceInProgress => runtimeMaintenanceDepth > 0;
 
         internal static IDisposable EnterRuntimeMaintenanceScope()
@@ -134,17 +105,17 @@ namespace KimodoUnityMotionTools.ProjectEditor
 
         internal static bool TryReadServerPort(string runtimeRoot, out string host, out int port)
         {
-            return KimodoServerRuntimeUtil.TryReadServerPort(runtimeRoot, out host, out port);
+            return BridgeRuntimeControl.TryReadServerEndpoint(runtimeRoot, out host, out port);
         }
 
         internal static bool IsServerResponsive(string host, int port)
         {
-            return KimodoServerRuntimeUtil.IsServerResponsive(host, port);
+            return BridgeRuntimeControl.IsServerResponsive(host, port);
         }
 
         internal static bool TrySendQuit(string host, int port)
         {
-            return KimodoServerRuntimeUtil.TrySendQuit(host, port);
+            return BridgeRuntimeControl.TrySendQuit(host, port);
         }
 
         internal static List<InstalledModelInfo> GetInstalledModels(string runtimeRoot)
@@ -157,22 +128,11 @@ namespace KimodoUnityMotionTools.ProjectEditor
                 result.Add(new InstalledModelInfo
                 {
                     Name = item.Name,
-                    DirectoryPath = item.DirectoryPath,
-                    SizeBytes = item.SizeBytes
+                    DirectoryPath = item.DirectoryPath
                 });
             }
 
             return result;
-        }
-
-        internal static long GetDirectorySizeSafe(string root)
-        {
-            return KimodoServerRuntimeUtil.GetDirectorySizeSafe(root);
-        }
-
-        internal static string FormatBytes(long bytes)
-        {
-            return KimodoServerRuntimeUtil.FormatBytes(bytes);
         }
 
         internal static bool IsModelInstalled(string runtimeRoot, string modelName, string modelsRootOverride = null)
@@ -440,16 +400,6 @@ namespace KimodoUnityMotionTools.ProjectEditor
             {
                 isClosing = false;
             }
-        }
-
-        private static void OnPlayModeStateChanged(PlayModeStateChange state)
-        {
-            // Keep force-quit capability only; do not auto-close on play mode transitions.
-        }
-
-        private static void OnEditorQuitting()
-        {
-            // Keep force-quit capability only; do not auto-close automatically.
         }
 
         private sealed class RuntimeMaintenanceScope : IDisposable

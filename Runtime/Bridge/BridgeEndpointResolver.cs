@@ -20,41 +20,39 @@ namespace KimodoUnityMotionTools.Bridge
             }
 
             string logDir = Path.Combine(runtimeRoot, "log");
-            if (!Directory.Exists(logDir))
-            {
-                return string.Empty;
-            }
-
             try
             {
-                string runServerLog = Path.Combine(logDir, "run_server.log");
-                if (File.Exists(runServerLog))
+                if (Directory.Exists(logDir))
                 {
-                    return runServerLog;
-                }
+                    string bridgeServerLog = Path.Combine(logDir, "bridge_server.log");
+                    if (File.Exists(bridgeServerLog))
+                    {
+                        return bridgeServerLog;
+                    }
 
-                string bridgeServerLog = Path.Combine(logDir, "bridge_server.log");
-                if (File.Exists(bridgeServerLog))
-                {
-                    return bridgeServerLog;
-                }
+                    string runServerLog = Path.Combine(logDir, "run_server.log");
+                    if (File.Exists(runServerLog))
+                    {
+                        return runServerLog;
+                    }
 
-                string bridgeRuntimeLog = Path.Combine(logDir, "test_input_log.log");
-                if (File.Exists(bridgeRuntimeLog))
-                {
-                    return bridgeRuntimeLog;
-                }
+                    string bridgeRuntimeLog = Path.Combine(logDir, "test_input_log.log");
+                    if (File.Exists(bridgeRuntimeLog))
+                    {
+                        return bridgeRuntimeLog;
+                    }
 
-                string[] bridgeLogs = Directory.GetFiles(logDir, "unity_bridge_*.log");
-                if (bridgeLogs.Length > 0)
-                {
-                    Array.Sort(bridgeLogs, (a, b) => File.GetLastWriteTimeUtc(b).CompareTo(File.GetLastWriteTimeUtc(a)));
-                    return bridgeLogs[0];
+                    string[] bridgeLogs = Directory.GetFiles(logDir, "unity_bridge_*.log");
+                    if (bridgeLogs.Length > 0)
+                    {
+                        Array.Sort(bridgeLogs, (a, b) => File.GetLastWriteTimeUtc(b).CompareTo(File.GetLastWriteTimeUtc(a)));
+                        return bridgeLogs[0];
+                    }
                 }
             }
             catch
             {
-                return string.Empty;
+                // fall through to default path
             }
 
             // Default bridge log path used by bridge_server.py when KIMODO_BRIDGE_LOG is not provided.

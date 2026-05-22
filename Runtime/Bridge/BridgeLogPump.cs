@@ -1,4 +1,5 @@
 using System;
+using System.Diagnostics;
 using System.IO;
 using System.Text;
 using System.Threading;
@@ -50,23 +51,27 @@ namespace KimodoUnityMotionTools.Bridge
         {
             try
             {
-                DateTime waitUntil = DateTime.UtcNow.AddSeconds(120);
-                while (!token.IsCancellationRequested && !File.Exists(logPath))
+                string fullLogPath = Path.GetFullPath(logPath);
+                string logFileName = Path.GetFileName(fullLogPath);
+                var waitWatch = Stopwatch.StartNew();
+                const int waitTimeoutMs = 120000;
+                while (!token.IsCancellationRequested && !File.Exists(fullLogPath))
                 {
-                    if (DateTime.UtcNow >= waitUntil)
+                    if (waitWatch.ElapsedMilliseconds >= waitTimeoutMs)
                     {
+                        onLine($"[BridgeLogPump] wait timeout for '{logFileName}'.");
                         return;
                     }
 
                     await Task.Delay(100, token);
                 }
 
-                if (!File.Exists(logPath))
+                if (!File.Exists(fullLogPath))
                 {
                     return;
                 }
 
-                using var fs = new FileStream(logPath, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete);
+                using var fs = new FileStream(fullLogPath, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete);
                 if (fs.CanSeek)
                 {
                     fs.Seek(0, SeekOrigin.End);

@@ -31,7 +31,7 @@ namespace KimodoUnityMotionTools.Bridge
             return new ProcessStartInfo
             {
                 FileName = "cmd.exe",
-                Arguments = $"/d /c \"call {qLauncher} {args}\"",
+                Arguments = $"/d /c \"set KIMODO_SERVER_WINDOW_STYLE=Hidden && call {qLauncher} {args}\"",
                 UseShellExecute = false,
                 CreateNoWindow = true,
                 WorkingDirectory = Path.GetDirectoryName(launcherPath) ?? Environment.CurrentDirectory

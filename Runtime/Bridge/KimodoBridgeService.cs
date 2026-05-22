@@ -100,6 +100,7 @@ namespace KimodoUnityMotionTools.Bridge
                 settings.highVram,
                 settings.forceSetup,
                 settings.modelsRoot);
+            progress?.Invoke("Bridge process launched.");
             StartLogPump(BridgeEndpointResolver.ResolveAttachLogPath(settings.runtimeRoot), progress);
 
             try
@@ -295,20 +296,17 @@ namespace KimodoUnityMotionTools.Bridge
             }
 
             StopSideLogPumps();
-            Debug.Log($"[KimodoBridge][LogPump] runtimeRoot={settings.runtimeRoot}");
-            Debug.Log($"[KimodoBridge][LogPump] bridgeLog={logPath}");
-            Debug.Log($"[KimodoBridge][LogPump] bridgeServerLog={Path.Combine(settings.runtimeRoot, "log", "bridge_server.log")}");
-            Debug.Log($"[KimodoBridge][LogPump] setupLog={Path.Combine(settings.runtimeRoot, "log", "setup.log")}");
-            Debug.Log($"[KimodoBridge][LogPump] downloadLog={Path.Combine(settings.runtimeRoot, "log", "download_model.log")}");
+            string mainLogFullPath = GetNormalizedPathOrEmpty(logPath);
             logPump.Start(logPath, line =>
             {
                 string msg = $"[Bridge] {line}";
                 progress?.Invoke(msg);
                 Debug.Log(msg);
             });
-            StartSideLogPump(Path.Combine(settings.runtimeRoot, "log", "bridge_server.log"), "[BridgeServer]", progress);
-            StartSideLogPump(Path.Combine(settings.runtimeRoot, "log", "setup.log"), "[Setup]", progress);
-            StartSideLogPump(Path.Combine(settings.runtimeRoot, "log", "download_model.log"), "[Download]", progress);
+            StartSideLogPumpIfDifferent(Path.Combine(settings.runtimeRoot, "log", "bridge_server.log"), "[BridgeServer]", mainLogFullPath, progress);
+            StartSideLogPumpIfDifferent(Path.Combine(settings.runtimeRoot, "log", "run_server.log"), "[RunServer]", mainLogFullPath, progress);
+            StartSideLogPumpIfDifferent(Path.Combine(settings.runtimeRoot, "log", "setup.log"), "[Setup]", mainLogFullPath, progress);
+            StartSideLogPumpIfDifferent(Path.Combine(settings.runtimeRoot, "log", "download_model.log"), "[Download]", mainLogFullPath, progress);
         }
 
         private void StopLogPump()
@@ -332,6 +330,36 @@ namespace KimodoUnityMotionTools.Bridge
                 progress?.Invoke(msg);
                 Debug.Log(msg);
             });
+        }
+
+        private void StartSideLogPumpIfDifferent(string logPath, string tag, string mainLogFullPath, Action<string> progress)
+        {
+            string sideLogFullPath = GetNormalizedPathOrEmpty(logPath);
+            if (!string.IsNullOrWhiteSpace(mainLogFullPath) &&
+                !string.IsNullOrWhiteSpace(sideLogFullPath) &&
+                string.Equals(mainLogFullPath, sideLogFullPath, StringComparison.OrdinalIgnoreCase))
+            {
+                return;
+            }
+
+            StartSideLogPump(logPath, tag, progress);
+        }
+
+        private static string GetNormalizedPathOrEmpty(string path)
+        {
+            if (string.IsNullOrWhiteSpace(path))
+            {
+                return string.Empty;
+            }
+
+            try
+            {
+                return Path.GetFullPath(path.Trim());
+            }
+            catch
+            {
+                return string.Empty;
+            }
         }
 
         private void StopSideLogPumps()
