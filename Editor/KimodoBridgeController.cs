@@ -19,6 +19,26 @@ namespace KimodoUnityMotionTools.ProjectEditor
             public string DirectoryPath;
         }
 
+        internal readonly struct ServerStatusSnapshot
+        {
+            public readonly bool Ready;
+            public readonly bool Running;
+            public readonly bool HasPort;
+            public readonly bool QueryInFlight;
+            public readonly string Host;
+            public readonly int Port;
+
+            public ServerStatusSnapshot(bool ready, bool running, bool hasPort, bool queryInFlight, string host, int port)
+            {
+                Ready = ready;
+                Running = running;
+                HasPort = hasPort;
+                QueryInFlight = queryInFlight;
+                Host = host ?? "127.0.0.1";
+                Port = port;
+            }
+        }
+
         private static KimodoRuntimeGenerationService sharedRuntimeGenerationService;
         private static string currentServiceRuntimeRoot = string.Empty;
         private static string currentServiceLauncherPath = string.Empty;
@@ -29,29 +49,54 @@ namespace KimodoUnityMotionTools.ProjectEditor
         private static bool isClosing;
         private static bool isRecovering;
         private static int runtimeMaintenanceDepth;
+        private static readonly object serverStateGate = new object();
+        private static bool serverRunningCached;
+        private static bool serverHasPortCached;
+        private static string serverHostCached = "127.0.0.1";
+        private static int serverPortCached = -1;
+        private static bool serverStateReady;
+        private static bool serverStateQueryInFlight;
+        private static int serverStateQueryVersion;
+        private static double nextServerStateQueryAt;
+
+        private const double ServerStateQueryCooldownSeconds = 2.0;
 
         static KimodoBridgeController()
         {
             EditorApplication.delayCall += RecoverBridgeAfterDomainReload;
+            AssemblyReloadEvents.beforeAssemblyReload += HandleBeforeAssemblyReload;
+            EditorApplication.quitting += HandleEditorQuitting;
         }
 
         internal static bool IsServerRunning
         {
             get
             {
-                string runtimeRoot = GetRuntimeRootPath();
-                if (!Directory.Exists(runtimeRoot))
+                RequestServerStateRefresh(force: false);
+                lock (serverStateGate)
                 {
-                    return false;
+                    return serverStateReady && serverRunningCached;
                 }
-
-                if (!TryReadServerPort(runtimeRoot, out string host, out int port))
-                {
-                    return false;
-                }
-
-                return IsServerResponsive(host, port);
             }
+        }
+
+        internal static ServerStatusSnapshot GetServerStatusSnapshot()
+        {
+            lock (serverStateGate)
+            {
+                return new ServerStatusSnapshot(
+                    ready: serverStateReady,
+                    running: serverRunningCached,
+                    hasPort: serverHasPortCached,
+                    queryInFlight: serverStateQueryInFlight,
+                    host: serverHostCached,
+                    port: serverPortCached);
+            }
+        }
+
+        internal static void RequestServerStateRefresh(bool force)
+        {
+            ScheduleServerStateRefresh(force);
         }
 
         internal static string[] SupportedModelNames => KimodoServerRuntimeUtil.SupportedModelNames;
@@ -108,14 +153,25 @@ namespace KimodoUnityMotionTools.ProjectEditor
             return BridgeRuntimeControl.TryReadServerEndpoint(runtimeRoot, out host, out port);
         }
 
-        internal static bool IsServerResponsive(string host, int port)
+        internal static async Task<bool> IsServerResponsiveAsync(string host, int port, CancellationToken token)
         {
-            return BridgeRuntimeControl.IsServerResponsive(host, port);
+            return await BridgeRuntimeControl.IsServerResponsiveAsync(
+                host,
+                port,
+                BridgeRuntimeSettings.DefaultStatusConnectTimeoutMs,
+                BridgeRuntimeSettings.DefaultStatusIoTimeoutMs,
+                acceptLoading: true,
+                token: token);
         }
 
-        internal static bool TrySendQuit(string host, int port)
+        internal static async Task<bool> TrySendQuitAsync(string host, int port, CancellationToken token)
         {
-            return BridgeRuntimeControl.TrySendQuit(host, port);
+            return await BridgeRuntimeControl.TrySendQuitAsync(
+                host,
+                port,
+                BridgeRuntimeSettings.DefaultStatusConnectTimeoutMs,
+                BridgeRuntimeSettings.DefaultStatusIoTimeoutMs,
+                token);
         }
 
         internal static List<InstalledModelInfo> GetInstalledModels(string runtimeRoot)
@@ -173,7 +229,7 @@ namespace KimodoUnityMotionTools.ProjectEditor
             bool highVram,
             string modelsRoot,
             bool forceSetup = false,
-            int startupTimeoutMs = 600000)
+            int startupTimeoutMs = BridgeRuntimeSettings.DefaultStartupTimeoutMs)
         {
             string resolvedRuntimeRoot = Path.GetFullPath(runtimeRoot ?? string.Empty);
             string resolvedLauncherPath = Path.GetFullPath(launcherPath ?? string.Empty);
@@ -205,16 +261,14 @@ namespace KimodoUnityMotionTools.ProjectEditor
 
             var settings = new KimodoRuntimeGenerationSettings
             {
-                bridgeSettings = new BridgeRuntimeSettings
-                {
-                    runtimeRoot = resolvedRuntimeRoot,
-                    launcherPath = resolvedLauncherPath,
-                    modelName = resolvedModelName,
-                    highVram = highVram,
-                    forceSetup = forceSetup,
-                    modelsRoot = resolvedModelsRoot,
-                    startupTimeoutMs = Math.Max(30000, startupTimeoutMs)
-                },
+                bridgeSettings = CreateBridgeSettings(
+                    runtimeRoot: resolvedRuntimeRoot,
+                    launcherPath: resolvedLauncherPath,
+                    modelName: resolvedModelName,
+                    highVram: highVram,
+                    forceSetup: forceSetup,
+                    modelsRoot: resolvedModelsRoot,
+                    startupTimeoutMs: Math.Max(30000, startupTimeoutMs)),
                 comfyWorkflowResourceName = "kimodo-unity-workflow"
             };
 
@@ -249,7 +303,7 @@ namespace KimodoUnityMotionTools.ProjectEditor
                     return;
                 }
 
-                if (!IsServerResponsive(host, port))
+                if (!await IsServerResponsiveAsync(host, port, CancellationToken.None))
                 {
                     return;
                 }
@@ -262,13 +316,14 @@ namespace KimodoUnityMotionTools.ProjectEditor
 
                 var settings = new KimodoRuntimeGenerationSettings
                 {
-                    bridgeSettings = new BridgeRuntimeSettings
-                    {
-                        runtimeRoot = runtimeRoot,
-                        launcherPath = launcherPath,
-                        modelName = "Kimodo-SOMA-RP-v1",
-                        highVram = false
-                    }
+                    bridgeSettings = CreateBridgeSettings(
+                        runtimeRoot: runtimeRoot,
+                        launcherPath: launcherPath,
+                        modelName: "Kimodo-SOMA-RP-v1",
+                        highVram: false,
+                        forceSetup: false,
+                        modelsRoot: string.Empty,
+                        startupTimeoutMs: BridgeRuntimeSettings.DefaultStartupTimeoutMs)
                 };
                 using var bridge = new KimodoBridgeService(settings.bridgeSettings);
                 _ = await bridge.AttachAsync(message => UnityEngine.Debug.Log($"[KimodoBridge] {message}"), CancellationToken.None);
@@ -293,14 +348,14 @@ namespace KimodoUnityMotionTools.ProjectEditor
             Action<string> progress,
             CancellationToken token)
         {
-            float startupTimeoutSeconds = 600f;
+            float startupTimeoutSeconds = BridgeRuntimeSettings.DefaultStartupTimeoutMs / 1000f;
             int points = KimodoServerRuntimeUtil.EstimateMissingConfigPoints(kimodoRootPath, highVram, modelName, modelsRoot);
             if (points > 0)
             {
                 // Use estimated setup duration as startup wait budget on first/missing-model runs.
                 // Keep a 10-minute floor to avoid premature timeout on slower disks/networks.
                 int minutes = Math.Max(3, points * 3);
-                startupTimeoutSeconds = Math.Max(600f, minutes * 60f);
+                startupTimeoutSeconds = Math.Max(BridgeRuntimeSettings.DefaultStartupTimeoutMs / 1000f, minutes * 60f);
             }
 
             KimodoRuntimeGenerationService runtimeService = GetOrCreateRuntimeGenerationService(
@@ -332,12 +387,12 @@ namespace KimodoUnityMotionTools.ProjectEditor
                 throw new ArgumentNullException(nameof(request));
             }
 
-            int startupTimeoutMs = 600000;
+            int startupTimeoutMs = BridgeRuntimeSettings.DefaultStartupTimeoutMs;
             int points = KimodoServerRuntimeUtil.EstimateMissingConfigPoints(kimodoRootPath, highVram, modelName, modelsRoot);
             if (points > 0)
             {
                 int minutes = Math.Max(3, points * 3);
-                startupTimeoutMs = Math.Max(startupTimeoutMs, (int)Math.Round(Math.Max(600f, minutes * 60f) * 1000f));
+                startupTimeoutMs = Math.Max(startupTimeoutMs, (int)Math.Round(Math.Max(BridgeRuntimeSettings.DefaultStartupTimeoutMs / 1000f, minutes * 60f) * 1000f));
             }
 
             KimodoRuntimeGenerationService runtimeService = GetOrCreateRuntimeGenerationService(
@@ -377,7 +432,7 @@ namespace KimodoUnityMotionTools.ProjectEditor
                         if (TryReadServerPort(runtimeRoot, out string host, out int port))
                         {
                             // Domain reload may clear our process handle; fall back to TCP quit.
-                            TrySendQuit(host, port);
+                            await TrySendQuitAsync(host, port, CancellationToken.None);
                         }
                     }
                 }
@@ -399,7 +454,150 @@ namespace KimodoUnityMotionTools.ProjectEditor
             finally
             {
                 isClosing = false;
+                InvalidateServerStateCache();
             }
+        }
+
+        private static void HandleBeforeAssemblyReload()
+        {
+            DisposeSharedRuntimeGenerationService();
+        }
+
+        private static void HandleEditorQuitting()
+        {
+            DisposeSharedRuntimeGenerationService();
+        }
+
+        private static void DisposeSharedRuntimeGenerationService()
+        {
+            KimodoRuntimeGenerationService service = sharedRuntimeGenerationService;
+            sharedRuntimeGenerationService = null;
+            if (service == null)
+            {
+                return;
+            }
+
+            try
+            {
+                service.Dispose();
+            }
+            catch
+            {
+                // ignore
+            }
+
+            currentServiceRuntimeRoot = string.Empty;
+            currentServiceLauncherPath = string.Empty;
+            currentServiceModelName = string.Empty;
+            currentServiceModelsRoot = string.Empty;
+            currentServiceHighVram = false;
+            currentServiceForceSetup = false;
+            InvalidateServerStateCache();
+        }
+
+        private static void ScheduleServerStateRefresh(bool force)
+        {
+            double now = EditorApplication.timeSinceStartup;
+            string runtimeRoot = GetRuntimeRootPath();
+
+            lock (serverStateGate)
+            {
+                if (!force)
+                {
+                    if (serverStateQueryInFlight || now < nextServerStateQueryAt)
+                    {
+                        return;
+                    }
+                }
+
+                serverStateQueryInFlight = true;
+                nextServerStateQueryAt = now + ServerStateQueryCooldownSeconds;
+                int version = ++serverStateQueryVersion;
+                _ = RefreshServerStateAsync(runtimeRoot, version);
+            }
+        }
+
+        private static async Task RefreshServerStateAsync(string runtimeRoot, int queryVersion)
+        {
+            bool running = false;
+            bool hasPort = false;
+            string host = "127.0.0.1";
+            int port = -1;
+            try
+            {
+                if (!string.IsNullOrWhiteSpace(runtimeRoot) &&
+                    Directory.Exists(runtimeRoot) &&
+                    TryReadServerPort(runtimeRoot, out string readHost, out int readPort))
+                {
+                    hasPort = true;
+                    host = readHost;
+                    port = readPort;
+                    running = await IsServerResponsiveAsync(readHost, readPort, CancellationToken.None);
+                }
+            }
+            catch
+            {
+                running = false;
+            }
+
+            lock (serverStateGate)
+            {
+                if (queryVersion != serverStateQueryVersion)
+                {
+                    return;
+                }
+
+                serverRunningCached = running;
+                serverHasPortCached = hasPort;
+                serverHostCached = host;
+                serverPortCached = port;
+                serverStateReady = true;
+                serverStateQueryInFlight = false;
+            }
+        }
+
+        private static void InvalidateServerStateCache()
+        {
+            lock (serverStateGate)
+            {
+                serverRunningCached = false;
+                serverHasPortCached = false;
+                serverHostCached = "127.0.0.1";
+                serverPortCached = -1;
+                serverStateReady = false;
+                serverStateQueryInFlight = false;
+                serverStateQueryVersion++;
+                nextServerStateQueryAt = 0.0;
+            }
+
+            ScheduleServerStateRefresh(force: true);
+        }
+
+        private static BridgeRuntimeSettings CreateBridgeSettings(
+            string runtimeRoot,
+            string launcherPath,
+            string modelName,
+            bool highVram,
+            bool forceSetup,
+            string modelsRoot,
+            int startupTimeoutMs)
+        {
+            return new BridgeRuntimeSettings
+            {
+                runtimeRoot = runtimeRoot,
+                launcherPath = launcherPath,
+                modelName = modelName,
+                highVram = highVram,
+                forceSetup = forceSetup,
+                modelsRoot = modelsRoot,
+                startupTimeoutMs = startupTimeoutMs,
+                connectTimeoutMs = BridgeRuntimeSettings.DefaultConnectTimeoutMs,
+                ioTimeoutMs = BridgeRuntimeSettings.DefaultIoTimeoutMs,
+                modelLoadingTimeoutMs = BridgeRuntimeSettings.DefaultModelLoadingTimeoutMs,
+                modelLoadingPollIntervalMs = BridgeRuntimeSettings.DefaultModelLoadingPollIntervalMs,
+                statusConnectTimeoutMs = BridgeRuntimeSettings.DefaultStatusConnectTimeoutMs,
+                statusIoTimeoutMs = BridgeRuntimeSettings.DefaultStatusIoTimeoutMs
+            };
         }
 
         private sealed class RuntimeMaintenanceScope : IDisposable

@@ -22,7 +22,7 @@ namespace KimodoUnityMotionTools.Bridge
             }
 
             using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(token);
-            timeoutCts.CancelAfter(Math.Max(30000, startupTimeoutMs));
+            timeoutCts.CancelAfter(Math.Max(BridgeRuntimeSettings.DefaultStartupTimeoutMs / 20, startupTimeoutMs));
             CancellationToken waitToken = timeoutCts.Token;
 
             while (true)
@@ -43,7 +43,7 @@ namespace KimodoUnityMotionTools.Bridge
                     throw new Exception($"Bridge exited with code {exitCode}.");
                 }
 
-                await Task.Delay(Math.Max(100, pollIntervalMs), waitToken);
+                await Task.Delay(Math.Max(BridgeRuntimeSettings.DefaultPollIntervalMs / 2, pollIntervalMs), waitToken);
             }
         }
     }

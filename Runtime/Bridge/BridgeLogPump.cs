@@ -3,17 +3,20 @@ using System.IO;
 using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
+using UnityEngine;
 
 namespace KimodoUnityMotionTools.Bridge
 {
     public sealed class BridgeLogPump : IDisposable
     {
+        private const int StopWaitTimeoutMs = 1500;
+
         private CancellationTokenSource cts;
         private Task pumpTask;
         private SynchronizationContext callbackContext;
         private bool disposed;
 
-        public void Start(string logPath, Action<string> onLine)
+        public void Start(string logPath, Action<string> onLine, BridgeRuntimeSettings settings = null)
         {
             Stop();
             if (string.IsNullOrWhiteSpace(logPath) || onLine == null)
@@ -21,21 +24,55 @@ namespace KimodoUnityMotionTools.Bridge
                 return;
             }
 
+            int waitFileTimeoutMs = settings?.logPumpWaitFileTimeoutMs ?? BridgeRuntimeSettings.DefaultLogPumpWaitFileTimeoutMs;
+            int missingFilePollMinMs = settings?.logPumpMissingFilePollMinMs ?? BridgeRuntimeSettings.DefaultLogPumpMissingFilePollMinMs;
+            int missingFilePollMaxMs = settings?.logPumpMissingFilePollMaxMs ?? BridgeRuntimeSettings.DefaultLogPumpMissingFilePollMaxMs;
+            int idlePollMinMs = settings?.logPumpIdlePollMinMs ?? BridgeRuntimeSettings.DefaultLogPumpIdlePollMinMs;
+            int idlePollMaxMs = settings?.logPumpIdlePollMaxMs ?? BridgeRuntimeSettings.DefaultLogPumpIdlePollMaxMs;
+
             cts = new CancellationTokenSource();
             callbackContext = SynchronizationContext.Current;
-            pumpTask = Task.Run(() => PumpAsync(logPath, onLine, cts.Token, callbackContext));
+            pumpTask = Task.Run(() => PumpAsync(
+                logPath,
+                onLine,
+                cts.Token,
+                callbackContext,
+                Math.Max(1000, waitFileTimeoutMs),
+                Math.Max(30, missingFilePollMinMs),
+                Math.Max(Math.Max(30, missingFilePollMinMs), missingFilePollMaxMs),
+                Math.Max(10, idlePollMinMs),
+                Math.Max(Math.Max(10, idlePollMinMs), idlePollMaxMs)));
         }
 
         public void Stop()
         {
-            CancellationTokenSource current = cts;
+            CancellationTokenSource currentCts = cts;
+            Task currentPumpTask = pumpTask;
             cts = null;
-            if (current != null)
-            {
-                try { current.Cancel(); } catch { }
-                current.Dispose();
-            }
             pumpTask = null;
+
+            if (currentCts != null)
+            {
+                try { currentCts.Cancel(); } catch { }
+            }
+
+            if (currentPumpTask != null)
+            {
+                try
+                {
+                    Task.WhenAny(currentPumpTask, Task.Delay(StopWaitTimeoutMs)).GetAwaiter().GetResult();
+                }
+                catch (Exception e)
+                {
+                    Debug.LogWarning($"[KimodoBridge][LogPump] stop wait failed: {e.Message}");
+                }
+            }
+
+            if (currentCts != null)
+            {
+                try { currentCts.Dispose(); } catch { }
+            }
+
             callbackContext = null;
         }
 
@@ -45,6 +82,7 @@ namespace KimodoUnityMotionTools.Bridge
             {
                 return;
             }
+
             disposed = true;
             Stop();
         }
@@ -53,11 +91,17 @@ namespace KimodoUnityMotionTools.Bridge
             string logPath,
             Action<string> onLine,
             CancellationToken token,
-            SynchronizationContext callbackContext)
+            SynchronizationContext callbackContext,
+            int waitFileTimeoutMs,
+            int missingFilePollMinMs,
+            int missingFilePollMaxMs,
+            int idlePollMinMs,
+            int idlePollMaxMs)
         {
             try
             {
-                DateTime waitUntil = DateTime.UtcNow.AddSeconds(20);
+                DateTime waitUntil = DateTime.UtcNow.AddMilliseconds(waitFileTimeoutMs);
+                int missingFileDelayMs = missingFilePollMinMs;
                 while (!token.IsCancellationRequested && !File.Exists(logPath))
                 {
                     if (DateTime.UtcNow >= waitUntil)
@@ -65,7 +109,8 @@ namespace KimodoUnityMotionTools.Bridge
                         return;
                     }
 
-                    await Task.Delay(100, token);
+                    await Task.Delay(missingFileDelayMs, token);
+                    missingFileDelayMs = Math.Min(missingFilePollMaxMs, missingFileDelayMs + missingFilePollMinMs);
                 }
 
                 if (!File.Exists(logPath))
@@ -78,7 +123,9 @@ namespace KimodoUnityMotionTools.Bridge
                 {
                     fs.Seek(0, SeekOrigin.End);
                 }
+
                 using var reader = new StreamReader(fs, Encoding.UTF8, detectEncodingFromByteOrderMarks: true);
+                int idleDelayMs = idlePollMinMs;
                 while (!token.IsCancellationRequested)
                 {
                     string line = await reader.ReadLineAsync();
@@ -89,16 +136,16 @@ namespace KimodoUnityMotionTools.Bridge
                         {
                             EmitLine(onLine, callbackContext, trimmed);
                         }
+
+                        idleDelayMs = idlePollMinMs;
                         continue;
                     }
 
-                    // The producer may truncate/recreate the same log file path between runs.
-                    // If current read position is beyond current file length, rewind to start so
-                    // the pump can continue tailing new content in the recreated file.
                     if (fs.CanSeek && fs.Length < fs.Position)
                     {
                         fs.Seek(0, SeekOrigin.Begin);
                         reader.DiscardBufferedData();
+                        idleDelayMs = idlePollMinMs;
                         continue;
                     }
 
@@ -117,10 +164,13 @@ namespace KimodoUnityMotionTools.Bridge
                                 }
                             }
                         }
+
+                        idleDelayMs = idlePollMinMs;
                         continue;
                     }
 
-                    await Task.Delay(10, token);
+                    await Task.Delay(idleDelayMs, token);
+                    idleDelayMs = Math.Min(idlePollMaxMs, idleDelayMs + idlePollMinMs);
                 }
             }
             catch (OperationCanceledException)

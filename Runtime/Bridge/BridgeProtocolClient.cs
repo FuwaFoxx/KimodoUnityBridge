@@ -14,6 +14,8 @@ namespace KimodoUnityMotionTools.Bridge
         private readonly SemaphoreSlim ioLock = new SemaphoreSlim(1, 1);
         private readonly int connectTimeoutMs;
         private readonly int ioTimeoutMs;
+        private readonly int modelLoadingTimeoutMs;
+        private readonly int modelLoadingPollIntervalMs;
 
         private TcpClient sharedClient;
         private StreamReader sharedReader;
@@ -22,10 +24,16 @@ namespace KimodoUnityMotionTools.Bridge
         private int sharedPort = -1;
         private bool disposed;
 
-        public BridgeProtocolClient(int connectTimeoutMs = 3000, int ioTimeoutMs = 120000)
+        public BridgeProtocolClient(
+            int connectTimeoutMs = BridgeRuntimeSettings.DefaultConnectTimeoutMs,
+            int ioTimeoutMs = BridgeRuntimeSettings.DefaultIoTimeoutMs,
+            int modelLoadingTimeoutMs = BridgeRuntimeSettings.DefaultModelLoadingTimeoutMs,
+            int modelLoadingPollIntervalMs = BridgeRuntimeSettings.DefaultModelLoadingPollIntervalMs)
         {
             this.connectTimeoutMs = Math.Max(500, connectTimeoutMs);
             this.ioTimeoutMs = Math.Max(1000, ioTimeoutMs);
+            this.modelLoadingTimeoutMs = Math.Max(10000, modelLoadingTimeoutMs);
+            this.modelLoadingPollIntervalMs = Math.Max(100, modelLoadingPollIntervalMs);
         }
 
         public async Task<bool> PingAsync(string host, int port, CancellationToken token, bool acceptLoading)
@@ -89,12 +97,12 @@ namespace KimodoUnityMotionTools.Bridge
                 {
                     string msg = response.Value<string>("message") ?? "Model is loading.";
                     progress?.Invoke($"Bridge loading model... {msg}");
-                    if ((DateTime.UtcNow - waitStart).TotalSeconds > 600d)
+                    if ((DateTime.UtcNow - waitStart).TotalMilliseconds > modelLoadingTimeoutMs)
                     {
-                        throw new TimeoutException("Bridge model loading timeout (>600s).");
+                        throw new TimeoutException($"Bridge model loading timeout (>{modelLoadingTimeoutMs}ms).");
                     }
 
-                    await Task.Delay(1000, token);
+                    await Task.Delay(modelLoadingPollIntervalMs, token);
                     continue;
                 }
 

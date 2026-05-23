@@ -5,7 +5,6 @@ using UnityEditor.Timeline;
 using UnityEngine;
 using UnityEngine.Playables;
 using UnityEngine.Timeline;
-using KimodoUnityMotionTools.Editor;
 
 namespace KimodoUnityMotionTools.ProjectEditor
 {
@@ -19,12 +18,109 @@ namespace KimodoUnityMotionTools.ProjectEditor
 
     public static class KimodoRetargetPipeline
     {
+        private readonly struct RetargetContext
+        {
+            public readonly AnimationClip SourceSomaBoneClip;
+            public readonly Animator TargetAnimator;
+            public readonly Avatar EnsuredAvatar;
+            public readonly string AvatarSource;
+            public readonly bool HadHumanoidAvatar;
+
+            public RetargetContext(
+                AnimationClip sourceSomaBoneClip,
+                Animator targetAnimator,
+                Avatar ensuredAvatar,
+                string avatarSource,
+                bool hadHumanoidAvatar)
+            {
+                SourceSomaBoneClip = sourceSomaBoneClip;
+                TargetAnimator = targetAnimator;
+                EnsuredAvatar = ensuredAvatar;
+                AvatarSource = avatarSource;
+                HadHumanoidAvatar = hadHumanoidAvatar;
+            }
+        }
+
         public static bool TryRetargetBakedClip(
             KimodoPlayableClip playableClip,
             TimelineClip timelineClip,
             out KimodoRetargetResultMode mode,
             out string details)
         {
+            mode = KimodoRetargetResultMode.SomaFallback;
+            details = string.Empty;
+
+            if (!TryPrepareRetargetContext(playableClip, timelineClip, out RetargetContext context, out bool completed, out mode, out details))
+            {
+                return false;
+            }
+
+            if (completed)
+            {
+                return true;
+            }
+
+            if (!TryCreateSomaSamplingAnimator(playableClip, out Animator somaAnimator, out GameObject somaTempRoot, out string somaError))
+            {
+                details = $"Ensure SOMA avatar failed: {somaError}";
+                return false;
+            }
+
+            try
+            {
+                if (!TryBuildSomaMuscleClip(context.SourceSomaBoneClip, somaAnimator, out AnimationClip muscleClip, out string muscleError))
+                {
+                    details = $"SOMA->Muscle failed: {muscleError}";
+                    return false;
+                }
+
+                if (context.HadHumanoidAvatar)
+                {
+                    OverwriteClipCurves(playableClip.clip, muscleClip);
+                    mode = KimodoRetargetResultMode.HumanoidMuscle;
+                    details = $"Retarget ok (Avatar={context.AvatarSource}, Mode=HumanoidMuscle).";
+                    return true;
+                }
+
+                if (!TryBuildTargetBoneClipFromMuscle(
+                        context,
+                        muscleClip,
+                        out AnimationClip targetBoneClip,
+                        out string toBoneError))
+                {
+                    details = $"Muscle->TargetBone failed: {toBoneError}";
+                    return false;
+                }
+
+                OverwriteClipCurves(playableClip.clip, targetBoneClip);
+                mode = KimodoRetargetResultMode.TargetBone;
+                details = $"Retarget ok (Avatar={context.AvatarSource}, Mode=TargetBone).";
+                return true;
+            }
+            catch (Exception e)
+            {
+                details = $"Retarget exception: {e.Message}";
+                return false;
+            }
+            finally
+            {
+                if (somaTempRoot != null)
+                {
+                    UnityEngine.Object.DestroyImmediate(somaTempRoot);
+                }
+            }
+        }
+
+        private static bool TryPrepareRetargetContext(
+            KimodoPlayableClip playableClip,
+            TimelineClip timelineClip,
+            out RetargetContext context,
+            out bool completed,
+            out KimodoRetargetResultMode mode,
+            out string details)
+        {
+            context = default;
+            completed = false;
             mode = KimodoRetargetResultMode.SomaFallback;
             details = string.Empty;
 
@@ -46,16 +142,15 @@ namespace KimodoUnityMotionTools.ProjectEditor
                 return false;
             }
 
-            // Standard skeleton direct path: if target can directly consume current bone curves, skip avatar conversion.
             if (CanDirectWriteBoneCurves(playableClip.clip, targetAnimator))
             {
                 mode = KimodoRetargetResultMode.DirectBone;
                 details = "Direct bone write path used (compatible skeleton binding).";
+                completed = true;
                 return true;
             }
 
             bool hadHumanoidAvatar = targetAnimator.avatar != null && targetAnimator.avatar.isValid && targetAnimator.avatar.isHuman;
-
             if (!KimodoLocalAvatarUtility.TryEnsureHumanoidAvatar(
                     targetAnimator,
                     out Avatar ensuredAvatar,
@@ -66,94 +161,66 @@ namespace KimodoUnityMotionTools.ProjectEditor
                 return false;
             }
 
-            if (!TryCreateSomaSamplingAnimator(out Animator somaAnimator, out GameObject somaTempRoot, out string somaError))
+            context = new RetargetContext(playableClip.clip, targetAnimator, ensuredAvatar, avatarSource, hadHumanoidAvatar);
+            return true;
+        }
+
+        private static bool TryBuildSomaMuscleClip(
+            AnimationClip sourceSomaBoneClip,
+            Animator somaAnimator,
+            out AnimationClip muscleClip,
+            out string error)
+        {
+            muscleClip = new AnimationClip
             {
-                details = $"Ensure SOMA avatar failed: {somaError}";
+                name = $"{sourceSomaBoneClip.name}_Muscle",
+                legacy = false,
+                frameRate = sourceSomaBoneClip.frameRate > 0f ? sourceSomaBoneClip.frameRate : 30f
+            };
+
+            return TryConvertBoneClipToMuscleByAvatar(
+                sourceSomaBoneClip,
+                somaAnimator,
+                muscleClip,
+                out error,
+                sourceSomaBoneClip.frameRate);
+        }
+
+        private static bool TryBuildTargetBoneClipFromMuscle(
+            RetargetContext context,
+            AnimationClip muscleClip,
+            out AnimationClip targetBoneClip,
+            out string error)
+        {
+            targetBoneClip = new AnimationClip
+            {
+                name = $"{context.SourceSomaBoneClip.name}_TargetBone",
+                legacy = false,
+                frameRate = context.SourceSomaBoneClip.frameRate > 0f ? context.SourceSomaBoneClip.frameRate : 30f
+            };
+
+            error = string.Empty;
+            Animator targetSamplingAnimator = CreateTempAnimatorForAvatar(context.TargetAnimator, context.EnsuredAvatar, out GameObject targetTempRoot);
+            if (targetSamplingAnimator == null)
+            {
+                error = "Failed to create target sampling animator.";
                 return false;
             }
 
             try
             {
-                AnimationClip sourceSomaBoneClip = playableClip.clip;
-
-                AnimationClip muscleClip = new AnimationClip
-                {
-                    name = $"{sourceSomaBoneClip.name}_Muscle",
-                    legacy = false,
-                    frameRate = sourceSomaBoneClip.frameRate > 0f ? sourceSomaBoneClip.frameRate : 30f
-                };
-
-                if (!SOMA2Avatar.BoneClipToMuscleClip(
-                        sourceSomaBoneClip,
-                        somaAnimator,
-                        muscleClip,
-                        out string toMuscleError,
-                        sourceSomaBoneClip.frameRate))
-                {
-                    details = $"SOMA->Muscle failed: {toMuscleError}";
-                    return false;
-                }
-
-                // Keep muscle clip only when binding object already had humanoid avatar.
-                if (hadHumanoidAvatar)
-                {
-                    OverwriteClipCurves(playableClip.clip, muscleClip);
-                    mode = KimodoRetargetResultMode.HumanoidMuscle;
-                    details = $"Retarget ok (Avatar={avatarSource}, Mode=HumanoidMuscle).";
-                    return true;
-                }
-
-                // Fallback path: convert muscle back to target skeleton bone clip.
-                AnimationClip targetBoneClip = new AnimationClip
-                {
-                    name = $"{sourceSomaBoneClip.name}_TargetBone",
-                    legacy = false,
-                    frameRate = sourceSomaBoneClip.frameRate > 0f ? sourceSomaBoneClip.frameRate : 30f
-                };
-
-                Animator targetSamplingAnimator = CreateTempAnimatorForAvatar(targetAnimator, ensuredAvatar, out GameObject targetTempRoot);
-                if (targetSamplingAnimator == null)
-                {
-                    details = "Failed to create target sampling animator.";
-                    return false;
-                }
-
-                try
-                {
-                    if (!TryConvertMuscleToTargetBoneClip(
-                            muscleClip,
-                            targetSamplingAnimator,
-                            targetBoneClip,
-                            out string toBoneError,
-                            sourceSomaBoneClip.frameRate))
-                    {
-                        details = $"Muscle->TargetBone failed: {toBoneError}";
-                        return false;
-                    }
-
-                    OverwriteClipCurves(playableClip.clip, targetBoneClip);
-                    mode = KimodoRetargetResultMode.TargetBone;
-                    details = $"Retarget ok (Avatar={avatarSource}, Mode=TargetBone).";
-                    return true;
-                }
-                finally
-                {
-                    if (targetTempRoot != null)
-                    {
-                        UnityEngine.Object.DestroyImmediate(targetTempRoot);
-                    }
-                }
-            }
-            catch (Exception e)
-            {
-                details = $"Retarget exception: {e.Message}";
-                return false;
+                return TryConvertMuscleToTargetBoneClip(
+                    muscleClip,
+                    targetSamplingAnimator,
+                    targetBoneClip,
+                    out error,
+                    context.SourceSomaBoneClip.frameRate);
             }
             finally
             {
-                if (somaTempRoot != null)
+                if (targetTempRoot != null)
                 {
-                    UnityEngine.Object.DestroyImmediate(somaTempRoot);
+                    UnityEngine.Object.DestroyImmediate(targetTempRoot);
                 }
             }
         }
@@ -184,7 +251,7 @@ namespace KimodoUnityMotionTools.ProjectEditor
                 return false;
             }
 
-            if (!TryCreateSomaSamplingAnimator(out Animator somaAnimator, out GameObject somaTempRoot, out string somaError))
+            if (!TryCreateSomaSamplingAnimator(null, out Animator somaAnimator, out GameObject somaTempRoot, out string somaError))
             {
                 error = somaError;
                 return false;
@@ -298,36 +365,55 @@ namespace KimodoUnityMotionTools.ProjectEditor
             return true;
         }
 
-        private static bool TryCreateSomaSamplingAnimator(out Animator animator, out GameObject tempRoot, out string error)
+        private static bool TryCreateSomaSamplingAnimator(KimodoPlayableClip playableClip, out Animator animator, out GameObject tempRoot, out string error)
         {
             animator = null;
             tempRoot = null;
             error = string.Empty;
 
-            GameObject prefab = Resources.Load<GameObject>("SOMA_somaskel77_neutral");
-            if (prefab == null)
+            string avatarResourceName = ResolveRuntimeAvatarResourceName(playableClip);
+            Avatar runtimeAvatar = Resources.Load<Avatar>(avatarResourceName);
+            if (runtimeAvatar == null || !runtimeAvatar.isValid || !runtimeAvatar.isHuman)
             {
-                error = "Resources/SOMA_somaskel77_neutral not found.";
+                error = $"Runtime Resources avatar '{avatarResourceName}' not found or invalid humanoid avatar.";
                 return false;
             }
 
-            tempRoot = UnityEngine.Object.Instantiate(prefab);
+            tempRoot = new GameObject($"KimodoSomaSampling_{avatarResourceName}");
             tempRoot.hideFlags = HideFlags.HideAndDontSave;
             tempRoot.transform.SetPositionAndRotation(Vector3.zero, Quaternion.identity);
             tempRoot.transform.localScale = Vector3.one;
 
-            animator = tempRoot.GetComponent<Animator>();
-            if (animator == null || animator.avatar == null || !animator.avatar.isValid || !animator.avatar.isHuman)
-            {
-                error = "SOMA prefab missing valid humanoid animator/avatar.";
-                return false;
-            }
+            animator = tempRoot.AddComponent<Animator>();
+            animator.avatar = runtimeAvatar;
 
             animator.enabled = false;
             animator.applyRootMotion = false;
             animator.Rebind();
             animator.Update(0f);
             return true;
+        }
+
+        private static string ResolveRuntimeAvatarResourceName(KimodoPlayableClip playableClip)
+        {
+            string modelName = playableClip != null ? playableClip.bridgeModelName : string.Empty;
+            if (string.IsNullOrWhiteSpace(modelName))
+            {
+                return "SOMAAvatar";
+            }
+
+            string normalized = modelName.Trim().ToLowerInvariant();
+            if (normalized.Contains("smplx"))
+            {
+                return "SMPLXAvatar";
+            }
+
+            if (normalized.Contains("g1"))
+            {
+                return "G1Avatar";
+            }
+
+            return "SOMAAvatar";
         }
 
         private static Animator CreateTempAnimatorForAvatar(
@@ -539,6 +625,119 @@ namespace KimodoUnityMotionTools.ProjectEditor
             catch (Exception e)
             {
                 error = $"Convert muscle->target bone failed: {e.Message}";
+                return false;
+            }
+        }
+
+        private static bool TryConvertBoneClipToMuscleByAvatar(
+            AnimationClip sourceBoneClip,
+            Animator sourceHumanoidAnimator,
+            AnimationClip outputMuscleClip,
+            out string error,
+            float sampleRate = 30f)
+        {
+            error = string.Empty;
+            if (sourceBoneClip == null || sourceHumanoidAnimator == null || outputMuscleClip == null)
+            {
+                error = "Input clip/animator/output is null.";
+                return false;
+            }
+
+            if (sourceHumanoidAnimator.avatar == null || !sourceHumanoidAnimator.avatar.isValid || !sourceHumanoidAnimator.avatar.isHuman)
+            {
+                error = "Source animator must have valid humanoid avatar.";
+                return false;
+            }
+
+            try
+            {
+                float effectiveRate = sampleRate > 0f ? sampleRate : (sourceBoneClip.frameRate > 0f ? sourceBoneClip.frameRate : 30f);
+                float duration = sourceBoneClip.length > 0f ? sourceBoneClip.length : 1f / Mathf.Max(1f, effectiveRate);
+                int frameCount = Mathf.Max(2, Mathf.RoundToInt(duration * effectiveRate) + 1);
+
+                GameObject tempRig = UnityEngine.Object.Instantiate(sourceHumanoidAnimator.gameObject);
+                tempRig.hideFlags = HideFlags.HideAndDontSave;
+                tempRig.transform.SetPositionAndRotation(Vector3.zero, Quaternion.identity);
+                tempRig.transform.localScale = Vector3.one;
+
+                try
+                {
+                    Animator tempAnimator = tempRig.GetComponent<Animator>();
+                    if (tempAnimator == null)
+                    {
+                        error = "Failed to create source sampling animator.";
+                        return false;
+                    }
+
+                    tempAnimator.enabled = false;
+                    tempAnimator.applyRootMotion = false;
+                    tempAnimator.Rebind();
+                    tempAnimator.Update(0f);
+
+                    HumanPoseHandler poseHandler = new HumanPoseHandler(tempAnimator.avatar, tempAnimator.transform);
+                    HumanPose pose = new HumanPose();
+
+                    outputMuscleClip.ClearCurves();
+                    outputMuscleClip.legacy = false;
+                    outputMuscleClip.frameRate = effectiveRate;
+
+                    AnimationCurve[] muscleCurves = new AnimationCurve[HumanTrait.MuscleCount];
+                    for (int i = 0; i < muscleCurves.Length; i++)
+                    {
+                        muscleCurves[i] = new AnimationCurve();
+                    }
+
+                    AnimationCurve rootTx = new AnimationCurve();
+                    AnimationCurve rootTy = new AnimationCurve();
+                    AnimationCurve rootTz = new AnimationCurve();
+                    AnimationCurve rootQx = new AnimationCurve();
+                    AnimationCurve rootQy = new AnimationCurve();
+                    AnimationCurve rootQz = new AnimationCurve();
+                    AnimationCurve rootQw = new AnimationCurve();
+
+                    for (int frame = 0; frame < frameCount; frame++)
+                    {
+                        float t = FrameToTime(frame, frameCount, duration);
+                        sourceBoneClip.SampleAnimation(tempRig, t);
+                        poseHandler.GetHumanPose(ref pose);
+
+                        for (int i = 0; i < HumanTrait.MuscleCount && i < pose.muscles.Length; i++)
+                        {
+                            muscleCurves[i].AddKey(t, pose.muscles[i]);
+                        }
+
+                        rootTx.AddKey(t, pose.bodyPosition.x);
+                        rootTy.AddKey(t, pose.bodyPosition.y);
+                        rootTz.AddKey(t, pose.bodyPosition.z);
+                        rootQx.AddKey(t, pose.bodyRotation.x);
+                        rootQy.AddKey(t, pose.bodyRotation.y);
+                        rootQz.AddKey(t, pose.bodyRotation.z);
+                        rootQw.AddKey(t, pose.bodyRotation.w);
+                    }
+
+                    for (int i = 0; i < HumanTrait.MuscleCount; i++)
+                    {
+                        outputMuscleClip.SetCurve(string.Empty, typeof(Animator), MusclePropertyNames[i], muscleCurves[i]);
+                    }
+
+                    outputMuscleClip.SetCurve(string.Empty, typeof(Animator), "RootT.x", rootTx);
+                    outputMuscleClip.SetCurve(string.Empty, typeof(Animator), "RootT.y", rootTy);
+                    outputMuscleClip.SetCurve(string.Empty, typeof(Animator), "RootT.z", rootTz);
+                    outputMuscleClip.SetCurve(string.Empty, typeof(Animator), "RootQ.x", rootQx);
+                    outputMuscleClip.SetCurve(string.Empty, typeof(Animator), "RootQ.y", rootQy);
+                    outputMuscleClip.SetCurve(string.Empty, typeof(Animator), "RootQ.z", rootQz);
+                    outputMuscleClip.SetCurve(string.Empty, typeof(Animator), "RootQ.w", rootQw);
+                    outputMuscleClip.EnsureQuaternionContinuity();
+                    return true;
+                }
+                finally
+                {
+                    UnityEngine.Object.DestroyImmediate(tempRig);
+                }
+            }
+            catch (Exception e)
+            {
+                error = $"Convert source bone->muscle by avatar failed: {e.Message}";
                 return false;
             }
         }

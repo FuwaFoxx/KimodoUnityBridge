@@ -27,7 +27,11 @@ namespace KimodoUnityMotionTools.Bridge
             this.settings.Validate();
 
             IBridgePlatformProcess platform = CreatePlatformProcess(this.settings);
-            protocolClient = new BridgeProtocolClient(this.settings.connectTimeoutMs, this.settings.ioTimeoutMs);
+            protocolClient = new BridgeProtocolClient(
+                this.settings.connectTimeoutMs,
+                this.settings.ioTimeoutMs,
+                this.settings.modelLoadingTimeoutMs,
+                this.settings.modelLoadingPollIntervalMs);
             processManager = new BridgeProcessManager(platform);
             logPump = new BridgeLogPump();
             currentHost = string.IsNullOrWhiteSpace(this.settings.hostFallback) ? "127.0.0.1" : this.settings.hostFallback;
@@ -302,7 +306,7 @@ namespace KimodoUnityMotionTools.Bridge
                 string msg = $"[Bridge] {line}";
                 progress?.Invoke(msg);
                 Debug.Log(msg);
-            });
+            }, settings);
             StartSideLogPumpIfDifferent(Path.Combine(settings.runtimeRoot, "log", "bridge_server.log"), "[BridgeServer]", mainLogFullPath, progress);
             StartSideLogPumpIfDifferent(Path.Combine(settings.runtimeRoot, "log", "bridge_message.log"), "[BridgeMessage]", mainLogFullPath, progress);
             StartSideLogPumpIfDifferent(Path.Combine(settings.runtimeRoot, "log", "run_server.log"), "[RunServer]", mainLogFullPath, progress);
@@ -330,7 +334,7 @@ namespace KimodoUnityMotionTools.Bridge
                 string msg = $"{tag} {line}";
                 progress?.Invoke(msg);
                 Debug.Log(msg);
-            });
+            }, settings);
         }
 
         private void StartSideLogPumpIfDifferent(string logPath, string tag, string mainLogFullPath, Action<string> progress)

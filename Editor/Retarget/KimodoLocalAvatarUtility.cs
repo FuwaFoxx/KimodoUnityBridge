@@ -72,6 +72,14 @@ namespace KimodoUnityMotionTools.ProjectEditor
                 return false;
             }
 
+            string generatedAssetPath = AssetDatabase.GetAssetPath(generated);
+            if (!string.IsNullOrEmpty(generatedAssetPath))
+            {
+                avatar = generated;
+                source = "GeneratedImporter";
+                return true;
+            }
+
             try
             {
                 if (File.Exists(cachePath))

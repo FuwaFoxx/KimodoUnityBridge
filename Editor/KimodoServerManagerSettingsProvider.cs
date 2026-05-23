@@ -23,7 +23,10 @@ namespace KimodoUnityMotionTools.ProjectEditor
             Enabled = 1
         }
 
-        private const double ServerStatusQueryCooldownSeconds = 2.0;
+        private const float ModelListMinHeight = 120f;
+        private const float ModelListMaxHeight = 260f;
+        private const float ModelListRowHeight = 22f;
+        private const float ModelDeleteButtonWidth = 70f;
 
         private string runtimeRoot = string.Empty;
         private string resolvedModelsRoot = string.Empty;
@@ -33,9 +36,6 @@ namespace KimodoUnityMotionTools.ProjectEditor
         private bool usingCustomModelsPath;
 
         private ServerState serverState = ServerState.Disabled;
-        private bool serverStatusQueryInFlight;
-        private int serverStatusQueryVersion;
-        private double nextServerStatusQueryAt;
         private double detectHintUntilTime;
         private string serverHost = "127.0.0.1";
         private int serverPort = -1;
@@ -63,7 +63,7 @@ namespace KimodoUnityMotionTools.ProjectEditor
         {
             Refresh();
             detectHintUntilTime = EditorApplication.timeSinceStartup + 2.0;
-            ScheduleServerStateQuery(force: true);
+            KimodoBridgeController.RequestServerStateRefresh(force: true);
         }
 
         public override void OnGUI(string searchContext)
@@ -73,7 +73,7 @@ namespace KimodoUnityMotionTools.ProjectEditor
                 runtimeRoot = KimodoBridgeController.GetRuntimeRootPath();
             }
 
-            ScheduleServerStateQuery(force: false);
+            PullServerStatusFromController(forceRefresh: false);
 
             EditorGUILayout.LabelField("Kimodo Server Manager", EditorStyles.boldLabel);
             EditorGUILayout.Space(4f);
@@ -83,7 +83,7 @@ namespace KimodoUnityMotionTools.ProjectEditor
             if (GUILayout.Button("Refresh", GUILayout.Width(100f)))
             {
                 Refresh();
-                ScheduleServerStateQuery(force: true);
+                PullServerStatusFromController(forceRefresh: true);
             }
 
             if (!runtimeExists)
@@ -107,7 +107,7 @@ namespace KimodoUnityMotionTools.ProjectEditor
                     }
 
                     Refresh();
-                    ScheduleServerStateQuery(force: true);
+                    PullServerStatusFromController(forceRefresh: true);
                 }
             }
             EditorGUILayout.EndHorizontal();
@@ -175,7 +175,7 @@ namespace KimodoUnityMotionTools.ProjectEditor
             string localModelsPath = settings.LocalModelsPath;
             EditorGUILayout.BeginHorizontal();
             EditorGUI.BeginChangeCheck();
-            localModelsPath = EditorGUILayout.TextField(
+            localModelsPath = EditorGUILayout.DelayedTextField(
                 new GUIContent("Local Models Path", "Optional. Use this path for model detection list only."),
                 localModelsPath);
             bool textChanged = EditorGUI.EndChangeCheck();
@@ -281,25 +281,52 @@ namespace KimodoUnityMotionTools.ProjectEditor
             }
             else
             {
-                scroll = EditorGUILayout.BeginScrollView(scroll, GUILayout.MinHeight(120f), GUILayout.MaxHeight(260f));
-                for (int i = 0; i < models.Count; i++)
+                float viewportHeight = Mathf.Clamp(models.Count * ModelListRowHeight, ModelListMinHeight, ModelListMaxHeight);
+                scroll = EditorGUILayout.BeginScrollView(scroll, GUILayout.Height(viewportHeight));
+
+                int firstVisible = Mathf.Clamp(Mathf.FloorToInt(scroll.y / ModelListRowHeight), 0, models.Count - 1);
+                int visibleCount = Mathf.CeilToInt(viewportHeight / ModelListRowHeight) + 2;
+                int lastVisibleExclusive = Mathf.Min(models.Count, firstVisible + visibleCount);
+
+                if (firstVisible > 0)
+                {
+                    GUILayout.Space(firstVisible * ModelListRowHeight);
+                }
+
+                for (int i = firstVisible; i < lastVisibleExclusive; i++)
                 {
                     InstalledModelInfoView model = models[i];
-                    EditorGUILayout.BeginHorizontal();
-                    EditorGUILayout.LabelField(model.Name, GUILayout.MinWidth(260f));
+                    Rect rowRect = EditorGUILayout.GetControlRect(false, ModelListRowHeight);
+                    Rect nameRect = new Rect(
+                        rowRect.x,
+                        rowRect.y,
+                        Mathf.Max(10f, rowRect.width - ModelDeleteButtonWidth - 8f),
+                        rowRect.height);
+                    Rect deleteRect = new Rect(
+                        rowRect.xMax - ModelDeleteButtonWidth,
+                        rowRect.y,
+                        ModelDeleteButtonWidth,
+                        rowRect.height - 1f);
+
+                    EditorGUI.LabelField(nameRect, model.Name);
 
                     using (new EditorGUI.DisabledScope(usingCustomModelsPath || operationInProgress))
                     {
-                        if (GUILayout.Button("Delete", GUILayout.Width(70f)))
+                        if (GUI.Button(deleteRect, "Delete"))
                         {
                             TryDeleteModelDirectory(model.DirectoryPath, model.Name);
                             RefreshModelList();
                             GUIUtility.ExitGUI();
                         }
                     }
-
-                    EditorGUILayout.EndHorizontal();
                 }
+
+                int remaining = models.Count - lastVisibleExclusive;
+                if (remaining > 0)
+                {
+                    GUILayout.Space(remaining * ModelListRowHeight);
+                }
+
                 EditorGUILayout.EndScrollView();
             }
 
@@ -377,7 +404,7 @@ namespace KimodoUnityMotionTools.ProjectEditor
             {
                 operationInProgress = false;
                 Refresh();
-                ScheduleServerStateQuery(force: true);
+                PullServerStatusFromController(forceRefresh: true);
             }
         }
 
@@ -404,7 +431,7 @@ namespace KimodoUnityMotionTools.ProjectEditor
             {
                 operationInProgress = false;
                 Refresh();
-                ScheduleServerStateQuery(force: true);
+                PullServerStatusFromController(forceRefresh: true);
             }
         }
 
@@ -439,7 +466,7 @@ namespace KimodoUnityMotionTools.ProjectEditor
             {
                 operationInProgress = false;
                 Refresh();
-                ScheduleServerStateQuery(force: true);
+                PullServerStatusFromController(forceRefresh: true);
             }
         }
 
@@ -515,7 +542,7 @@ namespace KimodoUnityMotionTools.ProjectEditor
             {
                 operationInProgress = false;
                 Refresh();
-                ScheduleServerStateQuery(force: true);
+                PullServerStatusFromController(forceRefresh: true);
             }
         }
 
@@ -634,71 +661,25 @@ namespace KimodoUnityMotionTools.ProjectEditor
             return Path.GetFullPath(customPath);
         }
 
-        private void ScheduleServerStateQuery(bool force)
+        private void PullServerStatusFromController(bool forceRefresh)
         {
             if (!runtimeExists)
             {
                 serverState = ServerState.Disabled;
-                serverStatusQueryInFlight = false;
                 return;
             }
 
-            double now = EditorApplication.timeSinceStartup;
-            if (!force && (serverStatusQueryInFlight || now < nextServerStatusQueryAt))
+            KimodoBridgeController.RequestServerStateRefresh(forceRefresh);
+            KimodoBridgeController.ServerStatusSnapshot snapshot = KimodoBridgeController.GetServerStatusSnapshot();
+            if (!snapshot.Ready)
             {
+                serverState = ServerState.Disabled;
                 return;
             }
 
-            serverStatusQueryInFlight = true;
-            nextServerStatusQueryAt = now + ServerStatusQueryCooldownSeconds;
-            int queryVersion = ++serverStatusQueryVersion;
-            string root = runtimeRoot;
-
-            _ = QueryServerStateAsync(root, queryVersion);
-        }
-
-        private async Task QueryServerStateAsync(string root, int queryVersion)
-        {
-            bool running = false;
-            string host = "127.0.0.1";
-            int port = -1;
-
-            try
-            {
-                await Task.Run(() =>
-                {
-                    if (!Directory.Exists(root))
-                    {
-                        return;
-                    }
-
-                    if (!KimodoBridgeController.TryReadServerPort(root, out string readHost, out int readPort))
-                    {
-                        return;
-                    }
-
-                    if (KimodoBridgeController.IsServerResponsive(readHost, readPort))
-                    {
-                        running = true;
-                        host = readHost;
-                        port = readPort;
-                    }
-                });
-            }
-            catch
-            {
-                running = false;
-            }
-
-            if (queryVersion != serverStatusQueryVersion)
-            {
-                return;
-            }
-
-            serverStatusQueryInFlight = false;
-            serverHost = host;
-            serverPort = port;
-            serverState = running ? ServerState.Enabled : ServerState.Disabled;
+            serverHost = snapshot.Host;
+            serverPort = snapshot.Port;
+            serverState = snapshot.Running ? ServerState.Enabled : ServerState.Disabled;
         }
     }
 }

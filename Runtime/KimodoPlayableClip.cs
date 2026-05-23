@@ -73,7 +73,7 @@ namespace KimodoUnityMotionTools
         public string bridgeServerScriptPath = "";
 
         [TextArea(2, 6)]
-        public string motionPrompt = "";
+        public string motionPrompt = "a man walk and say hello";
         public int generationFrames = DEFAULT_FRAMES;
         public int numSamples = 1;
         public int diffusionSteps = 100;
