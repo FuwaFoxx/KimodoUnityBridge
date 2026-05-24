@@ -356,21 +356,9 @@ namespace KimodoUnityMotionTools.ProjectEditor
             Repaint();
             try
             {
-                UnityEngine.Timeline.TimelineClip timelineClip = FindTimelineClipForAsset(clip);
                 string constraintsFilePath = string.Empty;
-                if (timelineClip != null)
-                {
-                    if (!KimodoInbetweenConstraintUtility.TryBuildAndWriteConstraintsFile(
-                        timelineClip,
-                        clip.enableInbetweenInterpolation,
-                        Mathf.Max(1, generationFrames.intValue),
-                        out constraintsFilePath,
-                        out string constraintError))
-                    {
-                        Debug.LogWarning($"[Kimodo] Constraint export skipped: {constraintError}");
-                        constraintsFilePath = string.Empty;
-                    }
-                }
+                // Force-disable constraint export in generation pipeline.
+                // Runtime request will always carry empty constraints_json.
                 int effectiveSeed = ResolveEffectiveSeed();
                 lastConstraintsPath = constraintsFilePath;
                 string motionJson = await GenerateMotionJsonViaRuntimeServiceAsync(constraintsFilePath, effectiveSeed, generationCts.Token);
