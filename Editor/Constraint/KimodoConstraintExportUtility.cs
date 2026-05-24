@@ -1,6 +1,5 @@
 using System;
 using System.Collections.Generic;
-using System.IO;
 using System.Linq;
 using System.Reflection;
 using Newtonsoft.Json;
@@ -16,12 +15,37 @@ namespace KimodoUnityMotionTools.ProjectEditor
     {
         private const string LogPrefix = "[Kimodo][ConstraintExport]";
 
-        public static bool TryBuildAndWriteConstraintsFile(
+        public static bool TryBuildConstraintsJson(
             TimelineClip sourceClip,
-            out string absolutePath,
+            out string constraintsJson,
             out string error)
         {
-            absolutePath = string.Empty;
+            constraintsJson = string.Empty;
+            error = string.Empty;
+
+            if (!TryBuildMergedConstraints(sourceClip, out List<KimodoConstraintJson> merged, out error))
+            {
+                return false;
+            }
+
+            if (merged.Count == 0)
+            {
+                return true;
+            }
+
+            constraintsJson = JsonConvert.SerializeObject(
+                merged,
+                Formatting.Indented,
+                new JsonSerializerSettings { NullValueHandling = NullValueHandling.Ignore });
+            return true;
+        }
+
+        private static bool TryBuildMergedConstraints(
+            TimelineClip sourceClip,
+            out List<KimodoConstraintJson> merged,
+            out string error)
+        {
+            merged = new List<KimodoConstraintJson>();
             error = string.Empty;
 
             if (sourceClip == null)
@@ -37,10 +61,9 @@ namespace KimodoUnityMotionTools.ProjectEditor
                 return false;
             }
 
-            var markers = GatherKimodoMarkers(track, sourceClip);
+            List<KimodoConstraintMarkerBase> markers = GatherKimodoMarkers(track, sourceClip);
             if (markers.Count == 0)
             {
-                // No constraints is valid: caller can clear sampler constraints input.
                 return true;
             }
 
@@ -75,11 +98,12 @@ namespace KimodoUnityMotionTools.ProjectEditor
 
                 for (int i = 0; i < markers.Count; i++)
                 {
-            if (!TryBuildMarkerConstraint(markers[i], sourceClip, skeletonRoot, animator, director, out KimodoConstraintJson constraint, out error))
+                    if (!TryBuildMarkerConstraint(markers[i], sourceClip, skeletonRoot, animator, director, out KimodoConstraintJson constraint, out error))
                     {
                         Debug.LogError($"{LogPrefix} Build marker constraint failed at index={i}: {error}");
                         return false;
                     }
+
                     Debug.Log($"{LogPrefix} Marker[{i}] {DescribeConstraint(constraint)}");
                     constraints.Add(constraint);
                 }
@@ -91,27 +115,12 @@ namespace KimodoUnityMotionTools.ProjectEditor
                 director.extrapolationMode = originalWrap;
             }
 
-            List<KimodoConstraintJson> merged = MergeConstraintsByType(constraints);
+            merged = MergeConstraintsByType(constraints);
             for (int i = 0; i < merged.Count; i++)
             {
                 Debug.Log($"{LogPrefix} Merged[{i}] {DescribeConstraint(merged[i])}");
             }
 
-            string json = JsonConvert.SerializeObject(
-                merged,
-                Formatting.Indented,
-                new JsonSerializerSettings { NullValueHandling = NullValueHandling.Ignore });
-
-            string tempDir = Path.Combine(Application.dataPath, "KimodoTemp");
-            if (!Directory.Exists(tempDir))
-            {
-                Directory.CreateDirectory(tempDir);
-            }
-
-            string fileName = $"constraints_{DateTime.Now:yyyyMMdd_HHmmss_fff}.json";
-            absolutePath = Path.Combine(tempDir, fileName);
-            File.WriteAllText(absolutePath, json);
-            Debug.Log($"{LogPrefix} Exported {merged.Count} merged constraint(s) to: {absolutePath}");
             return true;
         }
 

@@ -356,12 +356,10 @@ namespace KimodoUnityMotionTools.ProjectEditor
             Repaint();
             try
             {
-                string constraintsFilePath = string.Empty;
-                // Force-disable constraint export in generation pipeline.
-                // Runtime request will always carry empty constraints_json.
+                string constraintsJson = BuildConstraintsJsonOrThrow();
                 int effectiveSeed = ResolveEffectiveSeed();
-                lastConstraintsPath = constraintsFilePath;
-                string motionJson = await GenerateMotionJsonViaRuntimeServiceAsync(constraintsFilePath, effectiveSeed, generationCts.Token);
+                lastConstraintsPath = string.IsNullOrWhiteSpace(constraintsJson) ? "(none)" : "(inline-json)";
+                string motionJson = await GenerateMotionJsonViaRuntimeServiceAsync(constraintsJson, effectiveSeed, generationCts.Token);
                 if (string.IsNullOrWhiteSpace(motionJson))
                 {
                     throw new Exception("No motion json found in workflow outputs.");
@@ -424,7 +422,7 @@ namespace KimodoUnityMotionTools.ProjectEditor
             return effectiveSeed;
         }
 
-        private async Task<string> GenerateMotionJsonViaRuntimeServiceAsync(string constraintsFilePath, int effectiveSeed, CancellationToken token)
+        private async Task<string> GenerateMotionJsonViaRuntimeServiceAsync(string constraintsJson, int effectiveSeed, CancellationToken token)
         {
             string expectedRuntimeRoot = KimodoBridgeController.GetRuntimeRootPath();
             if (!Directory.Exists(expectedRuntimeRoot))
@@ -464,7 +462,7 @@ namespace KimodoUnityMotionTools.ProjectEditor
                 duration = durationSeconds,
                 seed = effectiveSeed,
                 steps = diffusionSteps.intValue,
-                constraints_json = constraintsFilePath ?? string.Empty
+                constraints_json = constraintsJson ?? string.Empty
             };
 
             KimodoGenerationResultDto result;
@@ -524,6 +522,29 @@ namespace KimodoUnityMotionTools.ProjectEditor
             }
 
             return result.motionJsonCompact;
+        }
+
+        private string BuildConstraintsJsonOrThrow()
+        {
+            TimelineClip sourceClip = FindTimelineClipForAsset(clip);
+            if (sourceClip == null)
+            {
+                return string.Empty;
+            }
+
+            bool ok = KimodoInbetweenConstraintUtility.TryBuildConstraintsJson(
+                sourceClip,
+                enableInbetweenInterpolation != null && enableInbetweenInterpolation.boolValue,
+                generationFrames != null ? generationFrames.intValue : KimodoPlayableClip.MIN_FRAMES,
+                out string constraintsJson,
+                out string error);
+
+            if (!ok)
+            {
+                throw new InvalidOperationException($"Build constraints failed: {error}");
+            }
+
+            return constraintsJson ?? string.Empty;
         }
 
         private async Task CloseBridgeServerAndRefreshStatusAsync()

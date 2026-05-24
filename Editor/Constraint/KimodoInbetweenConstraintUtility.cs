@@ -1,6 +1,5 @@
 using System;
 using System.Collections.Generic;
-using System.IO;
 using Newtonsoft.Json;
 using UnityEditor;
 using UnityEditor.Timeline;
@@ -15,93 +14,65 @@ namespace KimodoUnityMotionTools.ProjectEditor
         private const string LogPrefix = "[Kimodo][InbetweenConstraint]";
         private const double NeighborSampleDeltaSeconds = 1.0 / 60.0;
 
-
-        public static bool TryBuildAndWriteConstraintsFile(
+        public static bool TryBuildConstraintsJson(
             TimelineClip sourceClip,
             bool enableInbetweenInterpolation,
             int generationFrames,
-            out string absolutePath,
+            out string constraintsJson,
             out string error)
         {
-            absolutePath = string.Empty;
+            constraintsJson = string.Empty;
             error = string.Empty;
 
-            if (!KimodoConstraintExportUtility.TryBuildAndWriteConstraintsFile(sourceClip, out string markerConstraintsPath, out error))
+            if (!KimodoConstraintExportUtility.TryBuildConstraintsJson(sourceClip, out string markerConstraintsJson, out error))
             {
                 return false;
             }
 
             if (!enableInbetweenInterpolation)
             {
-                absolutePath = markerConstraintsPath ?? string.Empty;
+                constraintsJson = markerConstraintsJson ?? string.Empty;
                 return true;
             }
 
-            List<KimodoConstraintJson> constraints = LoadConstraints(markerConstraintsPath);
-            bool changed = false;
-
-            if (enableInbetweenInterpolation)
+            List<KimodoConstraintJson> constraints = LoadConstraintsFromJson(markerConstraintsJson);
+            if (TryBuildAutoInbetweenFullBodyConstraints(sourceClip, Mathf.Max(1, generationFrames), constraints, out bool _, out string autoWarning))
             {
-                if (TryBuildAutoInbetweenFullBodyConstraints(sourceClip, Mathf.Max(1, generationFrames), constraints, out bool autoAdded, out string autoWarning))
-                {
-                    changed = autoAdded;
-                }
-                else if (!string.IsNullOrWhiteSpace(autoWarning))
-                {
-                    Debug.LogWarning($"{LogPrefix} {autoWarning}");
-                }
+                // no-op
+            }
+            else if (!string.IsNullOrWhiteSpace(autoWarning))
+            {
+                Debug.LogWarning($"{LogPrefix} {autoWarning}");
             }
 
             if (constraints.Count == 0)
             {
-                absolutePath = string.Empty;
+                constraintsJson = string.Empty;
                 return true;
             }
 
-            if (!changed && !string.IsNullOrWhiteSpace(markerConstraintsPath) && File.Exists(markerConstraintsPath))
-            {
-                absolutePath = markerConstraintsPath;
-                return true;
-            }
-
-            string tempDir = Path.Combine(Application.dataPath, "KimodoTemp");
-            if (!Directory.Exists(tempDir))
-            {
-                Directory.CreateDirectory(tempDir);
-            }
-
-            string fileName = $"constraints_{DateTime.Now:yyyyMMdd_HHmmss_fff}_with_inbetween.json";
-            absolutePath = Path.Combine(tempDir, fileName);
-            string json = JsonConvert.SerializeObject(
+            constraintsJson = JsonConvert.SerializeObject(
                 constraints,
                 Formatting.Indented,
                 new JsonSerializerSettings { NullValueHandling = NullValueHandling.Ignore });
-            File.WriteAllText(absolutePath, json);
-            Debug.Log($"{LogPrefix} Exported {constraints.Count} constraint set(s) to: {absolutePath}");
             return true;
         }
 
-        private static List<KimodoConstraintJson> LoadConstraints(string path)
+        private static List<KimodoConstraintJson> LoadConstraintsFromJson(string json)
         {
-            if (string.IsNullOrWhiteSpace(path) || !File.Exists(path))
+            if (string.IsNullOrWhiteSpace(json))
             {
                 return new List<KimodoConstraintJson>();
             }
 
             try
             {
-                string json = File.ReadAllText(path);
-                if (string.IsNullOrWhiteSpace(json))
-                {
-                    return new List<KimodoConstraintJson>();
-                }
-
                 List<KimodoConstraintJson> parsed = JsonConvert.DeserializeObject<List<KimodoConstraintJson>>(json);
                 return parsed ?? new List<KimodoConstraintJson>();
             }
             catch (Exception ex)
             {
-                Debug.LogWarning($"{LogPrefix} Failed to parse existing constraints file ({path}), fallback to empty: {ex.Message}");
+                Debug.LogWarning($"{LogPrefix} Failed to parse constraints json string, fallback to empty: {ex.Message}");
                 return new List<KimodoConstraintJson>();
             }
         }
