@@ -44,9 +44,19 @@ namespace KimodoUnityMotionTools.ProjectEditor
         private string operationStatus = string.Empty;
         private string lastError = string.Empty;
         private string modelError = string.Empty;
+        private PendingServerOperation pendingOperation = PendingServerOperation.None;
 
         private string selectedModel = "Kimodo-SOMA-RP-v1";
         private KimodoBridgeVramMode selectedVramMode = KimodoBridgeVramMode.Low;
+
+        private enum PendingServerOperation
+        {
+            None = 0,
+            Start = 1,
+            Stop = 2,
+            TryFix = 3,
+            DeleteAllData = 4
+        }
 
         private KimodoServerManagerSettingsProvider(string path, SettingsScope scope) : base(path, scope) { }
 
@@ -74,6 +84,7 @@ namespace KimodoUnityMotionTools.ProjectEditor
             }
 
             PullServerStatusFromController(forceRefresh: false);
+            TryRunPendingOperationAfterCompile();
 
             EditorGUILayout.LabelField("Kimodo Server Manager", EditorStyles.boldLabel);
             EditorGUILayout.Space(4f);
@@ -227,7 +238,12 @@ namespace KimodoUnityMotionTools.ProjectEditor
             EditorGUILayout.BeginVertical("box");
 
             bool showDetectHint = EditorApplication.timeSinceStartup < detectHintUntilTime;
-            if (showDetectHint)
+            bool compileGate = EditorCompilationStateGate.IsCompilingOrReloading;
+            if (compileGate)
+            {
+                EditorGUILayout.HelpBox("compiling...", MessageType.None);
+            }
+            else if (showDetectHint)
             {
                 EditorGUILayout.HelpBox("detect...", MessageType.None);
             }
@@ -239,7 +255,14 @@ namespace KimodoUnityMotionTools.ProjectEditor
             {
                 EditorGUILayout.HelpBox("Server is not running.", MessageType.None);
             }
-            EditorGUILayout.LabelField("Status", serverState == ServerState.Enabled ? "enable" : "disable", EditorStyles.miniLabel);
+            if (compileGate)
+            {
+                EditorGUILayout.LabelField("Status", "detect/compiling", EditorStyles.miniLabel);
+            }
+            else
+            {
+                EditorGUILayout.LabelField("Status", serverState == ServerState.Enabled ? "enable" : "disable", EditorStyles.miniLabel);
+            }
 
             bool inMaintenance = KimodoBridgeController.IsRuntimeMaintenanceInProgress;
             bool stopMode = serverState == ServerState.Enabled;
@@ -251,11 +274,11 @@ namespace KimodoUnityMotionTools.ProjectEditor
                 {
                     if (stopMode)
                     {
-                        _ = StopServerAsync();
+                        EnqueueOrRun(PendingServerOperation.Stop, StopServerAsync);
                     }
                     else
                     {
-                        _ = StartServerAsync();
+                        EnqueueOrRun(PendingServerOperation.Start, StartServerAsync);
                     }
                 }
             }
@@ -348,14 +371,14 @@ namespace KimodoUnityMotionTools.ProjectEditor
             {
                 if (GUILayout.Button("Try Fix (delete and reconfigure)", GUILayout.Height(24f)))
                 {
-                    TryFix();
+                    EnqueueOrRun(PendingServerOperation.TryFix, TryFixAsync);
                 }
 
                 if (GUILayout.Button("Delete All Data", GUILayout.Height(24f)))
                 {
                     if (EditorUtility.DisplayDialog("Delete All Data", "Delete entire Kimodo runtime folder? This cannot be undone.", "Delete", "Cancel"))
                     {
-                        _ = DeleteAllDataAsync();
+                        EnqueueOrRun(PendingServerOperation.DeleteAllData, DeleteAllDataAsync);
                     }
                 }
             }
@@ -660,6 +683,51 @@ namespace KimodoUnityMotionTools.ProjectEditor
             serverHost = snapshot.Host;
             serverPort = snapshot.Port;
             serverState = snapshot.Running ? ServerState.Enabled : ServerState.Disabled;
+        }
+
+        private void EnqueueOrRun(PendingServerOperation op, Func<Task> action)
+        {
+            if (EditorCompilationStateGate.IsCompilingOrReloading)
+            {
+                pendingOperation = op;
+                operationStatus = $"Queued '{op}' until compile completes.";
+                Debug.Log($"[Kimodo][CompileGate] queued operation: {op}");
+                return;
+            }
+
+            _ = action();
+        }
+
+        private void TryRunPendingOperationAfterCompile()
+        {
+            if (pendingOperation == PendingServerOperation.None)
+            {
+                return;
+            }
+
+            if (EditorCompilationStateGate.IsCompilingOrReloading || operationInProgress)
+            {
+                return;
+            }
+
+            PendingServerOperation op = pendingOperation;
+            pendingOperation = PendingServerOperation.None;
+            Debug.Log($"[Kimodo][CompileGate] running queued operation: {op}");
+            switch (op)
+            {
+                case PendingServerOperation.Start:
+                    _ = StartServerAsync();
+                    break;
+                case PendingServerOperation.Stop:
+                    _ = StopServerAsync();
+                    break;
+                case PendingServerOperation.TryFix:
+                    _ = TryFixAsync();
+                    break;
+                case PendingServerOperation.DeleteAllData:
+                    _ = DeleteAllDataAsync();
+                    break;
+            }
         }
     }
 }

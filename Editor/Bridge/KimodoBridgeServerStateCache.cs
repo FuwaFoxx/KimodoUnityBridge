@@ -17,6 +17,7 @@ namespace KimodoUnityMotionTools.ProjectEditor
         private bool queryInFlight;
         private int queryVersion;
         private double nextQueryAt;
+        private bool paused;
 
         private const double QueryCooldownSeconds = 2.0;
 
@@ -48,7 +49,36 @@ namespace KimodoUnityMotionTools.ProjectEditor
 
         internal void RequestRefresh(bool force)
         {
+            if (EditorCompilationStateGate.IsCompilingOrReloading)
+            {
+                return;
+            }
+
             ScheduleRefresh(force);
+        }
+
+        internal void Pause()
+        {
+            lock (gate)
+            {
+                paused = true;
+                queryVersion++;
+                queryInFlight = false;
+                nextQueryAt = EditorApplication.timeSinceStartup + QueryCooldownSeconds;
+            }
+            UnityEngine.Debug.Log("[Kimodo][ServerStateCache] paused.");
+        }
+
+        internal void Resume()
+        {
+            lock (gate)
+            {
+                paused = false;
+                queryVersion++;
+                queryInFlight = false;
+                nextQueryAt = EditorApplication.timeSinceStartup + QueryCooldownSeconds;
+            }
+            UnityEngine.Debug.Log("[Kimodo][ServerStateCache] resumed.");
         }
 
         internal void Invalidate(System.Func<string> getRuntimeRoot)
@@ -75,6 +105,11 @@ namespace KimodoUnityMotionTools.ProjectEditor
 
             lock (gate)
             {
+                if (paused || EditorCompilationStateGate.IsCompilingOrReloading)
+                {
+                    return;
+                }
+
                 if (!force)
                 {
                     if (queryInFlight || now < nextQueryAt)
@@ -123,6 +158,12 @@ namespace KimodoUnityMotionTools.ProjectEditor
             {
                 if (version != queryVersion)
                 {
+                    return;
+                }
+
+                if (paused || EditorCompilationStateGate.IsCompilingOrReloading)
+                {
+                    queryInFlight = false;
                     return;
                 }
 

@@ -12,6 +12,7 @@ namespace KimodoUnityMotionTools.Bridge
     public sealed class BridgeProtocolClient : IDisposable
     {
         private readonly SemaphoreSlim ioLock = new SemaphoreSlim(1, 1);
+        private readonly object disposeGate = new object();
         private readonly int connectTimeoutMs;
         private readonly int ioTimeoutMs;
         private readonly int modelLoadingTimeoutMs;
@@ -23,6 +24,7 @@ namespace KimodoUnityMotionTools.Bridge
         private string sharedHost = string.Empty;
         private int sharedPort = -1;
         private bool disposed;
+        private int disposeStarted;
 
         public BridgeProtocolClient(
             int connectTimeoutMs = BridgeRuntimeSettings.DefaultConnectTimeoutMs,
@@ -208,15 +210,13 @@ namespace KimodoUnityMotionTools.Bridge
 
         public void Dispose()
         {
-            if (disposed)
+            if (!TryBeginDispose())
             {
                 return;
             }
 
-            disposed = true;
             try
             {
-                ioLock.Wait();
                 CloseSharedConnectionSync();
             }
             catch
@@ -225,7 +225,48 @@ namespace KimodoUnityMotionTools.Bridge
             }
             finally
             {
-                try { ioLock.Release(); } catch { }
+                ioLock.Dispose();
+            }
+        }
+
+        public async Task DisposeAsync(int timeoutMs = 300)
+        {
+            if (!TryBeginDispose())
+            {
+                return;
+            }
+
+            try
+            {
+                Task waitTask = ioLock.WaitAsync();
+                Task completed = await Task.WhenAny(waitTask, Task.Delay(Math.Max(10, timeoutMs)));
+                if (completed == waitTask)
+                {
+                    try
+                    {
+                        await waitTask;
+                    }
+                    finally
+                    {
+                        try { ioLock.Release(); } catch { }
+                    }
+                }
+            }
+            catch
+            {
+                // ignore
+            }
+            finally
+            {
+                try
+                {
+                    CloseSharedConnectionSync();
+                }
+                catch
+                {
+                    // ignore
+                }
+
                 ioLock.Dispose();
             }
         }
@@ -285,6 +326,21 @@ namespace KimodoUnityMotionTools.Bridge
             {
                 throw new ObjectDisposedException(nameof(BridgeProtocolClient));
             }
+        }
+
+        private bool TryBeginDispose()
+        {
+            if (Interlocked.Exchange(ref disposeStarted, 1) != 0)
+            {
+                return false;
+            }
+
+            lock (disposeGate)
+            {
+                disposed = true;
+            }
+
+            return true;
         }
     }
 }

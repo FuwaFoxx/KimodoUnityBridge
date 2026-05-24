@@ -1,0 +1,145 @@
+using System;
+using System.Collections.Generic;
+using System.IO;
+using System.Threading;
+using System.Threading.Tasks;
+using KimodoUnityMotionTools.Bridge;
+using KimodoUnityMotionTools.Generation;
+using Newtonsoft.Json;
+using UnityEditor;
+using UnityEngine;
+using UnityEngine.Timeline;
+
+namespace KimodoUnityMotionTools.ProjectEditor
+{
+    internal static class KimodoPoseGuidedGenerationUtility
+    {
+        internal const float TargetFps = 30f;
+
+        internal static async Task<KimodoGenerationResultDto> GenerateFromPromptWithOptionalBoundaryPosesAsync(
+            string prompt,
+            int frames,
+            int steps,
+            int? seed,
+            string modelName,
+            KimodoBridgeVramMode vramMode,
+            KimodoMarkerSampleResult startPose = null,
+            KimodoMarkerSampleResult endPose = null,
+            Action<string> progress = null,
+            CancellationToken token = default)
+        {
+            if (string.IsNullOrWhiteSpace(prompt))
+            {
+                throw new ArgumentException("Prompt is empty.", nameof(prompt));
+            }
+
+            int clampedFrames = Mathf.Clamp(frames, KimodoPlayableClip.MIN_FRAMES, KimodoPlayableClip.MAX_FRAMES);
+            int clampedSteps = Mathf.Clamp(steps, 1, 1000);
+            string constraintsJson = BuildBoundaryFullBodyConstraintsJson(startPose, endPose, clampedFrames);
+
+            string runtimeRoot = KimodoBridgeController.ResolveRuntimeRootOrThrow();
+            string launcherPath = KimodoBridgeController.ResolveStartScriptOrThrow(runtimeRoot);
+
+            string resolvedModelName = string.IsNullOrWhiteSpace(modelName)
+                ? "Kimodo-SOMA-RP-v1"
+                : modelName.Trim();
+
+            bool highVram = vramMode == KimodoBridgeVramMode.High;
+
+            string modelsRoot = KimodoPlayableClipGenerationSettings.instance.LocalModelsPath?.Trim();
+            if (!string.IsNullOrWhiteSpace(modelsRoot))
+            {
+                modelsRoot = Path.GetFullPath(modelsRoot);
+            }
+
+            var request = new KimodoGenerationRequestDto
+            {
+                prompt = prompt,
+                duration = clampedFrames / TargetFps,
+                seed = seed,
+                steps = clampedSteps,
+                constraints_json = constraintsJson
+            };
+
+            return await KimodoBridgeController.GenerateBridgeAsync(
+                launcherPath,
+                resolvedModelName,
+                highVram,
+                runtimeRoot,
+                modelsRoot,
+                request,
+                progress,
+                token);
+        }
+
+        internal static string BuildBoundaryFullBodyConstraintsJson(
+            KimodoMarkerSampleResult startPose,
+            KimodoMarkerSampleResult endPose,
+            int totalFrames)
+        {
+            int clampedFrames = Mathf.Max(1, totalFrames);
+            int endFrame = Mathf.Max(0, clampedFrames - 1);
+            var entries = new List<(int frame, KimodoMarkerSampleResult pose)>(2);
+
+            if (IsValidPose(startPose))
+            {
+                entries.Add((0, startPose));
+            }
+
+            if (IsValidPose(endPose))
+            {
+                entries.Add((endFrame, endPose));
+            }
+
+            if (entries.Count == 0)
+            {
+                return string.Empty;
+            }
+
+            entries.Sort((a, b) => a.frame.CompareTo(b.frame));
+
+            var full = new KimodoConstraintJson
+            {
+                type = "fullbody",
+                frame_indices = new List<int>(entries.Count),
+                smooth_root_2d = new List<float[]>(entries.Count),
+                root_positions = new List<float[]>(entries.Count),
+                local_joints_rot = new List<float[][]>(entries.Count)
+            };
+
+            for (int i = 0; i < entries.Count; i++)
+            {
+                int frame = entries[i].frame;
+                KimodoMarkerSampleResult pose = entries[i].pose;
+                full.frame_indices.Add(frame);
+                full.smooth_root_2d.Add(new[] { pose.rootPosition.x, pose.rootPosition.z });
+                full.root_positions.Add(new[] { pose.rootPosition.x, pose.rootPosition.y, pose.rootPosition.z });
+                full.local_joints_rot.Add(ToAxisAngleArray(pose.localAxisAngles));
+            }
+
+            return JsonConvert.SerializeObject(
+                new List<KimodoConstraintJson> { full },
+                Formatting.Indented,
+                new JsonSerializerSettings { NullValueHandling = NullValueHandling.Ignore });
+        }
+
+        private static bool IsValidPose(KimodoMarkerSampleResult pose)
+        {
+            return pose != null
+                && pose.localAxisAngles != null
+                && pose.localAxisAngles.Count > 0;
+        }
+
+        private static float[][] ToAxisAngleArray(List<Vector3> axisAngles)
+        {
+            float[][] data = new float[axisAngles.Count][];
+            for (int i = 0; i < axisAngles.Count; i++)
+            {
+                Vector3 v = axisAngles[i];
+                data[i] = new[] { v.x, v.y, v.z };
+            }
+
+            return data;
+        }
+    }
+}

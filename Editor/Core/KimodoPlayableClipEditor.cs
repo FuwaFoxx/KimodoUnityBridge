@@ -45,6 +45,7 @@ namespace KimodoUnityMotionTools.ProjectEditor
         private SerializedProperty loopProp;
         private SerializedProperty savedSkeletonTypeProp;
         private SerializedProperty autoRetargetOnBindingProp;
+        private SerializedProperty curveFilterOptionsProp;
 
         private KimodoPlayableClip clip;
         private bool isGenerating;
@@ -57,6 +58,7 @@ namespace KimodoUnityMotionTools.ProjectEditor
         private bool bridgeRunningCached;
         private bool bridgePortDiscoveredCached;
         private bool bridgeStatusReady;
+        private bool showAdvancedFoldout = true;
 
         private void OnEnable()
         {
@@ -88,6 +90,7 @@ namespace KimodoUnityMotionTools.ProjectEditor
             loopProp = serializedObject.FindProperty("m_Loop");
             savedSkeletonTypeProp = serializedObject.FindProperty("savedSkeletonType");
             autoRetargetOnBindingProp = serializedObject.FindProperty("autoRetargetOnBinding");
+            curveFilterOptionsProp = serializedObject.FindProperty("curveFilterOptions");
         }
 
         internal Task GenerateForTestsAsync()
@@ -322,6 +325,7 @@ namespace KimodoUnityMotionTools.ProjectEditor
             {
                 EditorGUILayout.PropertyField(autoRetargetOnBindingProp, new GUIContent("Auto Retarget On Binding"));
             }
+            DrawAdvancedCurveFilterSection();
 
             if (clip != null && clip.savedSkeletonType != KimodoBakeSkeletonType.SOMA)
             {
@@ -686,6 +690,7 @@ namespace KimodoUnityMotionTools.ProjectEditor
                 targetClip: clip.clip,
                 motionJson: clip.motionData,
                 skeletonType: KimodoBakeSkeletonType.SOMA,
+                curveFilterOptions: clip.curveFilterOptions,
                 out error
             );
 
@@ -707,6 +712,13 @@ namespace KimodoUnityMotionTools.ProjectEditor
             if (clip.autoRetargetOnBinding)
             {
                 TimelineClip timelineClip = FindTimelineClipForAsset(clip);
+                if (CanDirectOutputByJointNameMatch(clip, timelineClip))
+                {
+                    lastRetargetMode = "Direct Output (Name Match)";
+                    Debug.Log("[Kimodo] Retarget skipped: all source joints are present on bound skeleton by name.");
+                }
+                else
+                {
                 bool retargetOk = KimodoRetargetPipeline.TryRetargetBakedClip(
                     clip,
                     timelineClip,
@@ -730,6 +742,7 @@ namespace KimodoUnityMotionTools.ProjectEditor
                     lastRetargetMode = "SOMA Fallback";
                     Debug.LogWarning($"[Kimodo] Retarget fallback to SOMA. {retargetDetails}");
                 }
+                }
             }
 
             RefreshTimelinePreviewGraph();
@@ -737,6 +750,164 @@ namespace KimodoUnityMotionTools.ProjectEditor
             lastError = string.Empty;
             lastStatus = "Bake complete.";
             Debug.Log("[Kimodo] Bake complete (SOMA).");
+        }
+
+        private void DrawAdvancedCurveFilterSection()
+        {
+            if (curveFilterOptionsProp == null)
+            {
+                return;
+            }
+
+            EditorGUILayout.Space(4f);
+            showAdvancedFoldout = EditorGUILayout.ToggleLeft("Advanced", showAdvancedFoldout);
+            if (!showAdvancedFoldout)
+            {
+                return;
+            }
+
+            EditorGUI.indentLevel++;
+            EditorGUILayout.LabelField("Curve Filter Options", EditorStyles.boldLabel);
+
+            SerializedProperty enabledProp = curveFilterOptionsProp.FindPropertyRelative("enabled");
+            SerializedProperty positionErrorProp = curveFilterOptionsProp.FindPropertyRelative("positionError");
+            SerializedProperty rotationErrorProp = curveFilterOptionsProp.FindPropertyRelative("rotationError");
+            SerializedProperty floatErrorProp = curveFilterOptionsProp.FindPropertyRelative("floatError");
+            SerializedProperty ensureQuatProp = curveFilterOptionsProp.FindPropertyRelative("ensureQuaternionContinuity");
+
+            if (enabledProp != null)
+            {
+                EditorGUILayout.PropertyField(enabledProp, new GUIContent("Reduce Keyframes"));
+            }
+
+            if (enabledProp != null && enabledProp.boolValue)
+            {
+                if (positionErrorProp != null)
+                {
+                    positionErrorProp.floatValue = EditorGUILayout.Slider(
+                        new GUIContent("Position Error"),
+                        positionErrorProp.floatValue,
+                        0f,
+                        1f);
+                }
+
+                if (rotationErrorProp != null)
+                {
+                    rotationErrorProp.floatValue = EditorGUILayout.Slider(
+                        new GUIContent("Rotation Error"),
+                        rotationErrorProp.floatValue,
+                        0f,
+                        1f);
+                }
+
+                if (floatErrorProp != null)
+                {
+                    floatErrorProp.floatValue = EditorGUILayout.Slider(
+                        new GUIContent("Float Error"),
+                        floatErrorProp.floatValue,
+                        0f,
+                        1f);
+                }
+            }
+
+            if (ensureQuatProp != null)
+            {
+                EditorGUILayout.PropertyField(ensureQuatProp, new GUIContent("Ensure Quaternion Continuity"));
+            }
+
+            EditorGUI.indentLevel--;
+        }
+
+        private static bool CanDirectOutputByJointNameMatch(KimodoPlayableClip playableClip, TimelineClip timelineClip)
+        {
+            if (playableClip == null || playableClip.jointNames == null || playableClip.jointNames.Length == 0)
+            {
+                return false;
+            }
+
+            if (!TryResolveBoundAnimatorForTimelineClip(timelineClip, out Animator animator))
+            {
+                return false;
+            }
+
+            Transform skeletonRoot = animator != null ? animator.transform : null;
+            if (skeletonRoot == null)
+            {
+                return false;
+            }
+
+            var nameSet = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            var stack = new Stack<Transform>();
+            stack.Push(skeletonRoot);
+            while (stack.Count > 0)
+            {
+                Transform current = stack.Pop();
+                if (current == null)
+                {
+                    continue;
+                }
+
+                if (!string.IsNullOrWhiteSpace(current.name))
+                {
+                    nameSet.Add(current.name);
+                }
+
+                for (int i = 0; i < current.childCount; i++)
+                {
+                    stack.Push(current.GetChild(i));
+                }
+            }
+
+            for (int i = 0; i < playableClip.jointNames.Length; i++)
+            {
+                string jointName = playableClip.jointNames[i];
+                if (string.IsNullOrWhiteSpace(jointName))
+                {
+                    continue;
+                }
+
+                if (!nameSet.Contains(jointName))
+                {
+                    return false;
+                }
+            }
+
+            return true;
+        }
+
+        private static bool TryResolveBoundAnimatorForTimelineClip(TimelineClip timelineClip, out Animator animator)
+        {
+            animator = null;
+            if (timelineClip == null)
+            {
+                return false;
+            }
+
+            TrackAsset track = timelineClip.GetParentTrack();
+            if (track == null)
+            {
+                return false;
+            }
+
+            PlayableDirector director = TimelineEditor.inspectedDirector;
+            if (director == null)
+            {
+                return false;
+            }
+
+            TrackAsset currentTrack = track;
+            while (currentTrack != null)
+            {
+                animator = director.GetGenericBinding(currentTrack) as Animator;
+                if (animator != null)
+                {
+                    return true;
+                }
+
+                currentTrack = currentTrack.parent as TrackAsset;
+            }
+
+            return false;
         }
 
         private void DrawErrorSection()

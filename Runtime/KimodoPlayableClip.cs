@@ -23,6 +23,24 @@ namespace KimodoUnityMotionTools
     }
 
     [System.Serializable]
+    public class KimodoCurveFilterOptions
+    {
+        [Tooltip("Enable keyframe reduction after bake.")]
+        public bool enabled = true;
+        [Range(0f, 1f)]
+        [Tooltip("CurveFilterOptions.positionError (0-1).")]
+        public float positionError = 0.25f;
+        [Range(0f, 1f)]
+        [Tooltip("CurveFilterOptions.rotationError (0-1).")]
+        public float rotationError = 0.25f;
+        [Range(0f, 1f)]
+        [Tooltip("CurveFilterOptions.floatError (0-1).")]
+        public float floatError = 0.25f;
+        [Tooltip("Run AnimationClip.EnsureQuaternionContinuity() after bake/reduction.")]
+        public bool ensureQuaternionContinuity = true;
+    }
+
+    [System.Serializable]
     public class KimodoPlayableClip : AnimationPlayableAsset, IKimodoSampleMarker
     {
         [Header("Generation Backend")]
@@ -67,6 +85,8 @@ namespace KimodoUnityMotionTools
         [Header("Bake Options")]
         [Tooltip("Auto retarget baked animation according to timeline binding animator.")]
         public bool autoRetargetOnBinding = true;
+        [SerializeField]
+        public KimodoCurveFilterOptions curveFilterOptions = new KimodoCurveFilterOptions();
         
         public string motionData;
         public int frameCount;

@@ -68,6 +68,7 @@ namespace KimodoUnityMotionTools.ProjectEditor
             EditorApplication.delayCall += RecoverBridgeAfterDomainReload;
             AssemblyReloadEvents.beforeAssemblyReload += HandleBeforeAssemblyReload;
             EditorApplication.quitting += HandleEditorQuitting;
+            EditorCompilationStateGate.StateChanged += HandleCompilationStateChanged;
         }
 
         internal static bool IsServerRunning => serverStateCache.IsServerRunning;
@@ -134,6 +135,12 @@ namespace KimodoUnityMotionTools.ProjectEditor
 
         private static async void RecoverBridgeAfterDomainReload()
         {
+            if (EditorCompilationStateGate.IsCompilingOrReloading)
+            {
+                UnityEngine.Debug.Log("[Kimodo][CompileGate] skip recovery during compile/reload.");
+                return;
+            }
+
             if (isRecovering)
             {
                 return;
@@ -256,12 +263,29 @@ namespace KimodoUnityMotionTools.ProjectEditor
 
         private static void HandleBeforeAssemblyReload()
         {
-            generationFacade.DetachSharedRuntimeGenerationService();
+            _ = generationFacade.ShutdownAsync(
+                KimodoBridgeGenerationFacade.ShutdownMode.DetachOnly,
+                null,
+                CancellationToken.None);
         }
 
         private static void HandleEditorQuitting()
         {
             generationFacade.DisposeSharedRuntimeGenerationService();
+        }
+
+        private static void HandleCompilationStateChanged(bool active)
+        {
+            if (active)
+            {
+                serverStateCache.Pause();
+                UnityEngine.Debug.Log("[Kimodo][CompileGate] server state cache paused.");
+                return;
+            }
+
+            serverStateCache.Resume();
+            UnityEngine.Debug.Log("[Kimodo][CompileGate] server state cache resumed.");
+            EditorApplication.delayCall += RecoverBridgeAfterDomainReload;
         }
 
         private sealed class RuntimeMaintenanceScope : IDisposable

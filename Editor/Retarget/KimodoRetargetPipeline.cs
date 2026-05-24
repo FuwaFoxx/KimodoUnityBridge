@@ -236,7 +236,18 @@ namespace KimodoUnityMotionTools.ProjectEditor
                 return false;
             }
 
-            animator = director.GetGenericBinding(track) as Animator;
+            TrackAsset currentTrack = track;
+            while (currentTrack != null)
+            {
+                animator = director.GetGenericBinding(currentTrack) as Animator;
+                if (animator != null)
+                {
+                    return true;
+                }
+
+                currentTrack = currentTrack.parent as TrackAsset;
+            }
+
             if (animator == null)
             {
                 error = "Animation track has no Animator binding.";

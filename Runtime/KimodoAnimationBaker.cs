@@ -3,6 +3,7 @@ using Newtonsoft.Json.Linq;
 using System;
 using System.Collections.Generic;
 using UnityEditor;
+using UnityEditor.Animations;
 using UnityEngine;
 
 namespace KimodoUnityMotionTools
@@ -22,7 +23,12 @@ namespace KimodoUnityMotionTools
             public List<float> local_rot_quats;
         }
 
-        public static bool BakeIntoClip(AnimationClip targetClip, string motionJson, KimodoBakeSkeletonType skeletonType, out string error)
+        public static bool BakeIntoClip(
+            AnimationClip targetClip,
+            string motionJson,
+            KimodoBakeSkeletonType skeletonType,
+            KimodoCurveFilterOptions curveFilterOptions,
+            out string error)
         {
             error = string.Empty;
 
@@ -71,12 +77,163 @@ namespace KimodoUnityMotionTools
                     keepOriginalPositionY = true
                 });
 
-            BakeSomaCurvesDirect(targetClip, data, fps, frameCount);
+            var rawClip = new AnimationClip
+            {
+                name = $"{targetClip.name}_Raw",
+                legacy = false,
+                frameRate = fps
+            };
+            BakeSomaCurvesDirect(rawClip, data, fps, frameCount);
 
-            targetClip.frameRate = fps;
-            targetClip.EnsureQuaternionContinuity();
+            if (!TrySaveWithRecorder(rawClip, targetClip, data, fps, frameCount, curveFilterOptions, out error))
+            {
+                return false;
+            }
             EditorUtility.SetDirty(targetClip);
             return true;
+        }
+
+        private static bool TrySaveWithRecorder(
+            AnimationClip rawClip,
+            AnimationClip targetClip,
+            MotionJsonData data,
+            float fps,
+            int frameCount,
+            KimodoCurveFilterOptions options,
+            out string error)
+        {
+            error = string.Empty;
+            if (rawClip == null || targetClip == null)
+            {
+                error = "Raw clip or target clip is null.";
+                return false;
+            }
+
+            int jointCount = Mathf.Min(data.joint_names.Length, data.num_joints > 0 ? data.num_joints : data.joint_names.Length);
+            if (jointCount <= 0)
+            {
+                error = "Joint count is invalid for recorder save.";
+                return false;
+            }
+
+            GameObject samplerRoot = null;
+            try
+            {
+                samplerRoot = CreateSamplerHierarchyForRecording(data, jointCount);
+                var recorder = new GameObjectRecorder(samplerRoot);
+                recorder.BindComponentsOfType<Transform>(samplerRoot, true);
+
+                float dt = fps > 0f ? 1f / fps : 1f / 30f;
+                for (int f = 0; f < frameCount; f++)
+                {
+                    float t = f / fps;
+                    rawClip.SampleAnimation(samplerRoot, t);
+                    recorder.TakeSnapshot(dt);
+                }
+
+                targetClip.ClearCurves();
+                targetClip.frameRate = fps;
+                AnimationUtility.SetAnimationClipSettings(
+                    targetClip,
+                    new AnimationClipSettings
+                    {
+                        loopTime = false,
+                        keepOriginalPositionY = true
+                    });
+
+                CurveFilterOptions filter = BuildCurveFilterOptions(options);
+                recorder.SaveToClip(targetClip, fps, filter);
+
+                if ((options ?? new KimodoCurveFilterOptions()).ensureQuaternionContinuity)
+                {
+                    targetClip.EnsureQuaternionContinuity();
+                }
+
+                return true;
+            }
+            catch (Exception ex)
+            {
+                error = $"Recorder SaveToClip failed: {ex.Message}";
+                return false;
+            }
+            finally
+            {
+                if (samplerRoot != null)
+                {
+                    UnityEngine.Object.DestroyImmediate(samplerRoot);
+                }
+            }
+        }
+
+        private static CurveFilterOptions BuildCurveFilterOptions(KimodoCurveFilterOptions options)
+        {
+            KimodoCurveFilterOptions effective = options ?? new KimodoCurveFilterOptions();
+            bool reduce = effective.enabled;
+            float positionError = Mathf.Clamp01(effective.positionError);
+            float rotationError = Mathf.Clamp01(effective.rotationError);
+            float floatError = Mathf.Clamp01(effective.floatError);
+
+            if (!reduce)
+            {
+                return new CurveFilterOptions
+                {
+                    keyframeReduction = false,
+                    positionError = 0f,
+                    rotationError = 0f,
+                    scaleError = 0f,
+                    floatError = 0f
+                };
+            }
+
+            return new CurveFilterOptions
+            {
+                keyframeReduction = true,
+                positionError = positionError,
+                scaleError = positionError,
+                floatError = floatError,
+                rotationError = rotationError,
+                unrollRotation = true
+            };
+        }
+
+        private static GameObject CreateSamplerHierarchyForRecording(MotionJsonData data, int jointCount)
+        {
+            var root = new GameObject("__KimodoRecorderRoot")
+            {
+                hideFlags = HideFlags.HideAndDontSave
+            };
+
+            var transforms = new Transform[jointCount];
+            for (int i = 0; i < jointCount; i++)
+            {
+                string safeName = SanitizeName(data.joint_names[i]);
+                var go = new GameObject(safeName)
+                {
+                    hideFlags = HideFlags.HideAndDontSave
+                };
+                transforms[i] = go.transform;
+                transforms[i].localPosition = Vector3.zero;
+                transforms[i].localRotation = Quaternion.identity;
+                transforms[i].localScale = Vector3.one;
+            }
+
+            for (int i = 0; i < jointCount; i++)
+            {
+                int parent = (data.joint_parents != null && data.joint_parents.Length > i)
+                    ? data.joint_parents[i]
+                    : -1;
+
+                if (parent < 0 || parent >= jointCount || parent == i)
+                {
+                    transforms[i].SetParent(root.transform, false);
+                }
+                else
+                {
+                    transforms[i].SetParent(transforms[parent], false);
+                }
+            }
+
+            return root;
         }
 
         private static MotionJsonData ParseMotionJsonFlexible(string motionJson)

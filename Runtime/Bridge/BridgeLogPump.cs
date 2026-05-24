@@ -11,6 +11,7 @@ namespace KimodoUnityMotionTools.Bridge
     {
         private const int StopWaitTimeoutMs = 1500;
 
+        private readonly object gate = new object();
         private CancellationTokenSource cts;
         private Task pumpTask;
         private SynchronizationContext callbackContext;
@@ -30,50 +31,67 @@ namespace KimodoUnityMotionTools.Bridge
             int idlePollMinMs = settings?.logPumpIdlePollMinMs ?? BridgeRuntimeSettings.DefaultLogPumpIdlePollMinMs;
             int idlePollMaxMs = settings?.logPumpIdlePollMaxMs ?? BridgeRuntimeSettings.DefaultLogPumpIdlePollMaxMs;
 
-            cts = new CancellationTokenSource();
-            callbackContext = SynchronizationContext.Current;
-            pumpTask = Task.Run(() => PumpAsync(
+            var newCts = new CancellationTokenSource();
+            SynchronizationContext newContext = SynchronizationContext.Current;
+            Task newTask = Task.Run(() => PumpAsync(
                 logPath,
                 onLine,
-                cts.Token,
-                callbackContext,
+                newCts.Token,
+                newContext,
                 Math.Max(1000, waitFileTimeoutMs),
                 Math.Max(30, missingFilePollMinMs),
                 Math.Max(Math.Max(30, missingFilePollMinMs), missingFilePollMaxMs),
                 Math.Max(10, idlePollMinMs),
                 Math.Max(Math.Max(10, idlePollMinMs), idlePollMaxMs)));
+
+            lock (gate)
+            {
+                cts = newCts;
+                callbackContext = newContext;
+                pumpTask = newTask;
+            }
         }
 
         public void Stop()
         {
-            CancellationTokenSource currentCts = cts;
-            Task currentPumpTask = pumpTask;
-            cts = null;
-            pumpTask = null;
+            CancellationTokenSource currentCts;
+            Task currentPumpTask;
+            lock (gate)
+            {
+                currentCts = cts;
+                currentPumpTask = pumpTask;
+                cts = null;
+                pumpTask = null;
+                callbackContext = null;
+            }
 
             if (currentCts != null)
             {
                 try { currentCts.Cancel(); } catch { }
             }
 
-            if (currentPumpTask != null)
+            _ = ObserveStopAsync(currentPumpTask, currentCts, StopWaitTimeoutMs, CancellationToken.None);
+        }
+
+        public async Task StopAsync(int timeoutMs = StopWaitTimeoutMs, CancellationToken token = default)
+        {
+            CancellationTokenSource currentCts;
+            Task currentPumpTask;
+            lock (gate)
             {
-                try
-                {
-                    Task.WhenAny(currentPumpTask, Task.Delay(StopWaitTimeoutMs)).GetAwaiter().GetResult();
-                }
-                catch (Exception e)
-                {
-                    Debug.LogWarning($"[KimodoBridge][LogPump] stop wait failed: {e.Message}");
-                }
+                currentCts = cts;
+                currentPumpTask = pumpTask;
+                cts = null;
+                pumpTask = null;
+                callbackContext = null;
             }
 
             if (currentCts != null)
             {
-                try { currentCts.Dispose(); } catch { }
+                try { currentCts.Cancel(); } catch { }
             }
 
-            callbackContext = null;
+            await ObserveStopAsync(currentPumpTask, currentCts, timeoutMs, token);
         }
 
         public void Dispose()
@@ -85,6 +103,36 @@ namespace KimodoUnityMotionTools.Bridge
 
             disposed = true;
             Stop();
+        }
+
+        private static async Task ObserveStopAsync(Task currentPumpTask, CancellationTokenSource currentCts, int timeoutMs, CancellationToken token)
+        {
+            try
+            {
+                if (currentPumpTask != null)
+                {
+                    Task completed = await Task.WhenAny(currentPumpTask, Task.Delay(Math.Max(10, timeoutMs), token));
+                    if (completed != currentPumpTask)
+                    {
+                        Debug.LogWarning("[KimodoBridge][LogPump] stop timeout.");
+                    }
+                }
+            }
+            catch (OperationCanceledException)
+            {
+                // ignore
+            }
+            catch (Exception e)
+            {
+                Debug.LogWarning($"[KimodoBridge][LogPump] stop observe failed: {e.Message}");
+            }
+            finally
+            {
+                if (currentCts != null)
+                {
+                    try { currentCts.Dispose(); } catch { }
+                }
+            }
         }
 
         private static async Task PumpAsync(

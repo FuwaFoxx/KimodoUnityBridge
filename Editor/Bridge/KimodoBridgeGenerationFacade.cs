@@ -9,6 +9,12 @@ namespace KimodoUnityMotionTools.ProjectEditor
 {
     internal sealed class KimodoBridgeGenerationFacade : IDisposable
     {
+        internal enum ShutdownMode
+        {
+            DetachOnly = 0,
+            KillAndDispose = 1
+        }
+
         private KimodoRuntimeGenerationService sharedRuntimeGenerationService;
         private string currentServiceRuntimeRoot = string.Empty;
         private string currentServiceLauncherPath = string.Empty;
@@ -17,6 +23,7 @@ namespace KimodoUnityMotionTools.ProjectEditor
         private bool currentServiceHighVram;
         private bool currentServiceForceSetup;
         private bool isClosing;
+        private int shutdownTicket;
 
         internal async Task<string> StartServerAsync(
             string launcherPath,
@@ -85,91 +92,17 @@ namespace KimodoUnityMotionTools.ProjectEditor
 
         internal async Task CloseServerAsync(Func<Task<(bool hasEndpoint, string host, int port)>> tryGetEndpointAsync)
         {
-            if (isClosing)
-            {
-                return;
-            }
-
-            isClosing = true;
-            try
-            {
-                try
-                {
-                    KimodoRuntimeGenerationService runtimeService = sharedRuntimeGenerationService;
-                    sharedRuntimeGenerationService = null;
-                    if (runtimeService != null)
-                    {
-                        await runtimeService.KillAsync(KimodoBackendType.Bridge, CancellationToken.None);
-                    }
-                    else if (tryGetEndpointAsync != null)
-                    {
-                        (bool hasEndpoint, string host, int port) = await tryGetEndpointAsync();
-                        if (hasEndpoint)
-                        {
-                            await BridgeRuntimeControl.TrySendQuitAsync(
-                                host,
-                                port,
-                                BridgeRuntimeSettings.DefaultStatusConnectTimeoutMs,
-                                BridgeRuntimeSettings.DefaultStatusIoTimeoutMs,
-                                CancellationToken.None);
-                        }
-                    }
-                }
-                catch
-                {
-                    // ignore
-                }
-                finally
-                {
-                    try { sharedRuntimeGenerationService?.Dispose(); } catch { }
-                    ResetSharedServiceState();
-                }
-            }
-            finally
-            {
-                isClosing = false;
-            }
+            await ShutdownAsync(ShutdownMode.KillAndDispose, tryGetEndpointAsync, CancellationToken.None);
         }
 
         internal void DetachSharedRuntimeGenerationService()
         {
-            KimodoRuntimeGenerationService service = sharedRuntimeGenerationService;
-            if (service == null)
-            {
-                return;
-            }
-
-            try
-            {
-                service.DetachAsync(KimodoBackendType.Bridge, CancellationToken.None)
-                    .GetAwaiter()
-                    .GetResult();
-            }
-            catch
-            {
-                // ignore
-            }
+            _ = ShutdownAsync(ShutdownMode.DetachOnly, null, CancellationToken.None);
         }
 
         internal void DisposeSharedRuntimeGenerationService()
         {
-            KimodoRuntimeGenerationService service = sharedRuntimeGenerationService;
-            sharedRuntimeGenerationService = null;
-            if (service == null)
-            {
-                return;
-            }
-
-            try
-            {
-                service.Dispose();
-            }
-            catch
-            {
-                // ignore
-            }
-
-            ResetSharedServiceState();
+            _ = ShutdownAsync(ShutdownMode.KillAndDispose, null, CancellationToken.None);
         }
 
         internal bool TryGetAttachedServiceRuntimeRoot(out string runtimeRoot)
@@ -275,9 +208,86 @@ namespace KimodoUnityMotionTools.ProjectEditor
             currentServiceForceSetup = false;
         }
 
+        internal async Task ShutdownAsync(
+            ShutdownMode mode,
+            Func<Task<(bool hasEndpoint, string host, int port)>> tryGetEndpointAsync,
+            CancellationToken token)
+        {
+            int ticket = Interlocked.Increment(ref shutdownTicket);
+            if (isClosing)
+            {
+                UnityEngine.Debug.Log($"[Kimodo][BridgeShutdown] skip duplicate shutdown, mode={mode}, ticket={ticket}");
+                return;
+            }
+
+            isClosing = true;
+            UnityEngine.Debug.Log($"[Kimodo][BridgeShutdown] begin mode={mode}, ticket={ticket}");
+            try
+            {
+                KimodoRuntimeGenerationService runtimeService = sharedRuntimeGenerationService;
+                sharedRuntimeGenerationService = null;
+                ResetSharedServiceState();
+
+                if (runtimeService != null)
+                {
+                    try
+                    {
+                        if (mode == ShutdownMode.DetachOnly)
+                        {
+                            await runtimeService.DetachAsync(KimodoBackendType.Bridge, token);
+                            UnityEngine.Debug.Log("[Kimodo][BridgeShutdown] detached shared runtime service.");
+                        }
+                        else
+                        {
+                            await runtimeService.KillAsync(KimodoBackendType.Bridge, token);
+                            UnityEngine.Debug.Log("[Kimodo][BridgeShutdown] killed shared runtime service.");
+                        }
+                    }
+                    catch
+                    {
+                        // ignore
+                    }
+                    finally
+                    {
+                        try { runtimeService.Dispose(); } catch { }
+                    }
+                }
+                else if (mode == ShutdownMode.KillAndDispose && tryGetEndpointAsync != null)
+                {
+                    try
+                    {
+                        (bool hasEndpoint, string host, int port) = await tryGetEndpointAsync();
+                        if (hasEndpoint)
+                        {
+                            await BridgeRuntimeControl.TrySendQuitAsync(
+                                host,
+                                port,
+                                BridgeRuntimeSettings.DefaultStatusConnectTimeoutMs,
+                                BridgeRuntimeSettings.DefaultStatusIoTimeoutMs,
+                                token);
+                            UnityEngine.Debug.Log($"[Kimodo][BridgeShutdown] sent quit to {host}:{port}.");
+                        }
+                    }
+                    catch
+                    {
+                        // ignore
+                    }
+                }
+            }
+            finally
+            {
+                if (ticket == shutdownTicket)
+                {
+                    isClosing = false;
+                }
+
+                UnityEngine.Debug.Log($"[Kimodo][BridgeShutdown] end mode={mode}, ticket={ticket}");
+            }
+        }
+
         public void Dispose()
         {
-            DisposeSharedRuntimeGenerationService();
+            _ = ShutdownAsync(ShutdownMode.KillAndDispose, null, CancellationToken.None);
         }
     }
 }
