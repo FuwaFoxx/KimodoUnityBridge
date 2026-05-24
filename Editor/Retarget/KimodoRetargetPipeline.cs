@@ -40,6 +40,88 @@ namespace KimodoUnityMotionTools.ProjectEditor
             }
         }
 
+        internal static bool TryRetargetClipToAvatar(
+            AnimationClip sourceSomaClip,
+            Avatar targetAvatar,
+            out AnimationClip outputClip,
+            out string details)
+        {
+            outputClip = null;
+            details = string.Empty;
+
+            if (sourceSomaClip == null)
+            {
+                details = "Source clip is null.";
+                return false;
+            }
+
+            if (targetAvatar == null || !targetAvatar.isValid || !targetAvatar.isHuman)
+            {
+                details = "Custom avatar is null or invalid humanoid avatar.";
+                return false;
+            }
+
+            if (!TryCreateSomaSamplingAnimator(null, out Animator somaAnimator, out GameObject somaTempRoot, out string somaError))
+            {
+                details = $"Ensure SOMA avatar failed: {somaError}";
+                return false;
+            }
+
+            try
+            {
+                if (!TryBuildSomaMuscleClip(sourceSomaClip, somaAnimator, out AnimationClip muscleClip, out string muscleError))
+                {
+                    details = $"SOMA->Muscle failed: {muscleError}";
+                    return false;
+                }
+
+                outputClip = new AnimationClip
+                {
+                    name = $"{sourceSomaClip.name}_RetargetCustomAvatar",
+                    legacy = false,
+                    frameRate = sourceSomaClip.frameRate > 0f ? sourceSomaClip.frameRate : 30f
+                };
+
+                Animator targetSamplingAnimator = CreateTempAnimatorForAvatarObject(targetAvatar, out GameObject targetTempRoot);
+                if (targetSamplingAnimator == null)
+                {
+                    details = "Failed to create sampling animator from custom avatar.";
+                    return false;
+                }
+
+                try
+                {
+                    if (!TryConvertMuscleToTargetBoneClip(
+                            muscleClip,
+                            targetSamplingAnimator,
+                            outputClip,
+                            out string toBoneError,
+                            sourceSomaClip.frameRate))
+                    {
+                        details = $"Muscle->TargetBone failed: {toBoneError}";
+                        return false;
+                    }
+                }
+                finally
+                {
+                    if (targetTempRoot != null)
+                    {
+                        UnityEngine.Object.DestroyImmediate(targetTempRoot);
+                    }
+                }
+
+                details = "Retarget ok (Mode=CustomAvatar).";
+                return true;
+            }
+            finally
+            {
+                if (somaTempRoot != null)
+                {
+                    UnityEngine.Object.DestroyImmediate(somaTempRoot);
+                }
+            }
+        }
+
         public static bool TryRetargetBakedClip(
             KimodoPlayableClip playableClip,
             TimelineClip timelineClip,
@@ -533,6 +615,43 @@ namespace KimodoUnityMotionTools.ProjectEditor
                 tempAnimator.Update(0f);
             }
             return tempAnimator;
+        }
+
+        private static Animator CreateTempAnimatorForAvatarObject(Avatar avatar, out GameObject tempRoot)
+        {
+            tempRoot = null;
+            if (avatar == null || !avatar.isValid || !avatar.isHuman)
+            {
+                return null;
+            }
+
+            tempRoot = new GameObject("KimodoCustomAvatarSamplingRoot");
+            tempRoot.hideFlags = HideFlags.HideAndDontSave;
+            tempRoot.transform.SetPositionAndRotation(Vector3.zero, Quaternion.identity);
+            tempRoot.transform.localScale = Vector3.one;
+
+            if (!TryBuildHierarchyFromAvatarSkeleton(avatar, tempRoot.transform, out _))
+            {
+                UnityEngine.Object.DestroyImmediate(tempRoot);
+                tempRoot = null;
+                return null;
+            }
+
+            Transform samplingRoot = ResolveBuiltAvatarSkeletonRoot(tempRoot.transform, avatar);
+            if (samplingRoot == null)
+            {
+                UnityEngine.Object.DestroyImmediate(tempRoot);
+                tempRoot = null;
+                return null;
+            }
+
+            Animator animator = samplingRoot.gameObject.AddComponent<Animator>();
+            animator.avatar = avatar;
+            animator.enabled = false;
+            animator.applyRootMotion = false;
+            animator.Rebind();
+            animator.Update(0f);
+            return animator;
         }
 
         private static void OverwriteClipCurves(AnimationClip dst, AnimationClip src)

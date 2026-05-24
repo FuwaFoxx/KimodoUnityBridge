@@ -67,18 +67,15 @@ namespace KimodoUnityMotionTools
         [TextArea(2, 6)]
         public string motionPrompt = "a man walk and say hello";
         public int generationFrames = DEFAULT_FRAMES;
-        public int numSamples = 1;
         public int diffusionSteps = 100;
         public bool randomSeed = false;
         public int seed = 42;
+        [SerializeField, HideInInspector]
+        private Avatar customRetargetAvatar;
         [Tooltip("Enable inbetween interpolation by constraining start/end with neighboring clips on timeline.")]
         public bool enableInbetweenInterpolation = false;
         [Tooltip("If empty, use Resources/kimodo-unity-workflow.json")]
         public TextAsset workflowJsonAsset;
-        [Min(10f)]
-        public float generationTimeoutSeconds = 120f;
-        [Min(0.1f)]
-        public float pollIntervalSeconds = 1f;
 
         public bool isGenerated;
         public string lastGeneratedPrompt;
@@ -94,7 +91,22 @@ namespace KimodoUnityMotionTools
         public int fps;
         public string[] jointNames;
         public float[] motionPositions;
-        public KimodoBakeSkeletonType savedSkeletonType = KimodoBakeSkeletonType.SOMA;
+
+        public KimodoBakeSkeletonType InferredSkeletonType
+        {
+            get
+            {
+                string model = bridgeModelName ?? string.Empty;
+                string _ = model.Trim().ToLowerInvariant();
+                return KimodoBakeSkeletonType.SOMA;
+            }
+        }
+
+        public Avatar CustomRetargetAvatar
+        {
+            get => customRetargetAvatar;
+            set => customRetargetAvatar = value;
+        }
 
         public const int MIN_FRAMES = 1;
         public const int MAX_FRAMES = 300;

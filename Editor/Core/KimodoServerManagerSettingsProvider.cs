@@ -183,6 +183,16 @@ namespace KimodoUnityMotionTools.ProjectEditor
                 settings.SaveSettings();
             }
 
+            EditorGUI.BeginChangeCheck();
+            float timeoutSeconds = EditorGUILayout.FloatField(
+                new GUIContent("Generate Timeout (sec)", "Global timeout used by Kimodo generation requests."),
+                settings.GenerationTimeoutSeconds);
+            if (EditorGUI.EndChangeCheck())
+            {
+                settings.GenerationTimeoutSeconds = timeoutSeconds;
+                settings.SaveSettings();
+            }
+
             string localModelsPath = settings.LocalModelsPath;
             EditorGUILayout.BeginHorizontal();
             EditorGUI.BeginChangeCheck();

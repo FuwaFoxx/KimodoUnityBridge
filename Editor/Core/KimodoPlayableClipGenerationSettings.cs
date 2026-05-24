@@ -9,9 +9,13 @@ namespace KimodoUnityMotionTools.ProjectEditor
         internal const int MinGeneratedClipsLimit = 1;
         internal const int MaxGeneratedClipsLimit = 1000;
         internal const int DefaultGeneratedClipsLimit = 400;
+        internal const float MinGenerationTimeoutSeconds = 10f;
+        internal const float DefaultGenerationTimeoutSeconds = 120f;
 
         [SerializeField] private int maxGeneratedClips = DefaultGeneratedClipsLimit;
         [SerializeField] private string localModelsPath = string.Empty;
+        [SerializeField] private float generationTimeoutSeconds = DefaultGenerationTimeoutSeconds;
+        [SerializeField, HideInInspector] private bool advancedCurveFilterFoldout = true;
 
         internal int MaxGeneratedClips
         {
@@ -25,10 +29,23 @@ namespace KimodoUnityMotionTools.ProjectEditor
             set => localModelsPath = value ?? string.Empty;
         }
 
+        internal bool AdvancedCurveFilterFoldout
+        {
+            get => advancedCurveFilterFoldout;
+            set => advancedCurveFilterFoldout = value;
+        }
+
+        internal float GenerationTimeoutSeconds
+        {
+            get => Mathf.Max(MinGenerationTimeoutSeconds, generationTimeoutSeconds);
+            set => generationTimeoutSeconds = Mathf.Max(MinGenerationTimeoutSeconds, value);
+        }
+
         internal void SaveSettings()
         {
             maxGeneratedClips = Mathf.Clamp(maxGeneratedClips, MinGeneratedClipsLimit, MaxGeneratedClipsLimit);
             localModelsPath = localModelsPath ?? string.Empty;
+            generationTimeoutSeconds = Mathf.Max(MinGenerationTimeoutSeconds, generationTimeoutSeconds);
             Save(true);
         }
     }

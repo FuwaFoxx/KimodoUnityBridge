@@ -31,20 +31,17 @@ namespace KimodoUnityMotionTools.ProjectEditor
         private SerializedProperty bridgeVramMode;
         private SerializedProperty motionPrompt;
         private SerializedProperty generationFrames;
-        private SerializedProperty numSamples;
         private SerializedProperty diffusionSteps;
-        private SerializedProperty randomSeed;
+        private SerializedProperty randomProp;
         private SerializedProperty seed;
         private SerializedProperty enableInbetweenInterpolation;
         private SerializedProperty workflowJsonAsset;
-        private SerializedProperty generationTimeoutSeconds;
-        private SerializedProperty pollIntervalSeconds;
 
         private SerializedProperty animationClipProp;
         private SerializedProperty footIKProp;
         private SerializedProperty loopProp;
-        private SerializedProperty savedSkeletonTypeProp;
         private SerializedProperty autoRetargetOnBindingProp;
+        private SerializedProperty customRetargetAvatarProp;
         private SerializedProperty curveFilterOptionsProp;
 
         private KimodoPlayableClip clip;
@@ -54,7 +51,8 @@ namespace KimodoUnityMotionTools.ProjectEditor
         private CancellationTokenSource generationCts;
         private int lastSubmittedSeed = int.MinValue;
         private string lastConstraintsPath = string.Empty;
-        private string lastRetargetMode = "SOMA Fallback";
+        private readonly List<KimodoConstraintMarkerBase> lastConstraintMarkers = new List<KimodoConstraintMarkerBase>();
+        private bool lastIncludesAutoInbetweenConstraint;
         private bool bridgeRunningCached;
         private bool bridgePortDiscoveredCached;
         private bool bridgeStatusReady;
@@ -63,6 +61,7 @@ namespace KimodoUnityMotionTools.ProjectEditor
         private void OnEnable()
         {
             InitializeSerializedBindings();
+            showAdvancedFoldout = KimodoPlayableClipGenerationSettings.instance.AdvancedCurveFilterFoldout;
             PullBridgeStatusSnapshot(forceRefresh: true);
         }
 
@@ -76,20 +75,17 @@ namespace KimodoUnityMotionTools.ProjectEditor
             bridgeVramMode = serializedObject.FindProperty("bridgeVramMode");
             motionPrompt = serializedObject.FindProperty("motionPrompt");
             generationFrames = serializedObject.FindProperty("generationFrames");
-            numSamples = serializedObject.FindProperty("numSamples");
             diffusionSteps = serializedObject.FindProperty("diffusionSteps");
-            randomSeed = serializedObject.FindProperty("randomSeed");
+            randomProp = serializedObject.FindProperty("randomSeed");
             seed = serializedObject.FindProperty("seed");
             enableInbetweenInterpolation = serializedObject.FindProperty("enableInbetweenInterpolation");
             workflowJsonAsset = serializedObject.FindProperty("workflowJsonAsset");
-            generationTimeoutSeconds = serializedObject.FindProperty("generationTimeoutSeconds");
-            pollIntervalSeconds = serializedObject.FindProperty("pollIntervalSeconds");
 
             animationClipProp = serializedObject.FindProperty("m_Clip");
             footIKProp = serializedObject.FindProperty("m_ApplyFootIK");
             loopProp = serializedObject.FindProperty("m_Loop");
-            savedSkeletonTypeProp = serializedObject.FindProperty("savedSkeletonType");
             autoRetargetOnBindingProp = serializedObject.FindProperty("autoRetargetOnBinding");
+            customRetargetAvatarProp = serializedObject.FindProperty("customRetargetAvatar");
             curveFilterOptionsProp = serializedObject.FindProperty("curveFilterOptions");
         }
 
@@ -123,9 +119,8 @@ namespace KimodoUnityMotionTools.ProjectEditor
             motionPrompt.stringValue = prompt ?? string.Empty;
             generationFrames.intValue = Mathf.Clamp(generationFramesValue, KimodoPlayableClip.MIN_FRAMES, KimodoPlayableClip.MAX_FRAMES);
             diffusionSteps.intValue = Mathf.Clamp(diffusionStepsValue, 1, 1000);
-            randomSeed.boolValue = randomSeedEnabled;
+            randomProp.boolValue = randomSeedEnabled;
             seed.intValue = seedValue;
-            numSamples.intValue = Mathf.Clamp(numSamples.intValue <= 0 ? 1 : numSamples.intValue, 1, 8);
             serializedObject.ApplyModifiedPropertiesWithoutUndo();
         }
 
@@ -146,10 +141,10 @@ namespace KimodoUnityMotionTools.ProjectEditor
             PullBridgeStatusSnapshot(forceRefresh: false);
             serializedObject.UpdateIfRequiredOrScript();
             DrawGenerationSection();
-            DrawAnimationClipSection();
             DrawBakeSection();
             DrawErrorSection();
             DrawGeneratedInfo();
+            DrawAnimationClipSection();
             if (serializedObject.hasModifiedProperties)
             {
                 serializedObject.ApplyModifiedProperties();
@@ -203,12 +198,11 @@ namespace KimodoUnityMotionTools.ProjectEditor
                 TrySyncTimelineDuration(newFrames);
             }
 
-            numSamples.intValue = Mathf.Clamp(EditorGUILayout.IntField("Num Samples", numSamples.intValue), 1, 8);
             diffusionSteps.intValue = Mathf.Clamp(EditorGUILayout.IntField("Diffusion Steps", diffusionSteps.intValue), 1, 1000);
 
             EditorGUILayout.BeginHorizontal();
-            randomSeed.boolValue = EditorGUILayout.ToggleLeft("Random Seed", randomSeed.boolValue, GUILayout.Width(110f));
-            EditorGUI.BeginDisabledGroup(randomSeed.boolValue);
+            randomProp.boolValue = EditorGUILayout.ToggleLeft("Random", randomProp.boolValue, GUILayout.Width(110f));
+            EditorGUI.BeginDisabledGroup(randomProp.boolValue);
             seed.intValue = EditorGUILayout.IntField("Seed", seed.intValue);
             EditorGUI.EndDisabledGroup();
             EditorGUILayout.EndHorizontal();
@@ -219,11 +213,9 @@ namespace KimodoUnityMotionTools.ProjectEditor
                     new GUIContent("In-between Interpolation", "Use neighboring clip boundary poses as constraints to generate in-between motion."));
             }
 
-            generationTimeoutSeconds.floatValue = Mathf.Max(10f, EditorGUILayout.FloatField("Timeout (sec)", generationTimeoutSeconds.floatValue));
-            pollIntervalSeconds.floatValue = Mathf.Max(0.1f, EditorGUILayout.FloatField("Poll Interval (sec)", pollIntervalSeconds.floatValue));
-
             float seconds = generationFrames.intValue / TargetFps;
             EditorGUILayout.LabelField($"Duration: {seconds:F2}s", EditorStyles.miniLabel);
+            DrawConstraintReferenceList();
 
             bool disableGenerate = isGenerating || KimodoBridgeController.IsRuntimeMaintenanceInProgress;
             GUI.enabled = !disableGenerate;
@@ -267,6 +259,37 @@ namespace KimodoUnityMotionTools.ProjectEditor
 
             EditorGUILayout.EndVertical();
             EditorGUILayout.Space();
+        }
+
+        private void DrawConstraintReferenceList()
+        {
+            EditorGUILayout.LabelField("Constraint References", EditorStyles.miniBoldLabel);
+            if (lastConstraintMarkers.Count == 0)
+            {
+                EditorGUILayout.LabelField("(none)", EditorStyles.miniLabel);
+            }
+            else
+            {
+                for (int i = 0; i < lastConstraintMarkers.Count; i++)
+                {
+                    KimodoConstraintMarkerBase marker = lastConstraintMarkers[i];
+                    if (marker == null)
+                    {
+                        continue;
+                    }
+
+                    EditorGUILayout.ObjectField(
+                        new GUIContent($"{marker.ConstraintType} @ {marker.time:F3}s"),
+                        marker,
+                        typeof(KimodoConstraintMarkerBase),
+                        true);
+                }
+            }
+
+            if (lastIncludesAutoInbetweenConstraint)
+            {
+                EditorGUILayout.LabelField("- Auto in-between fullbody constraint (generated)", EditorStyles.miniLabel);
+            }
         }
 
         private void PullBridgeStatusSnapshot(bool forceRefresh)
@@ -316,26 +339,24 @@ namespace KimodoUnityMotionTools.ProjectEditor
             EditorGUILayout.LabelField("Animation Bake", EditorStyles.boldLabel);
             EditorGUILayout.BeginVertical("box");
 
-            if (savedSkeletonTypeProp != null)
-            {
-                EditorGUILayout.PropertyField(savedSkeletonTypeProp, new GUIContent("Skeleton Type"));
-            }
-
             if (autoRetargetOnBindingProp != null)
             {
                 EditorGUILayout.PropertyField(autoRetargetOnBindingProp, new GUIContent("Auto Retarget On Binding"));
             }
-            DrawAdvancedCurveFilterSection();
-
-            if (clip != null && clip.savedSkeletonType != KimodoBakeSkeletonType.SOMA)
+            if (autoRetargetOnBindingProp != null && !autoRetargetOnBindingProp.boolValue && customRetargetAvatarProp != null)
             {
-                clip.savedSkeletonType = KimodoBakeSkeletonType.SOMA;
-                EditorUtility.SetDirty(clip);
+                EditorGUILayout.PropertyField(customRetargetAvatarProp, new GUIContent("Custom Avatar"));
+                Avatar customAvatar = clip != null ? clip.CustomRetargetAvatar : null;
+                if (customAvatar == null)
+                {
+                    EditorGUILayout.HelpBox("Custom Avatar is required when Auto Retarget On Binding is disabled.", MessageType.Warning);
+                }
+                else if (!customAvatar.isValid || !customAvatar.isHuman)
+                {
+                    EditorGUILayout.HelpBox("Custom Avatar must be a valid Humanoid Avatar.", MessageType.Error);
+                }
             }
-
-            EditorGUILayout.LabelField("Saved As: SOMA", EditorStyles.miniLabel);
-            EditorGUILayout.LabelField($"Retarget Result: {lastRetargetMode}", EditorStyles.miniLabel);
-            EditorGUILayout.HelpBox("Baking is now part of 'Generate & Bake'.", MessageType.Info);
+            DrawAdvancedCurveFilterSection();
 
             EditorGUILayout.EndVertical();
         }
@@ -406,11 +427,11 @@ namespace KimodoUnityMotionTools.ProjectEditor
 
         private int ResolveEffectiveSeed()
         {
-            int effectiveSeed = randomSeed.boolValue
+            int effectiveSeed = randomProp.boolValue
                 ? Guid.NewGuid().GetHashCode() & int.MaxValue
                 : seed.intValue;
 
-            if (randomSeed.boolValue)
+            if (randomProp.boolValue)
             {
                 seed.intValue = effectiveSeed;
             }
@@ -503,8 +524,7 @@ namespace KimodoUnityMotionTools.ProjectEditor
                     },
                     comfyHost = comfyuiIP.stringValue,
                     comfyPort = comfyuiPort.intValue,
-                    comfyTimeoutSeconds = generationTimeoutSeconds.floatValue,
-                    comfyPollIntervalSeconds = pollIntervalSeconds.floatValue,
+                    comfyTimeoutSeconds = KimodoPlayableClipGenerationSettings.instance.GenerationTimeoutSeconds,
                     comfyWorkflowResourceName = "kimodo-unity-workflow"
                 };
 
@@ -533,8 +553,11 @@ namespace KimodoUnityMotionTools.ProjectEditor
             TimelineClip sourceClip = FindTimelineClipForAsset(clip);
             if (sourceClip == null)
             {
+                UpdateConstraintReferences(null);
                 return string.Empty;
             }
+
+            UpdateConstraintReferences(sourceClip);
 
             bool ok = KimodoInbetweenConstraintUtility.TryBuildConstraintsJson(
                 sourceClip,
@@ -551,6 +574,43 @@ namespace KimodoUnityMotionTools.ProjectEditor
             return constraintsJson ?? string.Empty;
         }
 
+        private void UpdateConstraintReferences(TimelineClip sourceClip)
+        {
+            lastConstraintMarkers.Clear();
+            lastIncludesAutoInbetweenConstraint = false;
+            if (sourceClip == null)
+            {
+                return;
+            }
+
+            TrackAsset track = sourceClip.GetParentTrack();
+            if (track == null)
+            {
+                return;
+            }
+
+            double minTime = sourceClip.start;
+            double maxTime = sourceClip.end;
+            foreach (IMarker marker in track.GetMarkers())
+            {
+                if (marker is not KimodoConstraintMarkerBase kimodoMarker)
+                {
+                    continue;
+                }
+
+                if (kimodoMarker.time < minTime || kimodoMarker.time > maxTime)
+                {
+                    continue;
+                }
+
+                lastConstraintMarkers.Add(kimodoMarker);
+            }
+
+            lastConstraintMarkers.Sort((a, b) => a.time.CompareTo(b.time));
+            lastIncludesAutoInbetweenConstraint =
+                enableInbetweenInterpolation != null && enableInbetweenInterpolation.boolValue;
+        }
+
         private async Task CloseBridgeServerAndRefreshStatusAsync()
         {
             await KimodoBridgeController.CloseServerAsync();
@@ -563,7 +623,8 @@ namespace KimodoUnityMotionTools.ProjectEditor
 
         private int ComputeBridgeStartupTimeoutMs(string runtimeRoot, bool highVram, string modelName)
         {
-            int requestedMs = Math.Max(30000, Mathf.RoundToInt(generationTimeoutSeconds.floatValue * 1000f));
+            float timeoutSeconds = KimodoPlayableClipGenerationSettings.instance.GenerationTimeoutSeconds;
+            int requestedMs = Math.Max(30000, Mathf.RoundToInt(timeoutSeconds * 1000f));
             int timeoutMs = requestedMs;
 
             KimodoBridgeController.ModelSetupStatus modelStatus =
@@ -671,7 +732,6 @@ namespace KimodoUnityMotionTools.ProjectEditor
                 clip.motionPositions = null;
             }
 
-            clip.savedSkeletonType = KimodoBakeSkeletonType.SOMA;
             EditorUtility.SetDirty(clip);
             AssetDatabase.SaveAssets();
         }
@@ -686,11 +746,24 @@ namespace KimodoUnityMotionTools.ProjectEditor
 
             Undo.RecordObject(clip, "Bake Kimodo Motion");
             string error;
+            bool willRetargetPipeline = clip.autoRetargetOnBinding || (!clip.autoRetargetOnBinding && clip.CustomRetargetAvatar != null);
+            KimodoCurveFilterOptions bakeFilterOptions = clip.curveFilterOptions;
+            if (willRetargetPipeline && clip.curveFilterOptions != null)
+            {
+                bakeFilterOptions = new KimodoCurveFilterOptions
+                {
+                    enabled = false,
+                    positionError = clip.curveFilterOptions.positionError,
+                    rotationError = clip.curveFilterOptions.rotationError,
+                    floatError = clip.curveFilterOptions.floatError,
+                    ensureQuaternionContinuity = false
+                };
+            }
             bool ok = KimodoUnityMotionTools.KimodoAnimationBaker.BakeIntoClip(
                 targetClip: clip.clip,
                 motionJson: clip.motionData,
-                skeletonType: KimodoBakeSkeletonType.SOMA,
-                curveFilterOptions: clip.curveFilterOptions,
+                skeletonType: clip.InferredSkeletonType,
+                curveFilterOptions: bakeFilterOptions,
                 out error
             );
 
@@ -702,19 +775,17 @@ namespace KimodoUnityMotionTools.ProjectEditor
                 return;
             }
 
-            clip.savedSkeletonType = KimodoBakeSkeletonType.SOMA;
             clip.isGenerated = true;
             EditorUtility.SetDirty(clip);
             EditorUtility.SetDirty(clip.clip);
             AssetDatabase.SaveAssets();
 
-            lastRetargetMode = "SOMA Fallback";
+            bool didRetarget = false;
             if (clip.autoRetargetOnBinding)
             {
                 TimelineClip timelineClip = FindTimelineClipForAsset(clip);
                 if (CanDirectOutputByJointNameMatch(clip, timelineClip))
                 {
-                    lastRetargetMode = "Direct Output (Name Match)";
                     Debug.Log("[Kimodo] Retarget skipped: all source joints are present on bound skeleton by name.");
                 }
                 else
@@ -726,23 +797,65 @@ namespace KimodoUnityMotionTools.ProjectEditor
                     out string retargetDetails);
 
                 if (retargetOk)
-                {
-                    lastRetargetMode = retargetMode switch
                     {
-                        KimodoRetargetResultMode.HumanoidMuscle => "Humanoid Muscle",
-                        KimodoRetargetResultMode.TargetBone => "Target Bone",
-                        _ => "SOMA Fallback"
-                    };
-                    Debug.Log($"[Kimodo] Retarget success. {retargetDetails}");
-                    EditorUtility.SetDirty(clip.clip);
-                    AssetDatabase.SaveAssets();
+                        Debug.Log($"[Kimodo] Retarget success. {retargetDetails}");
+                        EditorUtility.SetDirty(clip.clip);
+                        AssetDatabase.SaveAssets();
+                        didRetarget = true;
+                    }
+                    else
+                    {
+                        Debug.LogWarning($"[Kimodo] Retarget fallback to SOMA. {retargetDetails}");
+                    }
+                }
+            }
+            else if (clip.CustomRetargetAvatar != null)
+            {
+                if (KimodoRetargetPipeline.TryRetargetClipToAvatar(
+                        clip.clip,
+                        clip.CustomRetargetAvatar,
+                        out AnimationClip customRetargetClip,
+                        out string customRetargetDetails))
+                {
+                    if (customRetargetClip != null)
+                    {
+                        AnimationUtility.SetAnimationClipSettings(
+                            customRetargetClip,
+                            new AnimationClipSettings
+                            {
+                                loopTime = false,
+                                keepOriginalPositionY = true
+                            });
+
+                        string clipPath = AssetDatabase.GetAssetPath(clip.clip);
+                        if (!string.IsNullOrWhiteSpace(clipPath))
+                        {
+                            EditorCurveBinding[] bindings = AnimationUtility.GetCurveBindings(customRetargetClip);
+                            clip.clip.ClearCurves();
+                            for (int i = 0; i < bindings.Length; i++)
+                            {
+                                EditorCurveBinding b = bindings[i];
+                                AnimationCurve c = AnimationUtility.GetEditorCurve(customRetargetClip, b);
+                                clip.clip.SetCurve(b.path, b.type, b.propertyName, c);
+                            }
+                            clip.clip.frameRate = customRetargetClip.frameRate;
+                            EditorUtility.SetDirty(clip.clip);
+                            AssetDatabase.SaveAssets();
+                            didRetarget = true;
+                        }
+                    }
+
+                    Debug.Log($"[Kimodo] Custom avatar retarget success. {customRetargetDetails}");
                 }
                 else
                 {
-                    lastRetargetMode = "SOMA Fallback";
-                    Debug.LogWarning($"[Kimodo] Retarget fallback to SOMA. {retargetDetails}");
+                    Debug.LogWarning($"[Kimodo] Custom avatar retarget failed. {customRetargetDetails}");
                 }
-                }
+            }
+
+            if (didRetarget)
+            {
+                ApplyCurveFilterAfterRetarget(clip.clip);
             }
 
             RefreshTimelinePreviewGraph();
@@ -750,6 +863,110 @@ namespace KimodoUnityMotionTools.ProjectEditor
             lastError = string.Empty;
             lastStatus = "Bake complete.";
             Debug.Log("[Kimodo] Bake complete (SOMA).");
+        }
+
+        private void ApplyCurveFilterAfterRetarget(AnimationClip targetClip)
+        {
+            if (targetClip == null || clip == null || clip.curveFilterOptions == null)
+            {
+                return;
+            }
+
+            var options = clip.curveFilterOptions;
+            if (!options.enabled)
+            {
+                if (options.ensureQuaternionContinuity)
+                {
+                    targetClip.EnsureQuaternionContinuity();
+                }
+                return;
+            }
+
+            GameObject tempRoot = BuildHierarchyFromClipBindings(targetClip, "KimodoPostRetargetFilterRoot");
+            tempRoot.hideFlags = HideFlags.HideAndDontSave;
+            try
+            {
+                var recorder = new UnityEditor.Animations.GameObjectRecorder(tempRoot);
+                recorder.BindComponentsOfType<Transform>(tempRoot, true);
+                float fps = targetClip.frameRate > 0f ? targetClip.frameRate : 30f;
+                int frameCount = Mathf.Max(2, Mathf.RoundToInt(targetClip.length * fps));
+                float dt = 1f / fps;
+                for (int f = 0; f < frameCount; f++)
+                {
+                    float t = f / fps;
+                    targetClip.SampleAnimation(tempRoot, t);
+                    recorder.TakeSnapshot(dt);
+                }
+
+                var filter = new UnityEditor.Animations.CurveFilterOptions
+                {
+                    keyframeReduction = true,
+                    positionError = Mathf.Clamp01(options.positionError),
+                    rotationError = Mathf.Clamp01(options.rotationError),
+                    scaleError = Mathf.Clamp01(options.positionError),
+                    floatError = Mathf.Clamp01(options.floatError),
+                    unrollRotation = true
+                };
+                targetClip.ClearCurves();
+                recorder.SaveToClip(targetClip, fps, filter);
+                if (options.ensureQuaternionContinuity)
+                {
+                    targetClip.EnsureQuaternionContinuity();
+                }
+            }
+            finally
+            {
+                UnityEngine.Object.DestroyImmediate(tempRoot);
+            }
+        }
+
+        private static GameObject BuildHierarchyFromClipBindings(AnimationClip clipAsset, string rootName)
+        {
+            var root = new GameObject(rootName);
+            var created = new Dictionary<string, Transform>(StringComparer.Ordinal);
+            created[string.Empty] = root.transform;
+
+            EditorCurveBinding[] bindings = AnimationUtility.GetCurveBindings(clipAsset);
+            for (int i = 0; i < bindings.Length; i++)
+            {
+                string path = bindings[i].path ?? string.Empty;
+                if (created.ContainsKey(path))
+                {
+                    continue;
+                }
+
+                EnsurePath(path, root.transform, created);
+            }
+
+            return root;
+        }
+
+        private static Transform EnsurePath(string path, Transform root, Dictionary<string, Transform> cache)
+        {
+            if (cache.TryGetValue(path, out Transform existing))
+            {
+                return existing;
+            }
+
+            if (string.IsNullOrEmpty(path))
+            {
+                cache[string.Empty] = root;
+                return root;
+            }
+
+            int split = path.LastIndexOf('/');
+            string parentPath = split > 0 ? path.Substring(0, split) : string.Empty;
+            string selfName = split >= 0 ? path.Substring(split + 1) : path;
+            Transform parent = EnsurePath(parentPath, root, cache);
+
+            var go = new GameObject(string.IsNullOrWhiteSpace(selfName) ? "Bone" : selfName);
+            Transform t = go.transform;
+            t.SetParent(parent, false);
+            t.localPosition = Vector3.zero;
+            t.localRotation = Quaternion.identity;
+            t.localScale = Vector3.one;
+            cache[path] = t;
+            return t;
         }
 
         private void DrawAdvancedCurveFilterSection()
@@ -760,7 +977,13 @@ namespace KimodoUnityMotionTools.ProjectEditor
             }
 
             EditorGUILayout.Space(4f);
-            showAdvancedFoldout = EditorGUILayout.ToggleLeft("Advanced", showAdvancedFoldout);
+            bool newFoldout = EditorGUILayout.Foldout(showAdvancedFoldout, "Advanced", true);
+            if (newFoldout != showAdvancedFoldout)
+            {
+                showAdvancedFoldout = newFoldout;
+                KimodoPlayableClipGenerationSettings.instance.AdvancedCurveFilterFoldout = showAdvancedFoldout;
+                KimodoPlayableClipGenerationSettings.instance.SaveSettings();
+            }
             if (!showAdvancedFoldout)
             {
                 return;

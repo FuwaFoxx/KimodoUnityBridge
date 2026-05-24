@@ -25,7 +25,7 @@ namespace KimodoUnityMotionTools.Generation
                 this.settings.comfyHost,
                 this.settings.comfyPort,
                 this.settings.comfyTimeoutSeconds,
-                this.settings.comfyPollIntervalSeconds,
+                1f,
                 this.settings.comfyWorkflowResourceName);
         }
 

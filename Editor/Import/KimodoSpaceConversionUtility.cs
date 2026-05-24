@@ -55,6 +55,55 @@ namespace KimodoUnityMotionTools.ProjectEditor
             return QuaternionToAxisAngleVector(kimodoLocal);
         }
 
+        public static KimodoMarkerSampleResult ToUnitySample(KimodoMarkerSampleResult kimodoSample)
+        {
+            if (kimodoSample == null)
+            {
+                return null;
+            }
+
+            var converted = new KimodoMarkerSampleResult
+            {
+                rootPosition = ToUnityRootPosition(kimodoSample.rootPosition),
+                rootHeading = ToUnityHeading(kimodoSample.rootHeading),
+                localAxisAngles = new List<Vector3>()
+            };
+
+            if (kimodoSample.localAxisAngles != null)
+            {
+                for (int i = 0; i < kimodoSample.localAxisAngles.Count; i++)
+                {
+                    converted.localAxisAngles.Add(ToUnityAxisAngle(kimodoSample.localAxisAngles[i]));
+                }
+            }
+
+            return converted;
+        }
+
+        public static Vector3 ToUnityRootPosition(Vector3 kimodoPosition)
+        {
+            return new Vector3(-kimodoPosition.x, kimodoPosition.y, kimodoPosition.z);
+        }
+
+        public static Vector2 ToUnityHeading(Vector2 kimodoHeading)
+        {
+            return new Vector2(-kimodoHeading.x, kimodoHeading.y);
+        }
+
+        public static Vector3 ToUnityAxisAngle(Vector3 kimodoAxisAngle)
+        {
+            float angleRad = kimodoAxisAngle.magnitude;
+            if (angleRad <= 1e-8f)
+            {
+                return Vector3.zero;
+            }
+
+            Vector3 axis = kimodoAxisAngle / angleRad;
+            Quaternion kimodoLocal = Quaternion.AngleAxis(angleRad * Mathf.Rad2Deg, axis);
+            Quaternion unityLocal = new Quaternion(kimodoLocal.x, -kimodoLocal.y, -kimodoLocal.z, kimodoLocal.w);
+            return QuaternionToAxisAngleVector(unityLocal);
+        }
+
         private static Vector3 QuaternionToAxisAngleVector(Quaternion q)
         {
             q.Normalize();

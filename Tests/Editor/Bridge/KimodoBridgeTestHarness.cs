@@ -125,7 +125,6 @@ namespace KimodoUnityMotionTools.Tests
             string modelName = DefaultModel,
             bool highVram = false,
             float comfyTimeoutSeconds = 120f,
-            float comfyPollIntervalSeconds = 1f,
             int startupTimeoutMs = 600000)
         {
             string launcher = BridgeLauncherResolver.ResolveStartScript(scope.RuntimeRoot);
@@ -140,7 +139,6 @@ namespace KimodoUnityMotionTools.Tests
                     startupTimeoutMs = Math.Max(30000, startupTimeoutMs)
                 },
                 comfyTimeoutSeconds = comfyTimeoutSeconds,
-                comfyPollIntervalSeconds = comfyPollIntervalSeconds,
                 comfyWorkflowResourceName = "kimodo-unity-workflow"
             });
         }

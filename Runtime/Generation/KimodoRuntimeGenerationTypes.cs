@@ -35,8 +35,6 @@ namespace KimodoUnityMotionTools.Generation
         public string comfyHost = "127.0.0.1";
         public int comfyPort = 8188;
         public float comfyTimeoutSeconds = 120f;
-        public float comfyPollIntervalSeconds = 1f;
         public string comfyWorkflowResourceName = "kimodo-unity-workflow";
     }
 }
-
