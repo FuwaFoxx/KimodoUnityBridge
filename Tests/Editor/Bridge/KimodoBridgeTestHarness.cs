@@ -50,7 +50,7 @@ namespace KimodoUnityMotionTools.Tests
             {
                 Directory.CreateDirectory(Path.GetDirectoryName(DiagnosticsPath) ?? WorkingRoot);
                 File.WriteAllLines(DiagnosticsPath, timeline);
-                TestContext.AddTestAttachment(DiagnosticsPath, "Kimodo runtime diagnostics");
+                //TestContext.AddTestAttachment(DiagnosticsPath, "Kimodo runtime diagnostics");
             }
             catch
             {

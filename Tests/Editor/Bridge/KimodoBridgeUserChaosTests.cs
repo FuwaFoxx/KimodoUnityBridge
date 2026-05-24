@@ -15,7 +15,7 @@ namespace KimodoUnityMotionTools.Tests
     [TestFixture]
     [Category("KimodoBridge")]
     [Category("UserChaos")]
-    [NonParallelizable]
+    
     internal sealed class KimodoBridgeUserChaosTests
     {
         private KimodoRuntimeScope scope;
@@ -27,7 +27,12 @@ namespace KimodoUnityMotionTools.Tests
         }
 
         [TearDown]
-        public async Task TearDownAsync()
+        public void TearDown()
+        {
+            TearDownAsync().GetAwaiter().GetResult();
+        }
+
+        private async Task TearDownAsync()
         {
             string workingRoot = scope?.WorkingRoot;
             await KimodoBridgeTestHarness.CleanupScopeAsync(scope);
@@ -40,7 +45,12 @@ namespace KimodoUnityMotionTools.Tests
         }
 
         [Test]
-        public async Task HighFrequencyGenerateClicks_ShouldKeepSingleActiveGenerationAndNoLeaks()
+        public void HighFrequencyGenerateClicks_ShouldKeepSingleActiveGenerationAndNoLeaks()
+        {
+            HighFrequencyGenerateClicks_ShouldKeepSingleActiveGenerationAndNoLeaks_Async().GetAwaiter().GetResult();
+        }
+
+        private async Task HighFrequencyGenerateClicks_ShouldKeepSingleActiveGenerationAndNoLeaks_Async()
         {
             await KimodoBridgeTestHarness.EnsureSetupOrIgnoreAsync(scope);
             using KimodoRuntimeGenerationService service = await KimodoBridgeTestHarness.StartBridgeRuntimeServiceOrIgnoreAsync(scope, 90f);
@@ -97,7 +107,12 @@ namespace KimodoUnityMotionTools.Tests
         }
 
         [Test]
-        public async Task GenerateThenImmediateCancel_ShouldFinishQuicklyAndAllowRestart()
+        public void GenerateThenImmediateCancel_ShouldFinishQuicklyAndAllowRestart()
+        {
+            GenerateThenImmediateCancel_ShouldFinishQuicklyAndAllowRestart_Async().GetAwaiter().GetResult();
+        }
+
+        private async Task GenerateThenImmediateCancel_ShouldFinishQuicklyAndAllowRestart_Async()
         {
             await KimodoBridgeTestHarness.EnsureSetupOrIgnoreAsync(scope);
             using KimodoRuntimeGenerationService service = await KimodoBridgeTestHarness.StartBridgeRuntimeServiceOrIgnoreAsync(scope, 90f);
@@ -138,7 +153,12 @@ namespace KimodoUnityMotionTools.Tests
         }
 
         [Test]
-        public async Task GenerateThenImmediateStopServer_ShouldFailControlledAndStateRecovered()
+        public void GenerateThenImmediateStopServer_ShouldFailControlledAndStateRecovered()
+        {
+            GenerateThenImmediateStopServer_ShouldFailControlledAndStateRecovered_Async().GetAwaiter().GetResult();
+        }
+
+        private async Task GenerateThenImmediateStopServer_ShouldFailControlledAndStateRecovered_Async()
         {
             await KimodoBridgeTestHarness.EnsureSetupOrIgnoreAsync(scope);
             using KimodoRuntimeGenerationService service = await KimodoBridgeTestHarness.StartBridgeRuntimeServiceOrIgnoreAsync(scope, 90f);
@@ -172,7 +192,12 @@ namespace KimodoUnityMotionTools.Tests
         }
 
         [Test]
-        public async Task GenerateThenTryFixConflict_ShouldNotDeadlockAndCanRestart()
+        public void GenerateThenTryFixConflict_ShouldNotDeadlockAndCanRestart()
+        {
+            GenerateThenTryFixConflict_ShouldNotDeadlockAndCanRestart_Async().GetAwaiter().GetResult();
+        }
+
+        private async Task GenerateThenTryFixConflict_ShouldNotDeadlockAndCanRestart_Async()
         {
             await KimodoBridgeTestHarness.EnsureSetupOrIgnoreAsync(scope);
             using KimodoRuntimeGenerationService service = await KimodoBridgeTestHarness.StartBridgeRuntimeServiceOrIgnoreAsync(scope, 90f);
