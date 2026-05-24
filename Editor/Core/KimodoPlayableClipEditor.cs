@@ -226,7 +226,7 @@ namespace KimodoUnityMotionTools.ProjectEditor
             GUI.enabled = !disableGenerate;
             if (GUILayout.Button("Generate & Bake", GUILayout.Height(32)))
             {
-                _ = KimodoGenerateAndBakeService.GenerateFromInspectorAsync(this);
+                _ = GenerateAsync();
             }
             GUI.enabled = isGenerating;
             if (GUILayout.Button("Cancel", GUILayout.Height(24)))
