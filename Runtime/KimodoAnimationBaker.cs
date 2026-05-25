@@ -163,7 +163,7 @@ namespace KimodoUnityMotionTools
             {
                 if (samplerRoot != null)
                 {
-                    UnityEngine.Object.DestroyImmediate(samplerRoot);
+                    DestroySamplerHierarchyRoot(samplerRoot);
                 }
             }
         }
@@ -171,22 +171,9 @@ namespace KimodoUnityMotionTools
         private static CurveFilterOptions BuildCurveFilterOptions(KimodoCurveFilterOptions options)
         {
             KimodoCurveFilterOptions effective = options ?? new KimodoCurveFilterOptions();
-            bool reduce = effective.enabled;
             float positionError = Mathf.Clamp01(effective.positionError);
             float rotationError = Mathf.Clamp01(effective.rotationError);
             float floatError = Mathf.Clamp01(effective.floatError);
-
-            if (!reduce)
-            {
-                return new CurveFilterOptions
-                {
-                    keyframeReduction = false,
-                    positionError = 0f,
-                    rotationError = 0f,
-                    scaleError = 0f,
-                    floatError = 0f
-                };
-            }
 
             return new CurveFilterOptions
             {
@@ -206,52 +193,59 @@ namespace KimodoUnityMotionTools
                 hideFlags = HideFlags.HideAndDontSave
             };
 
-            if (TryBuildHierarchyFromRuntimeAvatar(modelName, root.transform))
+            if (!TryLoadAndBuildAvatarHierarchy(modelName, root.transform, out Avatar avatar, out string buildError))
             {
-                return root;
+                UnityEngine.Object.DestroyImmediate(root);
+                throw new InvalidOperationException($"Failed to build recorder hierarchy from runtime avatar: {buildError}");
             }
 
-            var transforms = new Transform[jointCount];
-            for (int i = 0; i < jointCount; i++)
+            string skeletonRootName = KimodoRuntimeAvatarSkeletonBuilder.ResolveSkeletonRootName(avatar);
+            Transform recordingRoot = string.IsNullOrWhiteSpace(skeletonRootName)
+                ? root.transform
+                : root.transform.Find(skeletonRootName);
+            if (recordingRoot == null)
             {
-                string safeName = SanitizeName(data.joint_names[i]);
-                var go = new GameObject(safeName)
-                {
-                    hideFlags = HideFlags.HideAndDontSave
-                };
-                transforms[i] = go.transform;
-                transforms[i].localPosition = Vector3.zero;
-                transforms[i].localRotation = Quaternion.identity;
-                transforms[i].localScale = Vector3.one;
+                UnityEngine.Object.DestroyImmediate(root);
+                throw new InvalidOperationException($"Avatar skeleton root '{skeletonRootName}' was not found in recorder hierarchy.");
             }
 
-            for (int i = 0; i < jointCount; i++)
-            {
-                int parent = (data.joint_parents != null && data.joint_parents.Length > i)
-                    ? data.joint_parents[i]
-                    : -1;
-
-                if (parent < 0 || parent >= jointCount || parent == i)
-                {
-                    transforms[i].SetParent(root.transform, false);
-                }
-                else
-                {
-                    transforms[i].SetParent(transforms[parent], false);
-                }
-            }
-
-            return root;
+            return recordingRoot.gameObject;
         }
 
-        private static bool TryBuildHierarchyFromRuntimeAvatar(string modelName, Transform root)
+        private static bool TryLoadAndBuildAvatarHierarchy(string modelName, Transform root, out Avatar avatar, out string error)
         {
-            if (!KimodoRuntimeAvatarSkeletonBuilder.TryLoadAvatarByModelName(modelName, out Avatar avatar, out _))
+            avatar = null;
+            error = string.Empty;
+
+            if (!KimodoRuntimeAvatarSkeletonBuilder.TryLoadAvatarByModelName(modelName, out avatar, out string loadError))
             {
+                error = loadError;
                 return false;
             }
 
-            return KimodoRuntimeAvatarSkeletonBuilder.TryBuildHierarchyFromAvatarSkeleton(avatar, root, out _);
+            if (!KimodoRuntimeAvatarSkeletonBuilder.TryBuildHierarchyFromAvatarSkeleton(avatar, root, out string buildError))
+            {
+                error = buildError;
+                return false;
+            }
+
+            return true;
+        }
+
+        private static void DestroySamplerHierarchyRoot(GameObject samplingObject)
+        {
+            if (samplingObject == null)
+            {
+                return;
+            }
+
+            Transform t = samplingObject.transform;
+            while (t.parent != null)
+            {
+                t = t.parent;
+            }
+
+            UnityEngine.Object.DestroyImmediate(t.gameObject);
         }
 
         private static MotionJsonData ParseMotionJsonFlexible(string motionJson)

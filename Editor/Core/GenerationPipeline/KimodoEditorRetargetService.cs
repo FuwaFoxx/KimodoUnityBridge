@@ -99,16 +99,6 @@ namespace KimodoUnityMotionTools.ProjectEditor.GenerationPipeline
                 return;
             }
 
-            if (!options.enabled)
-            {
-                if (options.ensureQuaternionContinuity)
-                {
-                    targetClip.EnsureQuaternionContinuity();
-                }
-
-                return;
-            }
-
             GameObject tempRoot = BuildHierarchyFromClipBindings(targetClip, "KimodoPostRetargetFilterRoot");
             tempRoot.hideFlags = HideFlags.HideAndDontSave;
             try
