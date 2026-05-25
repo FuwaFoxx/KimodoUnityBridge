@@ -220,7 +220,7 @@ namespace KimodoUnityMotionTools.ProjectEditor
 
             token.ThrowIfCancellationRequested();
             progress?.Invoke("Creating animation clip...");
-            string clipPath = CreateGeneratedClipAsset(motionJson, options.OutputFolderAssetPath);
+            string clipPath = CreateGeneratedClipAsset(motionJson, options.OutputFolderAssetPath, options.ModelName);
 
             token.ThrowIfCancellationRequested();
             progress?.Invoke("Rewiring animator transition...");
@@ -413,7 +413,7 @@ namespace KimodoUnityMotionTools.ProjectEditor
             return 1f;
         }
 
-        private static string CreateGeneratedClipAsset(string motionJson, string outputFolderAssetPath)
+        private static string CreateGeneratedClipAsset(string motionJson, string outputFolderAssetPath, string modelName)
         {
             if (string.IsNullOrWhiteSpace(motionJson))
             {
@@ -440,7 +440,7 @@ namespace KimodoUnityMotionTools.ProjectEditor
                 clip,
                 motionJson,
                 KimodoBakeSkeletonType.SOMA,
-                options.ModelName,
+                modelName,
                 null,
                 out string bakeError);
 
