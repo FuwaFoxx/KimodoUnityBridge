@@ -26,7 +26,7 @@ namespace KimodoUnityMotionTools.Tests
 }";
 
         [Test]
-        public void BakeMotionJsonToClip_ValidJson_SucceedsAndForcesLegacy()
+        public void BakeMotionJsonToClip_ValidJson_SucceedsAndProducesExpectedClipMode()
         {
             var clip = new AnimationClip();
             bool ok = KimodoAiApi.BakeMotionJsonToClip(clip, MinimalValidMotionJson, out string error);

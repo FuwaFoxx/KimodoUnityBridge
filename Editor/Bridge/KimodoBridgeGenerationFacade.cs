@@ -1,4 +1,6 @@
 using System;
+using System.Collections.Generic;
+using System.Diagnostics;
 using System.IO;
 using System.Threading;
 using System.Threading.Tasks;
@@ -222,6 +224,24 @@ namespace KimodoUnityMotionTools.ProjectEditor
 
             isClosing = true;
             UnityEngine.Debug.Log($"[Kimodo][BridgeShutdown] begin mode={mode}, ticket={ticket}");
+
+            bool endpointKnown = false;
+            string endpointHost = string.Empty;
+            int endpointPort = -1;
+            if (mode == ShutdownMode.KillAndDispose && tryGetEndpointAsync != null)
+            {
+                try
+                {
+                    (endpointKnown, endpointHost, endpointPort) = await tryGetEndpointAsync();
+                }
+                catch
+                {
+                    endpointKnown = false;
+                    endpointHost = string.Empty;
+                    endpointPort = -1;
+                }
+            }
+
             try
             {
                 KimodoRuntimeGenerationService runtimeService = sharedRuntimeGenerationService;
@@ -252,25 +272,31 @@ namespace KimodoUnityMotionTools.ProjectEditor
                         try { runtimeService.Dispose(); } catch { }
                     }
                 }
-                else if (mode == ShutdownMode.KillAndDispose && tryGetEndpointAsync != null)
+                else if (mode == ShutdownMode.KillAndDispose && endpointKnown)
                 {
                     try
                     {
-                        (bool hasEndpoint, string host, int port) = await tryGetEndpointAsync();
-                        if (hasEndpoint)
-                        {
-                            await BridgeRuntimeControl.TrySendQuitAsync(
-                                host,
-                                port,
-                                BridgeRuntimeSettings.DefaultStatusConnectTimeoutMs,
-                                BridgeRuntimeSettings.DefaultStatusIoTimeoutMs,
-                                token);
-                            UnityEngine.Debug.Log($"[Kimodo][BridgeShutdown] sent quit to {host}:{port}.");
-                        }
+                        await BridgeRuntimeControl.TrySendQuitAsync(
+                            endpointHost,
+                            endpointPort,
+                            BridgeRuntimeSettings.DefaultStatusConnectTimeoutMs,
+                            BridgeRuntimeSettings.DefaultStatusIoTimeoutMs,
+                            token);
+                        UnityEngine.Debug.Log($"[Kimodo][BridgeShutdown] sent quit to {endpointHost}:{endpointPort}.");
                     }
                     catch
                     {
                         // ignore
+                    }
+                }
+
+                if (mode == ShutdownMode.KillAndDispose && endpointKnown)
+                {
+                    bool fullyStopped = await EnsureEndpointStoppedAfterShutdownAsync(endpointHost, endpointPort, token);
+                    if (!fullyStopped)
+                    {
+                        throw new InvalidOperationException(
+                            $"Bridge server still responsive at {endpointHost}:{endpointPort} after shutdown attempt.");
                     }
                 }
             }
@@ -283,6 +309,238 @@ namespace KimodoUnityMotionTools.ProjectEditor
 
                 UnityEngine.Debug.Log($"[Kimodo][BridgeShutdown] end mode={mode}, ticket={ticket}");
             }
+        }
+
+        private static async Task<bool> EnsureEndpointStoppedAfterShutdownAsync(string host, int port, CancellationToken token)
+        {
+            if (string.IsNullOrWhiteSpace(host) || port <= 0)
+            {
+                return true;
+            }
+
+            bool alive = await BridgeRuntimeControl.IsServerResponsiveAsync(
+                host,
+                port,
+                connectTimeoutMs: 500,
+                ioTimeoutMs: 800,
+                acceptLoading: true,
+                token: token);
+            if (!alive)
+            {
+                return true;
+            }
+
+            UnityEngine.Debug.LogWarning($"[Kimodo][BridgeShutdown] endpoint still alive at {host}:{port}, trying force-kill by port owner.");
+            bool forceKillTriggered = TryForceKillListeningProcessByPort(port);
+            if (!forceKillTriggered)
+            {
+                return false;
+            }
+
+            await Task.Delay(700, CancellationToken.None);
+
+            bool aliveAfterForceKill = await BridgeRuntimeControl.IsServerResponsiveAsync(
+                host,
+                port,
+                connectTimeoutMs: 500,
+                ioTimeoutMs: 800,
+                acceptLoading: true,
+                token: token);
+            if (!aliveAfterForceKill)
+            {
+                TryDeleteServerPortByEndpoint(host, port);
+                UnityEngine.Debug.Log($"[Kimodo][BridgeShutdown] force-kill succeeded for {host}:{port}.");
+                return true;
+            }
+
+            UnityEngine.Debug.LogWarning($"[Kimodo][BridgeShutdown] endpoint still alive after force-kill at {host}:{port}.");
+            return false;
+        }
+
+        private static void TryDeleteServerPortByEndpoint(string host, int port)
+        {
+            if (port <= 0)
+            {
+                return;
+            }
+
+            try
+            {
+                string runtimeRoot = KimodoBridgeRuntimeInstallFacade.GetRuntimeRootPath();
+                if (string.IsNullOrWhiteSpace(runtimeRoot))
+                {
+                    return;
+                }
+
+                string serverPortPath = BridgeEndpointResolver.GetServerPortFilePath(runtimeRoot);
+                if (!File.Exists(serverPortPath))
+                {
+                    return;
+                }
+
+                if (!BridgeEndpointResolver.TryReadServerEndpointFromFile(
+                        serverPortPath,
+                        string.IsNullOrWhiteSpace(host) ? "127.0.0.1" : host,
+                        out string fileHost,
+                        out int filePort,
+                        out _))
+                {
+                    File.Delete(serverPortPath);
+                    return;
+                }
+
+                if (filePort == port)
+                {
+                    File.Delete(serverPortPath);
+                }
+            }
+            catch
+            {
+                // ignore cleanup failure
+            }
+        }
+
+        private static bool TryForceKillListeningProcessByPort(int port)
+        {
+            if (port <= 0)
+            {
+                return false;
+            }
+
+            if (UnityEngine.Application.platform != UnityEngine.RuntimePlatform.WindowsEditor &&
+                UnityEngine.Application.platform != UnityEngine.RuntimePlatform.WindowsPlayer)
+            {
+                return false;
+            }
+
+            HashSet<int> pids = QueryListeningPidsByPortOnWindows(port);
+            if (pids.Count == 0)
+            {
+                UnityEngine.Debug.LogWarning($"[Kimodo][BridgeShutdown] no listening PID found for port {port}.");
+                return false;
+            }
+
+            bool anyKilled = false;
+            foreach (int pid in pids)
+            {
+                if (pid <= 0)
+                {
+                    continue;
+                }
+
+                try
+                {
+                    var psi = new ProcessStartInfo
+                    {
+                        FileName = "taskkill.exe",
+                        Arguments = $"/PID {pid} /T /F",
+                        UseShellExecute = false,
+                        CreateNoWindow = true,
+                        RedirectStandardOutput = true,
+                        RedirectStandardError = true
+                    };
+
+                    using Process killer = Process.Start(psi);
+                    if (killer != null)
+                    {
+                        killer.WaitForExit(5000);
+                        anyKilled = true;
+                        UnityEngine.Debug.Log($"[Kimodo][BridgeShutdown] taskkill by port {port}, pid={pid}, exit={killer.ExitCode}");
+                    }
+                }
+                catch (Exception ex)
+                {
+                    UnityEngine.Debug.LogWarning($"[Kimodo][BridgeShutdown] taskkill failed for pid={pid}: {ex.Message}");
+                }
+            }
+
+            return anyKilled;
+        }
+
+        private static HashSet<int> QueryListeningPidsByPortOnWindows(int port)
+        {
+            var result = new HashSet<int>();
+            try
+            {
+                var psi = new ProcessStartInfo
+                {
+                    FileName = "netstat.exe",
+                    Arguments = "-ano -p tcp",
+                    UseShellExecute = false,
+                    CreateNoWindow = true,
+                    RedirectStandardOutput = true,
+                    RedirectStandardError = true
+                };
+
+                using Process p = Process.Start(psi);
+                if (p == null)
+                {
+                    return result;
+                }
+
+                string output = p.StandardOutput.ReadToEnd();
+                p.WaitForExit(5000);
+
+                string[] lines = output.Split(new[] { '\r', '\n' }, StringSplitOptions.RemoveEmptyEntries);
+                for (int i = 0; i < lines.Length; i++)
+                {
+                    string line = lines[i].Trim();
+                    if (!line.StartsWith("TCP", StringComparison.OrdinalIgnoreCase))
+                    {
+                        continue;
+                    }
+
+                    string[] columns = line.Split((char[])null, StringSplitOptions.RemoveEmptyEntries);
+                    if (columns.Length < 5)
+                    {
+                        continue;
+                    }
+
+                    string localAddress = columns[1];
+                    string state = columns[3];
+                    string pidText = columns[4];
+
+                    if (!string.Equals(state, "LISTENING", StringComparison.OrdinalIgnoreCase) &&
+                        !string.Equals(state, "LISTEN", StringComparison.OrdinalIgnoreCase))
+                    {
+                        continue;
+                    }
+
+                    if (!TryParsePortFromEndpoint(localAddress, out int localPort) || localPort != port)
+                    {
+                        continue;
+                    }
+
+                    if (int.TryParse(pidText, out int pid) && pid > 0)
+                    {
+                        result.Add(pid);
+                    }
+                }
+            }
+            catch
+            {
+                // ignore
+            }
+
+            return result;
+        }
+
+        private static bool TryParsePortFromEndpoint(string endpoint, out int port)
+        {
+            port = -1;
+            if (string.IsNullOrWhiteSpace(endpoint))
+            {
+                return false;
+            }
+
+            int index = endpoint.LastIndexOf(':');
+            if (index < 0 || index >= endpoint.Length - 1)
+            {
+                return false;
+            }
+
+            string portText = endpoint.Substring(index + 1);
+            return int.TryParse(portText, out port) && port > 0 && port <= 65535;
         }
 
         public void Dispose()

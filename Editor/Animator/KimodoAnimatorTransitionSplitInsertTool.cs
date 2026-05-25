@@ -4,6 +4,7 @@ using System.IO;
 using System.Threading;
 using System.Threading.Tasks;
 using KimodoUnityMotionTools.Generation;
+using KimodoUnityMotionTools.ProjectEditor.Manager;
 using Newtonsoft.Json;
 using UnityEditor;
 using UnityEditor.Animations;
@@ -30,6 +31,8 @@ namespace KimodoUnityMotionTools.ProjectEditor
                 return;
             }
 
+            KimodoEditorCommandManager.Dispatch(
+                new ConstraintSnapshotRefreshCommand());
             OpenWindowForTransition(transition);
         }
 
@@ -49,6 +52,8 @@ namespace KimodoUnityMotionTools.ProjectEditor
                 return;
             }
 
+            KimodoEditorCommandManager.Dispatch(
+                new ConstraintSnapshotRefreshCommand());
             OpenWindowForTransition(transition);
         }
 
@@ -435,6 +440,7 @@ namespace KimodoUnityMotionTools.ProjectEditor
                 clip,
                 motionJson,
                 KimodoBakeSkeletonType.SOMA,
+                options.ModelName,
                 null,
                 out string bakeError);
 
@@ -681,6 +687,8 @@ namespace KimodoUnityMotionTools.ProjectEditor
         private string endPoseJson = string.Empty;
         private bool generating;
         private CancellationTokenSource cts;
+        private Guid activeRequestId = Guid.Empty;
+        private bool subscribedManager;
 
         internal static void OpenForTransition(AnimatorStateTransition transition)
         {
@@ -713,6 +721,7 @@ namespace KimodoUnityMotionTools.ProjectEditor
 
         private void OnDisable()
         {
+            UnsubscribeManagerEvents();
             CancelInternal();
         }
 
@@ -844,41 +853,30 @@ namespace KimodoUnityMotionTools.ProjectEditor
             error = string.Empty;
             status = "Starting...";
             SavePrefs();
+            var command = new AnimatorSplitInsertCommand(
+                transition,
+                options.Prompt,
+                options.Steps,
+                options.UseRandomSeed,
+                options.Seed,
+                options.ModelName,
+                options.VramMode,
+                options.OutputFolderAssetPath,
+                options.StartPose,
+                options.EndPose);
+
+            bool accepted = KimodoEditorCommandManager.Dispatch(command);
+            if (!accepted)
+            {
+                status = "Rejected: target is busy.";
+                return;
+            }
+
+            activeRequestId = command.RequestId;
             generating = true;
             cts = new CancellationTokenSource();
             Repaint();
-
-            try
-            {
-                SplitInsertResult result = await KimodoAnimatorTransitionSplitInsertTool.ExecuteSplitInsertAsync(
-                    transition,
-                    options,
-                    msg =>
-                    {
-                        status = msg ?? string.Empty;
-                        EditorApplication.delayCall += Repaint;
-                    },
-                    cts.Token);
-
-                status = $"Done. Inserted clip: {result.GeneratedClipAssetPath}";
-                error = string.Empty;
-            }
-            catch (OperationCanceledException)
-            {
-                status = "Canceled.";
-            }
-            catch (Exception ex)
-            {
-                error = ex.Message;
-                status = "Failed.";
-                Debug.LogError("[Kimodo] Split-insert failed: " + ex);
-            }
-            finally
-            {
-                generating = false;
-                CancelInternal();
-                Repaint();
-            }
+            await Task.CompletedTask;
         }
 
         private void CancelInternal()
@@ -904,6 +902,11 @@ namespace KimodoUnityMotionTools.ProjectEditor
             finally
             {
                 local.Dispose();
+            }
+
+            if (activeRequestId != Guid.Empty)
+            {
+                KimodoEditorCommandManager.Cancel(activeRequestId);
             }
         }
 
@@ -975,6 +978,117 @@ namespace KimodoUnityMotionTools.ProjectEditor
                 error = ex.Message;
                 return null;
             }
+        }
+
+        private void OnEnable()
+        {
+            SubscribeManagerEvents();
+        }
+
+        private void SubscribeManagerEvents()
+        {
+            if (subscribedManager)
+            {
+                return;
+            }
+
+            KimodoEditorCommandManager.CommandProgress += OnCommandProgress;
+            KimodoEditorCommandManager.CommandCompleted += OnCommandCompleted;
+            KimodoEditorCommandManager.CommandFailed += OnCommandFailed;
+            KimodoEditorCommandManager.CommandCanceled += OnCommandCanceled;
+            subscribedManager = true;
+        }
+
+        private void UnsubscribeManagerEvents()
+        {
+            if (!subscribedManager)
+            {
+                return;
+            }
+
+            KimodoEditorCommandManager.CommandProgress -= OnCommandProgress;
+            KimodoEditorCommandManager.CommandCompleted -= OnCommandCompleted;
+            KimodoEditorCommandManager.CommandFailed -= OnCommandFailed;
+            KimodoEditorCommandManager.CommandCanceled -= OnCommandCanceled;
+            subscribedManager = false;
+        }
+
+        private void OnCommandProgress(KimodoEditorCommandProgressEvent evt)
+        {
+            if (!IsActiveCommand(evt.Command))
+            {
+                return;
+            }
+
+            status = evt.Message ?? string.Empty;
+            EditorApplication.delayCall += Repaint;
+        }
+
+        private void OnCommandCompleted(KimodoEditorCommandCompletedEvent evt)
+        {
+            if (!IsActiveCommand(evt.Command))
+            {
+                return;
+            }
+
+            if (evt.Payload is KimodoEditorAnimatorSplitInsertResult result)
+            {
+                status = $"Done. Inserted clip: {result.GeneratedClipAssetPath}";
+            }
+            else
+            {
+                status = "Done.";
+            }
+
+            error = string.Empty;
+            generating = false;
+            activeRequestId = Guid.Empty;
+            CancelInternal();
+            Repaint();
+        }
+
+        private void OnCommandFailed(KimodoEditorCommandFailedEvent evt)
+        {
+            if (!IsActiveCommand(evt.Command))
+            {
+                return;
+            }
+
+            error = evt.Message;
+            status = "Failed.";
+            generating = false;
+            activeRequestId = Guid.Empty;
+            CancelInternal();
+            Repaint();
+        }
+
+        private void OnCommandCanceled(KimodoEditorCommandCanceledEvent evt)
+        {
+            if (!IsActiveCommand(evt.Command))
+            {
+                return;
+            }
+
+            status = "Canceled.";
+            generating = false;
+            activeRequestId = Guid.Empty;
+            CancelInternal();
+            Repaint();
+        }
+
+        private bool IsActiveCommand(IKimodoEditorCommand command)
+        {
+            if (command == null || command.Kind != KimodoEditorCommandKind.AnimatorSplitInsert)
+            {
+                return false;
+            }
+
+            if (activeRequestId != Guid.Empty)
+            {
+                return command.RequestId == activeRequestId;
+            }
+
+            return transition != null && string.Equals(command.TargetKey, "animator:" + transition.GetInstanceID(), StringComparison.Ordinal);
         }
 
         [Serializable]

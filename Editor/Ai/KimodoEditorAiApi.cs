@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Threading;
 using System.Threading.Tasks;
+using KimodoUnityMotionTools.ProjectEditor.Manager;
 using UnityEditor;
 
 namespace KimodoUnityMotionTools.ProjectEditor.Ai
@@ -84,19 +85,65 @@ namespace KimodoUnityMotionTools.ProjectEditor.Ai
                 token.ThrowIfCancellationRequested();
             }
 
-            var editor = UnityEditor.Editor.CreateEditor(clip, typeof(KimodoPlayableClipEditor)) as KimodoPlayableClipEditor;
-            if (editor == null)
+            var command = new GeneratePlayableClipCommand(clip);
+            var tcs = new TaskCompletionSource<bool>();
+
+            void OnProgress(KimodoEditorCommandProgressEvent _) { }
+            void OnCompleted(KimodoEditorCommandCompletedEvent evt)
             {
-                throw new InvalidOperationException("Failed to create KimodoPlayableClipEditor.");
+                if (evt.Command.RequestId != command.RequestId)
+                {
+                    return;
+                }
+
+                Unsubscribe();
+                tcs.TrySetResult(true);
             }
 
-            try
+            void OnFailed(KimodoEditorCommandFailedEvent evt)
             {
-                await editor.GenerateForTestsAsync();
+                if (evt.Command.RequestId != command.RequestId)
+                {
+                    return;
+                }
+
+                Unsubscribe();
+                tcs.TrySetException(new InvalidOperationException(evt.Message, evt.Exception));
             }
-            finally
+
+            void OnCanceled(KimodoEditorCommandCanceledEvent evt)
             {
-                UnityEngine.Object.DestroyImmediate(editor);
+                if (evt.Command.RequestId != command.RequestId)
+                {
+                    return;
+                }
+
+                Unsubscribe();
+                tcs.TrySetCanceled();
+            }
+
+            void Unsubscribe()
+            {
+                KimodoEditorCommandManager.CommandProgress -= OnProgress;
+                KimodoEditorCommandManager.CommandCompleted -= OnCompleted;
+                KimodoEditorCommandManager.CommandFailed -= OnFailed;
+                KimodoEditorCommandManager.CommandCanceled -= OnCanceled;
+            }
+
+            KimodoEditorCommandManager.CommandProgress += OnProgress;
+            KimodoEditorCommandManager.CommandCompleted += OnCompleted;
+            KimodoEditorCommandManager.CommandFailed += OnFailed;
+            KimodoEditorCommandManager.CommandCanceled += OnCanceled;
+
+            if (!KimodoEditorCommandManager.Dispatch(command))
+            {
+                Unsubscribe();
+                throw new InvalidOperationException("Dispatch rejected: command is already running for target clip.");
+            }
+
+            using (token.Register(() => KimodoEditorCommandManager.Cancel(command.RequestId)))
+            {
+                await tcs.Task;
             }
         }
     }

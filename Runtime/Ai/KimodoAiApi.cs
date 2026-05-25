@@ -99,7 +99,7 @@ namespace KimodoUnityMotionTools.Ai
 
         public static bool BakeMotionJsonToClip(AnimationClip clip, string motionJson, out string error)
         {
-            return KimodoRuntimeLegacyClipBaker.TryBake(clip, motionJson, out error);
+            return KimodoRuntimeClipBaker.TryBake(clip, motionJson, out error);
         }
 
         public static async Task<(KimodoGenerationResultDto result, bool baked, string bakeError)> GenerateAndBakeAsync(

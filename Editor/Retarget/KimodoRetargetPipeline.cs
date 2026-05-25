@@ -1,10 +1,11 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using UnityEditor;
 using UnityEditor.Timeline;
 using UnityEngine;
 using UnityEngine.Playables;
 using UnityEngine.Timeline;
+using KimodoUnityMotionTools.Generation.Pipeline;
 
 namespace KimodoUnityMotionTools.ProjectEditor
 {
@@ -345,20 +346,20 @@ namespace KimodoUnityMotionTools.ProjectEditor
             tempRoot = null;
             error = string.Empty;
 
-            string avatarResourceName = ResolveRuntimeAvatarResourceName(playableClip);
-            Avatar runtimeAvatar = Resources.Load<Avatar>(avatarResourceName);
-            if (runtimeAvatar == null || !runtimeAvatar.isValid || !runtimeAvatar.isHuman)
+            string modelName = playableClip != null ? playableClip.bridgeModelName : string.Empty;
+            if (!KimodoRuntimeAvatarSkeletonBuilder.TryLoadAvatarByModelName(modelName, out Avatar runtimeAvatar, out string loadError))
             {
-                error = $"Runtime Resources avatar '{avatarResourceName}' not found or invalid humanoid avatar.";
+                error = loadError;
                 return false;
             }
+            string avatarResourceName = KimodoRuntimeAvatarSkeletonBuilder.ResolveAvatarResourceName(modelName);
 
             tempRoot = new GameObject($"KimodoSomaSampling_{avatarResourceName}");
             tempRoot.hideFlags = HideFlags.HideAndDontSave;
             tempRoot.transform.SetPositionAndRotation(Vector3.zero, Quaternion.identity);
             tempRoot.transform.localScale = Vector3.one;
 
-            if (!TryBuildHierarchyFromAvatarSkeleton(runtimeAvatar, tempRoot.transform, out string hierarchyError))
+            if (!KimodoRuntimeAvatarSkeletonBuilder.TryBuildHierarchyFromAvatarSkeleton(runtimeAvatar, tempRoot.transform, out string hierarchyError))
             {
                 UnityEngine.Object.DestroyImmediate(tempRoot);
                 tempRoot = null;
@@ -385,90 +386,6 @@ namespace KimodoUnityMotionTools.ProjectEditor
             return true;
         }
 
-        private static string ResolveRuntimeAvatarResourceName(KimodoPlayableClip playableClip)
-        {
-            string modelName = playableClip != null ? playableClip.bridgeModelName : string.Empty;
-            if (string.IsNullOrWhiteSpace(modelName))
-            {
-                return "SOMAAvatar";
-            }
-
-            string normalized = modelName.Trim().ToLowerInvariant();
-            if (normalized.Contains("smplx"))
-            {
-                return "SMPLXAvatar";
-            }
-
-            if (normalized.Contains("g1"))
-            {
-                return "G1Avatar";
-            }
-
-            return "SOMAAvatar";
-        }
-        private static bool TryBuildHierarchyFromAvatarSkeleton(Avatar avatar, Transform root, out string error)
-        {
-            error = string.Empty;
-            if (avatar == null || root == null)
-            {
-                error = "Avatar or root is null while building sampling hierarchy.";
-                return false;
-            }
-
-            SkeletonBone[] skeleton = avatar.humanDescription.skeleton;
-            if (skeleton == null || skeleton.Length == 0)
-            {
-                error = "Avatar humanDescription.skeleton is empty.";
-                return false;
-            }
-
-            var nodes = new List<SkeletonBuildNode>(skeleton.Length);
-            var firstByName = new Dictionary<string, Transform>(StringComparer.Ordinal);
-
-            for (int i = 0; i < skeleton.Length; i++)
-            {
-                SkeletonBone bone = skeleton[i];
-                string name = string.IsNullOrWhiteSpace(bone.name) ? $"Bone_{i}" : bone.name;
-                string parentName = AvatarSetupToolExtension.GetSkeletonBoneParentNameOrEmpty(bone);
-
-                GameObject go = new GameObject(name);
-                Transform t = go.transform;
-                nodes.Add(new SkeletonBuildNode
-                {
-                    Name = name,
-                    ParentName = parentName,
-                    LocalPosition = bone.position,
-                    LocalRotation = bone.rotation,
-                    LocalScale = bone.scale,
-                    Transform = t
-                });
-
-                if (!firstByName.ContainsKey(name))
-                {
-                    firstByName[name] = t;
-                }
-            }
-
-            for (int i = 0; i < nodes.Count; i++)
-            {
-                SkeletonBuildNode node = nodes[i];
-                Transform parent = root;
-                if (!string.IsNullOrWhiteSpace(node.ParentName) &&
-                    firstByName.TryGetValue(node.ParentName, out Transform resolvedParent) &&
-                    resolvedParent != null)
-                {
-                    parent = resolvedParent;
-                }
-
-                node.Transform.SetParent(parent, false);
-                node.Transform.localPosition = node.LocalPosition;
-                node.Transform.localRotation = node.LocalRotation;
-                node.Transform.localScale = node.LocalScale;
-            }
-
-            return true;
-        }
-
         private static Transform ResolveBuiltAvatarSkeletonRoot(Transform hierarchyRoot, Avatar avatar)
         {
             if (hierarchyRoot == null)
@@ -476,7 +393,7 @@ namespace KimodoUnityMotionTools.ProjectEditor
                 return null;
             }
 
-            string expectedRootName = GetAvatarSkeletonRootName(avatar);
+            string expectedRootName = KimodoRuntimeAvatarSkeletonBuilder.ResolveSkeletonRootName(avatar);
             if (!string.IsNullOrWhiteSpace(expectedRootName))
             {
                 if (string.Equals(hierarchyRoot.name, expectedRootName, StringComparison.Ordinal))
@@ -507,32 +424,6 @@ namespace KimodoUnityMotionTools.ProjectEditor
             }
 
             return hierarchyRoot;
-        }
-
-        private static string GetAvatarSkeletonRootName(Avatar avatar)
-        {
-            if (avatar == null || avatar.humanDescription.skeleton == null)
-            {
-                return string.Empty;
-            }
-
-            SkeletonBone[] skeleton = avatar.humanDescription.skeleton;
-            for (int i = 0; i < skeleton.Length; i++)
-            {
-                string name = skeleton[i].name;
-                string parentName = AvatarSetupToolExtension.GetSkeletonBoneParentNameOrEmpty(skeleton[i]);
-                if (string.IsNullOrWhiteSpace(name))
-                {
-                    continue;
-                }
-
-                if (string.IsNullOrWhiteSpace(parentName))
-                {
-                    return name;
-                }
-            }
-
-            return string.Empty;
         }
 
         private static int CopyLocalPoseByPathForSampling(Transform sourceRoot, Transform dstRoot)
@@ -571,16 +462,6 @@ namespace KimodoUnityMotionTools.ProjectEditor
             }
 
             return copied;
-        }
-
-        private sealed class SkeletonBuildNode
-        {
-            public string Name;
-            public string ParentName;
-            public Vector3 LocalPosition;
-            public Quaternion LocalRotation;
-            public Vector3 LocalScale;
-            public Transform Transform;
         }
 
         private static Animator CreateTempAnimatorForAvatar(
@@ -630,7 +511,7 @@ namespace KimodoUnityMotionTools.ProjectEditor
             tempRoot.transform.SetPositionAndRotation(Vector3.zero, Quaternion.identity);
             tempRoot.transform.localScale = Vector3.one;
 
-            if (!TryBuildHierarchyFromAvatarSkeleton(avatar, tempRoot.transform, out _))
+            if (!KimodoRuntimeAvatarSkeletonBuilder.TryBuildHierarchyFromAvatarSkeleton(avatar, tempRoot.transform, out _))
             {
                 UnityEngine.Object.DestroyImmediate(tempRoot);
                 tempRoot = null;

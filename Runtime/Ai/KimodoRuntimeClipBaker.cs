@@ -5,7 +5,7 @@ using UnityEngine;
 
 namespace KimodoUnityMotionTools.Ai
 {
-    internal static class KimodoRuntimeLegacyClipBaker
+    internal static class KimodoRuntimeClipBaker
     {
         [Serializable]
         private sealed class MotionJsonData

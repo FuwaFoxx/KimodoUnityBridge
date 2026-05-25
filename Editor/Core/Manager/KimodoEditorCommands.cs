@@ -1,0 +1,182 @@
+﻿using UnityEditor.Animations;
+using UnityEngine;
+using UnityEngine.Timeline;
+
+namespace KimodoUnityMotionTools.ProjectEditor.Manager
+{
+    public sealed class GeneratePlayableClipCommand : KimodoEditorCommandBase
+    {
+        public GeneratePlayableClipCommand(KimodoPlayableClip clip, string promptOverride = null)
+            : base(BuildTargetKey(clip), KimodoEditorCommandKind.GeneratePlayableClip)
+        {
+            Clip = clip;
+            PromptOverride = promptOverride;
+        }
+
+        public KimodoPlayableClip Clip { get; }
+
+        public string PromptOverride { get; }
+
+        private static string BuildTargetKey(KimodoPlayableClip clip)
+        {
+            return clip == null ? "clip:null" : "clip:" + clip.GetInstanceID();
+        }
+    }
+
+    public sealed class GenerateFromPromptCommand : KimodoEditorCommandBase
+    {
+        public GenerateFromPromptCommand(int clipInstanceId, string promptOverride)
+            : base("clip:" + clipInstanceId, KimodoEditorCommandKind.GeneratePlayableClip)
+        {
+            ClipInstanceId = clipInstanceId;
+            PromptOverride = promptOverride ?? string.Empty;
+        }
+
+        public int ClipInstanceId { get; }
+
+        public string PromptOverride { get; }
+    }
+
+    public sealed class CancelPlayableClipGenerationCommand : KimodoEditorCommandBase
+    {
+        public CancelPlayableClipGenerationCommand(KimodoPlayableClip clip)
+            : base(clip == null ? "clip:null" : "clip:" + clip.GetInstanceID(), KimodoEditorCommandKind.CancelPlayableClipGeneration)
+        {
+            Clip = clip;
+        }
+
+        public KimodoPlayableClip Clip { get; }
+    }
+
+    public sealed class AnimatorSplitInsertCommand : KimodoEditorCommandBase
+    {
+        public AnimatorSplitInsertCommand(
+            AnimatorStateTransition transition,
+            string prompt,
+            int steps,
+            bool useRandomSeed,
+            int seed,
+            string modelName,
+            KimodoBridgeVramMode vramMode,
+            string outputFolderAssetPath,
+            KimodoMarkerSampleResult startPose,
+            KimodoMarkerSampleResult endPose)
+            : base(transition == null ? "animator:null" : "animator:" + transition.GetInstanceID(), KimodoEditorCommandKind.AnimatorSplitInsert)
+        {
+            Transition = transition;
+            Prompt = prompt ?? string.Empty;
+            Steps = steps;
+            UseRandomSeed = useRandomSeed;
+            Seed = seed;
+            ModelName = modelName ?? string.Empty;
+            VramMode = vramMode;
+            OutputFolderAssetPath = outputFolderAssetPath ?? string.Empty;
+            StartPose = startPose;
+            EndPose = endPose;
+        }
+
+        public AnimatorStateTransition Transition { get; }
+
+        public string Prompt { get; }
+
+        public int Steps { get; }
+
+        public bool UseRandomSeed { get; }
+
+        public int Seed { get; }
+
+        public string ModelName { get; }
+
+        public KimodoBridgeVramMode VramMode { get; }
+
+        public string OutputFolderAssetPath { get; }
+
+        public KimodoMarkerSampleResult StartPose { get; }
+
+        public KimodoMarkerSampleResult EndPose { get; }
+    }
+
+    public enum KimodoBridgeOperation
+    {
+        Start = 0,
+        Stop = 1,
+        TryFix = 2,
+        DeleteAllData = 3,
+        RefreshStatus = 4,
+        EnsureRuntimeRoot = 5
+    }
+
+    public sealed class BridgeControlCommand : KimodoEditorCommandBase
+    {
+        public BridgeControlCommand(
+            KimodoBridgeOperation operation,
+            string runtimeRoot,
+            string modelName,
+            KimodoBridgeVramMode vramMode,
+            string modelsRootOverride)
+            : base(BuildTargetKey(operation), MapKind(operation))
+        {
+            Operation = operation;
+            RuntimeRoot = runtimeRoot ?? string.Empty;
+            ModelName = modelName ?? string.Empty;
+            VramMode = vramMode;
+            ModelsRootOverride = modelsRootOverride ?? string.Empty;
+        }
+
+        public KimodoBridgeOperation Operation { get; }
+
+        public string RuntimeRoot { get; }
+
+        public string ModelName { get; }
+
+        public KimodoBridgeVramMode VramMode { get; }
+
+        public string ModelsRootOverride { get; }
+
+        private static string BuildTargetKey(KimodoBridgeOperation operation)
+        {
+            switch (operation)
+            {
+                case KimodoBridgeOperation.RefreshStatus:
+                    return "bridge:refresh";
+                case KimodoBridgeOperation.EnsureRuntimeRoot:
+                case KimodoBridgeOperation.TryFix:
+                case KimodoBridgeOperation.DeleteAllData:
+                    return "bridge:maintenance";
+                case KimodoBridgeOperation.Start:
+                case KimodoBridgeOperation.Stop:
+                default:
+                    return "bridge:control";
+            }
+        }
+
+        private static KimodoEditorCommandKind MapKind(KimodoBridgeOperation operation)
+        {
+            switch (operation)
+            {
+                case KimodoBridgeOperation.Start:
+                    return KimodoEditorCommandKind.BridgeStartServer;
+                case KimodoBridgeOperation.Stop:
+                    return KimodoEditorCommandKind.BridgeStopServer;
+                case KimodoBridgeOperation.TryFix:
+                    return KimodoEditorCommandKind.BridgeTryFix;
+                case KimodoBridgeOperation.DeleteAllData:
+                    return KimodoEditorCommandKind.BridgeDeleteAllData;
+                case KimodoBridgeOperation.RefreshStatus:
+                    return KimodoEditorCommandKind.BridgeRefreshStatus;
+                case KimodoBridgeOperation.EnsureRuntimeRoot:
+                    return KimodoEditorCommandKind.BridgeEnsureRuntimeRoot;
+                default:
+                    return KimodoEditorCommandKind.Unknown;
+            }
+        }
+    }
+
+    public sealed class ConstraintSnapshotRefreshCommand : KimodoEditorCommandBase
+    {
+        public ConstraintSnapshotRefreshCommand()
+            : base("constraint:snapshot", KimodoEditorCommandKind.ConstraintSnapshotRefresh)
+        {
+        }
+    }
+}

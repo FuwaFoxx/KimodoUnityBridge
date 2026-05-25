@@ -1,0 +1,16 @@
+﻿{
+  "name": "KimodoTool.Editor.UI",
+  "rootNamespace": "",
+  "references": [
+    "KimodoTool.Editor"
+  ],
+  "includePlatforms": [],
+  "excludePlatforms": [],
+  "allowUnsafeCode": false,
+  "overrideReferences": false,
+  "precompiledReferences": [],
+  "autoReferenced": true,
+  "defineConstraints": [],
+  "versionDefines": [],
+  "noEngineReferences": false
+}

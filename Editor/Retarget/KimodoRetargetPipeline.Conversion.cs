@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using UnityEditor;
 using UnityEngine;
@@ -395,8 +395,8 @@ namespace KimodoUnityMotionTools.ProjectEditor
                 return false;
             }
 
-            postRotation = AvatarSetupToolExtension.GetAvatarPostRotationOrIdentity(avatar, humanId);
-            axisLength = AvatarSetupToolExtension.GetAvatarAxisLengthOrZero(avatar, humanId);
+            postRotation = AvatarRuntimeAccess.GetAvatarPostRotationOrIdentity(avatar, humanId);
+            axisLength = AvatarRuntimeAccess.GetAvatarAxisLengthOrZero(avatar, humanId);
             return true;
         }
 

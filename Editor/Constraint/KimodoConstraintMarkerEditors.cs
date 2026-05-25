@@ -1,5 +1,5 @@
 ﻿using System;
-using System;
+using KimodoUnityMotionTools.ProjectEditor.Manager;
 using UnityEditor;
 using UnityEditor.Timeline;
 using UnityEngine;
@@ -582,8 +582,10 @@ namespace KimodoUnityMotionTools.ProjectEditor
             Undo.RecordObject(marker as UnityEngine.Object, "Move Kimodo Constraint Marker");
             marker.time = absTime;
             EditorUtility.SetDirty(marker as UnityEngine.Object);
-            TimelineEditor.Refresh(RefreshReason.ContentsModified | RefreshReason.SceneNeedsUpdate | RefreshReason.WindowNeedsRedraw);
+            KimodoEditorCommandManager.Dispatch(
+                new ConstraintSnapshotRefreshCommand());
         }
     }
 }
+
 

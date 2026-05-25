@@ -12,6 +12,8 @@ public class KimodoBVHLoaderEditor : Editor
         KimodoBVHLoader loader = (KimodoBVHLoader)target;
 
         GUILayout.Space(8);
+        // LEGACY: BVH preview controls stay local/direct by design.
+        // Do not route through KimodoEditorCommandManager.
         if (GUILayout.Button("Build Preview From BVH"))
         {
             try

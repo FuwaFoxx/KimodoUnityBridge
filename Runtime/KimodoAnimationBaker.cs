@@ -5,6 +5,7 @@ using System.Collections.Generic;
 using UnityEditor;
 using UnityEditor.Animations;
 using UnityEngine;
+using KimodoUnityMotionTools.Generation.Pipeline;
 
 namespace KimodoUnityMotionTools
 {
@@ -27,6 +28,7 @@ namespace KimodoUnityMotionTools
             AnimationClip targetClip,
             string motionJson,
             KimodoBakeSkeletonType skeletonType,
+            string modelName,
             KimodoCurveFilterOptions curveFilterOptions,
             out string error)
         {
@@ -85,7 +87,7 @@ namespace KimodoUnityMotionTools
             };
             BakeSomaCurvesDirect(rawClip, data, fps, frameCount);
 
-            if (!TrySaveWithRecorder(rawClip, targetClip, data, fps, frameCount, curveFilterOptions, out error))
+            if (!TrySaveWithRecorder(rawClip, targetClip, data, fps, frameCount, modelName, curveFilterOptions, out error))
             {
                 return false;
             }
@@ -99,6 +101,7 @@ namespace KimodoUnityMotionTools
             MotionJsonData data,
             float fps,
             int frameCount,
+            string modelName,
             KimodoCurveFilterOptions options,
             out string error)
         {
@@ -119,7 +122,7 @@ namespace KimodoUnityMotionTools
             GameObject samplerRoot = null;
             try
             {
-                samplerRoot = CreateSamplerHierarchyForRecording(data, jointCount);
+                samplerRoot = CreateSamplerHierarchyForRecording(data, jointCount, modelName);
                 var recorder = new GameObjectRecorder(samplerRoot);
                 recorder.BindComponentsOfType<Transform>(samplerRoot, true);
 
@@ -196,12 +199,17 @@ namespace KimodoUnityMotionTools
             };
         }
 
-        private static GameObject CreateSamplerHierarchyForRecording(MotionJsonData data, int jointCount)
+        private static GameObject CreateSamplerHierarchyForRecording(MotionJsonData data, int jointCount, string modelName)
         {
             var root = new GameObject("__KimodoRecorderRoot")
             {
                 hideFlags = HideFlags.HideAndDontSave
             };
+
+            if (TryBuildHierarchyFromRuntimeAvatar(modelName, root.transform))
+            {
+                return root;
+            }
 
             var transforms = new Transform[jointCount];
             for (int i = 0; i < jointCount; i++)
@@ -234,6 +242,16 @@ namespace KimodoUnityMotionTools
             }
 
             return root;
+        }
+
+        private static bool TryBuildHierarchyFromRuntimeAvatar(string modelName, Transform root)
+        {
+            if (!KimodoRuntimeAvatarSkeletonBuilder.TryLoadAvatarByModelName(modelName, out Avatar avatar, out _))
+            {
+                return false;
+            }
+
+            return KimodoRuntimeAvatarSkeletonBuilder.TryBuildHierarchyFromAvatarSkeleton(avatar, root, out _);
         }
 
         private static MotionJsonData ParseMotionJsonFlexible(string motionJson)
