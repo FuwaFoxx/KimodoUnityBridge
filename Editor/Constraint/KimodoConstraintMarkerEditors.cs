@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using KimodoUnityMotionTools.ProjectEditor.Manager;
 using UnityEditor;
 using UnityEditor.Timeline;
@@ -15,24 +15,28 @@ namespace KimodoUnityMotionTools.ProjectEditor
             serializedObject.Update();
 
             EditorGUILayout.HelpBox(
-                "Purpose: constrain the character root trajectory on the ground plane (X/Z) at a key frame. Optional heading constraint is supported.\\n" +
+                "Purpose: constrain the character root trajectory on the ground plane (X/Z) at a key frame. Optional heading constraint is supported.\n" +
                 "Recommended for path following, locomotion route control, and turn direction control.",
                 MessageType.Info);
             EditorGUILayout.Space(4f);
 
             DrawCommonHeader("Root2D");
-            DrawAutoFrameIndices();
+            DrawAutoFrameIndex();
+
+            KimodoConstraintMarkerBase markerTarget = target as KimodoConstraintMarkerBase;
             SerializedProperty overrideProp = serializedObject.FindProperty("useOverride");
             bool useOverride = overrideProp != null && overrideProp.boolValue;
-            if (!useOverride)
+            bool activeEditSession = KimodoConstraintOverrideEditSession.HasActiveSession(markerTarget);
+            if (!useOverride && !activeEditSession)
             {
-                if (!KimodoConstraintExportUtility.TryBuildAutoConstraintPreview(target as KimodoConstraintMarkerBase, out KimodoConstraintJson preview, out string error))
+                if (!KimodoConstraintExportUtility.TryBuildAutoConstraintPreview(markerTarget, out KimodoConstraintJson preview, out string error))
                 {
                     EditorGUILayout.HelpBox($"Auto preview unavailable: {error}", MessageType.Warning);
                 }
                 else
                 {
-                    KimodoConstraintMarkerEditorUtility.ApplyRoot2DPreview(serializedObject, preview);
+                    ApplyPreviewToTarget(preview);
+                    serializedObject.Update();
                 }
             }
 
@@ -53,12 +57,18 @@ namespace KimodoUnityMotionTools.ProjectEditor
             EditorGUILayout.Space(4f);
         }
 
-        private void DrawAutoFrameIndices()
+        private void DrawAutoFrameIndex()
         {
+            SerializedProperty frameProp = serializedObject.FindProperty("frameIndex");
+            if (frameProp == null)
+            {
+                return;
+            }
+
             if (!KimodoConstraintMarkerEditorUtility.TryGetClipRangeForMarker(target as IMarker, out TimelineClip clipRange))
             {
-                EditorGUILayout.HelpBox("Owning AnimationPlayableAsset not found. frame_indices will use the currently stored value.", MessageType.Warning);
-                EditorGUILayout.PropertyField(serializedObject.FindProperty("frameIndices"));
+                EditorGUILayout.HelpBox("Owning AnimationPlayableAsset not found. frameIndex keeps current value.", MessageType.Warning);
+                EditorGUILayout.PropertyField(frameProp);
                 return;
             }
 
@@ -66,17 +76,16 @@ namespace KimodoUnityMotionTools.ProjectEditor
             int maxFrameIndex = KimodoConstraintMarkerEditorUtility.GetMaxKimodoFrameIndex(clipRange);
             int autoFrame = KimodoConstraintMarkerEditorUtility.TimeToKimodoFrameIndex(clipRange, ((IMarker)target).time);
 
-            SerializedProperty framesProp = serializedObject.FindProperty("frameIndices");
-            KimodoConstraintMarkerEditorUtility.EnsureSingleFrame(framesProp, autoFrame);
-            framesProp.GetArrayElementAtIndex(0).intValue = autoFrame;
+            KimodoConstraintMarkerEditorUtility.EnsureFrameIndex(frameProp, autoFrame);
+            frameProp.intValue = autoFrame;
 
-            int currentFrame = framesProp.GetArrayElementAtIndex(0).intValue;
-            int editedFrame = EditorGUILayout.IntField(new GUIContent("Frame Index (Auto from Marker)"), currentFrame);
+            int currentFrame = frameProp.intValue;
+            int editedFrame = EditorGUILayout.IntField(new GUIContent("Frame Index (Auto from Marker)", "Auto-synced from marker time in the owning clip. Editing this value also moves marker time to the selected frame."), currentFrame);
             EditorGUILayout.LabelField($"Marker Local Time: {localSeconds:F3}s   Clip Start: {clipRange.start:F3}s", EditorStyles.miniLabel);
             if (editedFrame != currentFrame)
             {
                 int clampedFrame = Mathf.Clamp(editedFrame, 0, maxFrameIndex);
-                framesProp.GetArrayElementAtIndex(0).intValue = clampedFrame;
+                frameProp.intValue = clampedFrame;
                 KimodoConstraintMarkerEditorUtility.MoveMarkerToFrame(target as IMarker, clipRange, clampedFrame);
             }
         }
@@ -89,16 +98,25 @@ namespace KimodoUnityMotionTools.ProjectEditor
             }
 
             EditorGUI.BeginDisabledGroup(readOnly);
-            EditorGUILayout.PropertyField(serializedObject.FindProperty("smoothRoot2D"), true);
+            EditorGUILayout.PropertyField(serializedObject.FindProperty("smoothRoot2D"));
             EditorGUILayout.PropertyField(serializedObject.FindProperty("includeGlobalHeading"));
 
             SerializedProperty includeGlobalHeadingProp = serializedObject.FindProperty("includeGlobalHeading");
             if (includeGlobalHeadingProp != null && includeGlobalHeadingProp.boolValue)
             {
-                EditorGUILayout.PropertyField(serializedObject.FindProperty("globalRootHeading"), true);
+                EditorGUILayout.PropertyField(serializedObject.FindProperty("globalRootHeading"));
             }
 
             EditorGUI.EndDisabledGroup();
+        }
+
+        private void ApplyPreviewToTarget(KimodoConstraintJson preview)
+        {
+            if (target is KimodoConstraintMarkerBase marker)
+            {
+                KimodoConstraintPosePipeline.ApplyPreviewToMarkerData(marker, preview);
+                EditorUtility.SetDirty(marker);
+            }
         }
     }
 
@@ -110,24 +128,28 @@ namespace KimodoUnityMotionTools.ProjectEditor
             serializedObject.Update();
 
             EditorGUILayout.HelpBox(
-                "Purpose: apply a strong full-body pose constraint at a key frame (root position + local joint rotations).\\n" +
+                "Purpose: apply a strong full-body pose constraint at a key frame (root position + local joint rotations).\n" +
                 "Recommended when you need the generated motion to match a specific target pose at that frame.",
                 MessageType.Info);
             EditorGUILayout.Space(4f);
 
             DrawCommonHeader("FullBody");
-            DrawAutoFrameIndices();
+            DrawAutoFrameIndex();
+
+            KimodoConstraintMarkerBase markerTarget = target as KimodoConstraintMarkerBase;
             SerializedProperty overrideProp = serializedObject.FindProperty("useOverride");
             bool useOverride = overrideProp != null && overrideProp.boolValue;
-            if (!useOverride)
+            bool activeEditSession = KimodoConstraintOverrideEditSession.HasActiveSession(markerTarget);
+            if (!useOverride && !activeEditSession)
             {
-                if (!KimodoConstraintExportUtility.TryBuildAutoConstraintPreview(target as KimodoConstraintMarkerBase, out KimodoConstraintJson preview, out string error))
+                if (!KimodoConstraintExportUtility.TryBuildAutoConstraintPreview(markerTarget, out KimodoConstraintJson preview, out string error))
                 {
                     EditorGUILayout.HelpBox($"Auto preview unavailable: {error}", MessageType.Warning);
                 }
                 else
                 {
-                    KimodoConstraintMarkerEditorUtility.ApplyFullBodyPreview(serializedObject, preview);
+                    ApplyPreviewToTarget(preview);
+                    serializedObject.Update();
                 }
             }
 
@@ -148,12 +170,18 @@ namespace KimodoUnityMotionTools.ProjectEditor
             EditorGUILayout.Space(4f);
         }
 
-        private void DrawAutoFrameIndices()
+        private void DrawAutoFrameIndex()
         {
+            SerializedProperty frameProp = serializedObject.FindProperty("frameIndex");
+            if (frameProp == null)
+            {
+                return;
+            }
+
             if (!KimodoConstraintMarkerEditorUtility.TryGetClipRangeForMarker(target as IMarker, out TimelineClip clipRange))
             {
-                EditorGUILayout.HelpBox("Owning AnimationPlayableAsset not found. frame_indices will use the currently stored value.", MessageType.Warning);
-                EditorGUILayout.PropertyField(serializedObject.FindProperty("frameIndices"));
+                EditorGUILayout.HelpBox("Owning AnimationPlayableAsset not found. frameIndex keeps current value.", MessageType.Warning);
+                EditorGUILayout.PropertyField(frameProp);
                 return;
             }
 
@@ -161,17 +189,16 @@ namespace KimodoUnityMotionTools.ProjectEditor
             int maxFrameIndex = KimodoConstraintMarkerEditorUtility.GetMaxKimodoFrameIndex(clipRange);
             int autoFrame = KimodoConstraintMarkerEditorUtility.TimeToKimodoFrameIndex(clipRange, ((IMarker)target).time);
 
-            SerializedProperty framesProp = serializedObject.FindProperty("frameIndices");
-            KimodoConstraintMarkerEditorUtility.EnsureSingleFrame(framesProp, autoFrame);
-            framesProp.GetArrayElementAtIndex(0).intValue = autoFrame;
+            KimodoConstraintMarkerEditorUtility.EnsureFrameIndex(frameProp, autoFrame);
+            frameProp.intValue = autoFrame;
 
-            int currentFrame = framesProp.GetArrayElementAtIndex(0).intValue;
-            int editedFrame = EditorGUILayout.IntField(new GUIContent("Frame Index (Auto from Marker)"), currentFrame);
+            int currentFrame = frameProp.intValue;
+            int editedFrame = EditorGUILayout.IntField(new GUIContent("Frame Index (Auto from Marker)", "Auto-synced from marker time in the owning clip. Editing this value also moves marker time to the selected frame."), currentFrame);
             EditorGUILayout.LabelField($"Marker Local Time: {localSeconds:F3}s   Clip Start: {clipRange.start:F3}s", EditorStyles.miniLabel);
             if (editedFrame != currentFrame)
             {
                 int clampedFrame = Mathf.Clamp(editedFrame, 0, maxFrameIndex);
-                framesProp.GetArrayElementAtIndex(0).intValue = clampedFrame;
+                frameProp.intValue = clampedFrame;
                 KimodoConstraintMarkerEditorUtility.MoveMarkerToFrame(target as IMarker, clipRange, clampedFrame);
             }
         }
@@ -184,10 +211,19 @@ namespace KimodoUnityMotionTools.ProjectEditor
             }
 
             EditorGUI.BeginDisabledGroup(readOnly);
-            EditorGUILayout.PropertyField(serializedObject.FindProperty("smoothRoot2D"), true);
-            EditorGUILayout.PropertyField(serializedObject.FindProperty("rootPositions"), true);
+            EditorGUILayout.PropertyField(serializedObject.FindProperty("smoothRoot2D"));
+            EditorGUILayout.PropertyField(serializedObject.FindProperty("rootPosition"));
             EditorGUILayout.PropertyField(serializedObject.FindProperty("localJointRots"), true);
             EditorGUI.EndDisabledGroup();
+        }
+
+        private void ApplyPreviewToTarget(KimodoConstraintJson preview)
+        {
+            if (target is KimodoConstraintMarkerBase marker)
+            {
+                KimodoConstraintPosePipeline.ApplyPreviewToMarkerData(marker, preview);
+                EditorUtility.SetDirty(marker);
+            }
         }
     }
 
@@ -207,9 +243,8 @@ namespace KimodoUnityMotionTools.ProjectEditor
             SerializedProperty overrideProp = serializedObject.FindProperty("useOverride");
             if (isCustomEndEffector)
             {
-                // end-effector has no manual override mode
                 overrideProp.boolValue = false;
-                EditorGUILayout.Toggle(new GUIContent("useOverride"), false);
+                EditorGUILayout.Toggle(new GUIContent("useOverride", "Disabled for custom end-effector marker; values are sampled from timeline pose."), false);
             }
             else
             {
@@ -217,18 +252,21 @@ namespace KimodoUnityMotionTools.ProjectEditor
                 KimodoConstraintMarkerEditorUtility.DrawOverrideEditButton(serializedObject, target as KimodoConstraintMarkerBase);
             }
 
-            DrawAutoFrameIndices();
+            DrawAutoFrameIndex();
             bool useOverride = !isCustomEndEffector && overrideProp != null && overrideProp.boolValue;
+            KimodoConstraintMarkerBase markerTarget = target as KimodoConstraintMarkerBase;
+            bool activeEditSession = KimodoConstraintOverrideEditSession.HasActiveSession(markerTarget);
 
-            if (!useOverride)
+            if (!useOverride && !activeEditSession)
             {
-                if (!KimodoConstraintExportUtility.TryBuildAutoConstraintPreview(target as KimodoConstraintMarkerBase, out KimodoConstraintJson preview, out string error))
+                if (!KimodoConstraintExportUtility.TryBuildAutoConstraintPreview(markerTarget, out KimodoConstraintJson preview, out string error))
                 {
                     EditorGUILayout.HelpBox($"Auto preview unavailable: {error}", MessageType.Warning);
                 }
                 else
                 {
-                    KimodoConstraintMarkerEditorUtility.ApplyEndEffectorPreview(serializedObject, preview, isCustomEndEffector);
+                    ApplyPreviewToTarget(preview);
+                    serializedObject.Update();
                 }
             }
 
@@ -251,12 +289,18 @@ namespace KimodoUnityMotionTools.ProjectEditor
             }
         }
 
-        private void DrawAutoFrameIndices()
+        private void DrawAutoFrameIndex()
         {
+            SerializedProperty frameProp = serializedObject.FindProperty("frameIndex");
+            if (frameProp == null)
+            {
+                return;
+            }
+
             if (!KimodoConstraintMarkerEditorUtility.TryGetClipRangeForMarker(target as IMarker, out TimelineClip clipRange))
             {
-                EditorGUILayout.HelpBox("Owning AnimationPlayableAsset not found. frame_indices will use the currently stored value.", MessageType.Warning);
-                EditorGUILayout.PropertyField(serializedObject.FindProperty("frameIndices"));
+                EditorGUILayout.HelpBox("Owning AnimationPlayableAsset not found. frameIndex keeps current value.", MessageType.Warning);
+                EditorGUILayout.PropertyField(frameProp);
                 return;
             }
 
@@ -264,17 +308,16 @@ namespace KimodoUnityMotionTools.ProjectEditor
             int maxFrameIndex = KimodoConstraintMarkerEditorUtility.GetMaxKimodoFrameIndex(clipRange);
             int autoFrame = KimodoConstraintMarkerEditorUtility.TimeToKimodoFrameIndex(clipRange, ((IMarker)target).time);
 
-            SerializedProperty framesProp = serializedObject.FindProperty("frameIndices");
-            KimodoConstraintMarkerEditorUtility.EnsureSingleFrame(framesProp, autoFrame);
-            framesProp.GetArrayElementAtIndex(0).intValue = autoFrame;
+            KimodoConstraintMarkerEditorUtility.EnsureFrameIndex(frameProp, autoFrame);
+            frameProp.intValue = autoFrame;
 
-            int currentFrame = framesProp.GetArrayElementAtIndex(0).intValue;
-            int editedFrame = EditorGUILayout.IntField(new GUIContent("Frame Index (Auto from Marker)"), currentFrame);
+            int currentFrame = frameProp.intValue;
+            int editedFrame = EditorGUILayout.IntField(new GUIContent("Frame Index (Auto from Marker)", "Auto-synced from marker time in the owning clip. Editing this value also moves marker time to the selected frame."), currentFrame);
             EditorGUILayout.LabelField($"Marker Local Time: {localSeconds:F3}s   Clip Start: {clipRange.start:F3}s", EditorStyles.miniLabel);
             if (editedFrame != currentFrame)
             {
                 int clampedFrame = Mathf.Clamp(editedFrame, 0, maxFrameIndex);
-                framesProp.GetArrayElementAtIndex(0).intValue = clampedFrame;
+                frameProp.intValue = clampedFrame;
                 KimodoConstraintMarkerEditorUtility.MoveMarkerToFrame(target as IMarker, clipRange, clampedFrame);
             }
         }
@@ -284,15 +327,15 @@ namespace KimodoUnityMotionTools.ProjectEditor
             switch (typeName)
             {
                 case "left-hand":
-                    return "Purpose: constrain the left-hand end-effector chain position/orientation at a key frame.\\nRecommended for grab, wave, and pointing control.";
+                    return "Purpose: constrain the left-hand end-effector chain position/orientation at a key frame.\nRecommended for grab, wave, and pointing control.";
                 case "right-hand":
-                    return "Purpose: constrain the right-hand end-effector chain position/orientation at a key frame.\\nRecommended for grab, wave, and pointing control.";
+                    return "Purpose: constrain the right-hand end-effector chain position/orientation at a key frame.\nRecommended for grab, wave, and pointing control.";
                 case "left-foot":
-                    return "Purpose: constrain the left-foot end-effector chain position/orientation at a key frame.\\nRecommended for foot placement, stepping targets, and anti-sliding control.";
+                    return "Purpose: constrain the left-foot end-effector chain position/orientation at a key frame.\nRecommended for foot placement, stepping targets, and anti-sliding control.";
                 case "right-foot":
-                    return "Purpose: constrain the right-foot end-effector chain position/orientation at a key frame.\\nRecommended for foot placement, stepping targets, and anti-sliding control.";
+                    return "Purpose: constrain the right-foot end-effector chain position/orientation at a key frame.\nRecommended for foot placement, stepping targets, and anti-sliding control.";
                 default:
-                    return "Purpose: custom end-effector constraint (joint_names can include LeftHand/RightHand/LeftFoot/RightFoot/Hips).\\n" +
+                    return "Purpose: custom end-effector constraint (joint_names can include LeftHand/RightHand/LeftFoot/RightFoot/Hips).\n" +
                            "Recommended for mixed multi-target constraints (for example, hand and foot targets at the same time).";
             }
         }
@@ -309,12 +352,21 @@ namespace KimodoUnityMotionTools.ProjectEditor
             {
                 EditorGUILayout.HelpBox("Fixed joint group marker type; joint_names is determined by marker class.", MessageType.None);
             }
-            EditorGUILayout.PropertyField(serializedObject.FindProperty("smoothRoot2D"), true);
-            EditorGUILayout.PropertyField(serializedObject.FindProperty("rootPositions"), true);
+
+            EditorGUILayout.PropertyField(serializedObject.FindProperty("smoothRoot2D"));
+            EditorGUILayout.PropertyField(serializedObject.FindProperty("rootPosition"));
             EditorGUILayout.PropertyField(serializedObject.FindProperty("localJointRots"), true);
             EditorGUI.EndDisabledGroup();
         }
 
+        private void ApplyPreviewToTarget(KimodoConstraintJson preview)
+        {
+            if (target is KimodoConstraintMarkerBase marker)
+            {
+                KimodoConstraintPosePipeline.ApplyPreviewToMarkerData(marker, preview);
+                EditorUtility.SetDirty(marker);
+            }
+        }
     }
 
     internal static class KimodoConstraintMarkerEditorUtility
@@ -329,7 +381,6 @@ namespace KimodoUnityMotionTools.ProjectEditor
                 return 0.0;
             }
 
-            // Reuse Timeline's public conversion utility for global->clip local time.
             double local = clipRange.ToLocalTime(globalTime);
             if (local < 0.0)
             {
@@ -368,158 +419,8 @@ namespace KimodoUnityMotionTools.ProjectEditor
 
         private static int ToFramesTimelineStyle(double timeSeconds, double fps)
         {
-            // Mirrors Unity Timeline's TimeUtility.ToFrames positive-time path (with tolerance),
-            // while remaining callable from this assembly.
-            double tolerance = Math.Max(Math.Abs(timeSeconds), 1.0) * fps * TimeEpsilon;
-            return (int)Math.Floor(timeSeconds * fps + tolerance);
-        }
-
-        public static void ApplyRoot2DPreview(SerializedObject so, KimodoConstraintJson preview)
-        {
-            if (so == null || preview == null)
-            {
-                return;
-            }
-
-            SetIntList(so.FindProperty("frameIndices"), preview.frame_indices);
-            SetVector2List(so.FindProperty("smoothRoot2D"), preview.smooth_root_2d);
-
-            SerializedProperty includeHeadingProp = so.FindProperty("includeGlobalHeading");
-            if (includeHeadingProp != null)
-            {
-                bool hasHeading = preview.global_root_heading != null && preview.global_root_heading.Count > 0;
-                includeHeadingProp.boolValue = hasHeading;
-                if (hasHeading)
-                {
-                    SetVector2List(so.FindProperty("globalRootHeading"), preview.global_root_heading);
-                }
-            }
-        }
-
-        public static void ApplyFullBodyPreview(SerializedObject so, KimodoConstraintJson preview)
-        {
-            if (so == null || preview == null)
-            {
-                return;
-            }
-
-            SetIntList(so.FindProperty("frameIndices"), preview.frame_indices);
-            SetVector2List(so.FindProperty("smoothRoot2D"), preview.smooth_root_2d);
-            SetVector3List(so.FindProperty("rootPositions"), preview.root_positions);
-            SetAxisAngleFrames(so.FindProperty("localJointRots"), preview.local_joints_rot);
-        }
-
-        public static void ApplyEndEffectorPreview(SerializedObject so, KimodoConstraintJson preview, bool allowJointNames)
-        {
-            if (so == null || preview == null)
-            {
-                return;
-            }
-
-            SetIntList(so.FindProperty("frameIndices"), preview.frame_indices);
-            if (allowJointNames)
-            {
-                SetStringList(so.FindProperty("jointNames"), preview.joint_names);
-            }
-            SetVector2List(so.FindProperty("smoothRoot2D"), preview.smooth_root_2d);
-            SetVector3List(so.FindProperty("rootPositions"), preview.root_positions);
-            SetAxisAngleFrames(so.FindProperty("localJointRots"), preview.local_joints_rot);
-        }
-
-        private static void SetIntList(SerializedProperty prop, System.Collections.Generic.List<int> values)
-        {
-            if (prop == null || !prop.isArray)
-            {
-                return;
-            }
-
-            int count = values != null ? values.Count : 0;
-            prop.arraySize = count;
-            for (int i = 0; i < count; i++)
-            {
-                prop.GetArrayElementAtIndex(i).intValue = values[i];
-            }
-        }
-
-        private static void SetStringList(SerializedProperty prop, System.Collections.Generic.List<string> values)
-        {
-            if (prop == null || !prop.isArray)
-            {
-                return;
-            }
-
-            int count = values != null ? values.Count : 0;
-            prop.arraySize = count;
-            for (int i = 0; i < count; i++)
-            {
-                prop.GetArrayElementAtIndex(i).stringValue = values[i] ?? string.Empty;
-            }
-        }
-
-        private static void SetVector2List(SerializedProperty prop, System.Collections.Generic.List<float[]> values)
-        {
-            if (prop == null || !prop.isArray)
-            {
-                return;
-            }
-
-            int count = values != null ? values.Count : 0;
-            prop.arraySize = count;
-            for (int i = 0; i < count; i++)
-            {
-                SerializedProperty element = prop.GetArrayElementAtIndex(i);
-                float[] v = values[i];
-                element.vector2Value = (v != null && v.Length >= 2) ? new Vector2(v[0], v[1]) : Vector2.zero;
-            }
-        }
-
-        private static void SetVector3List(SerializedProperty prop, System.Collections.Generic.List<float[]> values)
-        {
-            if (prop == null || !prop.isArray)
-            {
-                return;
-            }
-
-            int count = values != null ? values.Count : 0;
-            prop.arraySize = count;
-            for (int i = 0; i < count; i++)
-            {
-                SerializedProperty element = prop.GetArrayElementAtIndex(i);
-                float[] v = values[i];
-                element.vector3Value = (v != null && v.Length >= 3) ? new Vector3(v[0], v[1], v[2]) : Vector3.zero;
-            }
-        }
-
-        private static void SetAxisAngleFrames(SerializedProperty prop, System.Collections.Generic.List<float[][]> frames)
-        {
-            if (prop == null || !prop.isArray)
-            {
-                return;
-            }
-
-            int frameCount = frames != null ? frames.Count : 0;
-            prop.arraySize = frameCount;
-            for (int i = 0; i < frameCount; i++)
-            {
-                SerializedProperty frameProp = prop.GetArrayElementAtIndex(i);
-                SerializedProperty jointsProp = frameProp.FindPropertyRelative("joints");
-                if (jointsProp == null || !jointsProp.isArray)
-                {
-                    continue;
-                }
-
-                float[][] joints = frames[i];
-                int jointCount = joints != null ? joints.Length : 0;
-                jointsProp.arraySize = jointCount;
-                for (int j = 0; j < jointCount; j++)
-                {
-                    SerializedProperty jointProp = jointsProp.GetArrayElementAtIndex(j);
-                    float[] axis = joints[j];
-                    jointProp.vector3Value = (axis != null && axis.Length >= 3)
-                        ? new Vector3(axis[0], axis[1], axis[2])
-                        : Vector3.zero;
-                }
-            }
+            // Use nearest-frame rounding to avoid systematic "one-frame earlier" bias from floor.
+            return (int)Math.Round(timeSeconds * fps, MidpointRounding.AwayFromZero);
         }
 
         public static bool TryGetClipRangeForMarker(IMarker marker, out TimelineClip clipRange)
@@ -550,36 +451,16 @@ namespace KimodoUnityMotionTools.ProjectEditor
             return false;
         }
 
-        public static void EnsureSingleFrame(SerializedProperty framesProp, int fallbackValue)
+        public static void EnsureFrameIndex(SerializedProperty frameProp, int fallbackValue)
         {
-            if (framesProp == null)
+            if (frameProp == null)
             {
                 return;
             }
 
-            if (!framesProp.isArray)
+            if (frameProp.intValue < 0)
             {
-                return;
-            }
-
-            if (framesProp.arraySize == 0)
-            {
-                framesProp.InsertArrayElementAtIndex(0);
-                framesProp.GetArrayElementAtIndex(0).intValue = fallbackValue;
-            }
-            else if (framesProp.arraySize > 1)
-            {
-                int first = framesProp.GetArrayElementAtIndex(0).intValue;
-                framesProp.arraySize = 1;
-                framesProp.GetArrayElementAtIndex(0).intValue = first;
-            }
-            else
-            {
-                int current = framesProp.GetArrayElementAtIndex(0).intValue;
-                if (current < 0)
-                {
-                    framesProp.GetArrayElementAtIndex(0).intValue = fallbackValue;
-                }
+                frameProp.intValue = fallbackValue;
             }
         }
 
@@ -620,12 +501,19 @@ namespace KimodoUnityMotionTools.ProjectEditor
                 return;
             }
 
-            bool active = KimodoConstraintOverrideEditSession.HasActiveSession(marker);
-            string label = active ? "Editing..." : "Edit";
-            using (new EditorGUI.DisabledScope(active))
+            bool activeSession = KimodoConstraintOverrideEditSession.HasActiveSession(marker);
+            bool windowOpen = KimodoConstraintOverrideEditWindow.IsOpenForMarker(marker);
+            string label = activeSession ? (windowOpen ? "Editing..." : "Reopen Edit") : "Edit";
+            using (new EditorGUI.DisabledScope(activeSession && windowOpen))
             {
-                if (!GUILayout.Button(label, GUILayout.Height(22f)))
+                if (!GUILayout.Button(new GUIContent(label, "Open scene-based override edit session. This enables useOverride automatically if needed."), GUILayout.Height(22f)))
                 {
+                    return;
+                }
+
+                if (activeSession)
+                {
+                    KimodoConstraintOverrideEditWindow.ShowWindow(marker);
                     return;
                 }
 
@@ -644,5 +532,3 @@ namespace KimodoUnityMotionTools.ProjectEditor
         }
     }
 }
-
-

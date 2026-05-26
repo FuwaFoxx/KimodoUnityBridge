@@ -14,7 +14,7 @@ public class KimodoBVHLoaderEditor : Editor
         GUILayout.Space(8);
         // LEGACY: BVH preview controls stay local/direct by design.
         // Do not route through KimodoEditorCommandManager.
-        if (GUILayout.Button("Build Preview From BVH"))
+        if (GUILayout.Button(new GUIContent("Build Preview From BVH", "Parse the configured BVH file and build a temporary preview rig + animation clip in the scene.")))
         {
             try
             {
@@ -27,7 +27,7 @@ public class KimodoBVHLoaderEditor : Editor
             }
         }
 
-        if (GUILayout.Button("Play"))
+        if (GUILayout.Button(new GUIContent("Play", "Play the built preview animation on the temporary preview object.")))
         {
             if (loader.builtRoot != null)
             {
@@ -39,7 +39,7 @@ public class KimodoBVHLoaderEditor : Editor
             }
         }
 
-        if (GUILayout.Button("Stop"))
+        if (GUILayout.Button(new GUIContent("Stop", "Stop preview playback on the temporary preview object.")))
         {
             if (loader.builtRoot != null)
             {
@@ -51,7 +51,7 @@ public class KimodoBVHLoaderEditor : Editor
             }
         }
 
-        if (GUILayout.Button("Clear Preview"))
+        if (GUILayout.Button(new GUIContent("Clear Preview", "Remove the temporary preview object and clip references created by this inspector.")))
         {
             if (loader.builtRoot != null)
             {

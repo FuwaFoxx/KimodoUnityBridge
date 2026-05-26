@@ -47,10 +47,6 @@ namespace KimodoUnityMotionTools.ProjectEditor
         private void OnDisable()
         {
             EditorApplication.update -= OnEditorUpdate;
-            if (marker != null && KimodoConstraintOverrideEditSession.HasActiveSession(marker))
-            {
-                KimodoConstraintOverrideEditSession.Cancel(marker);
-            }
         }
 
         private void OnEditorUpdate()
@@ -76,7 +72,7 @@ namespace KimodoUnityMotionTools.ProjectEditor
             if (!KimodoConstraintOverrideEditSession.HasActiveSession(marker))
             {
                 EditorGUILayout.HelpBox("Edit session is not active.", MessageType.Warning);
-                if (GUILayout.Button("Close", GUILayout.Height(28f)))
+                if (GUILayout.Button(new GUIContent("Close", "Close this window. No changes are committed when session is inactive."), GUILayout.Height(28f)))
                 {
                     Close();
                 }
@@ -108,10 +104,10 @@ namespace KimodoUnityMotionTools.ProjectEditor
             {
                 var so = new SerializedObject(marker);
                 so.Update();
-                EditorGUILayout.PropertyField(so.FindProperty("frameIndices"), true);
-                EditorGUILayout.PropertyField(so.FindProperty("smoothRoot2D"), true);
-                EditorGUILayout.PropertyField(so.FindProperty("rootPositions"), true);
-                EditorGUILayout.PropertyField(so.FindProperty("localJointRots"), true);
+                DrawPropertyIfExists(so, "frameIndex");
+                DrawPropertyIfExists(so, "smoothRoot2D");
+                DrawPropertyIfExists(so, "rootPosition");
+                DrawPropertyIfExists(so, "localJointRots");
                 SerializedProperty includeHeadingProp = so.FindProperty("includeGlobalHeading");
                 if (includeHeadingProp != null)
                 {
@@ -133,13 +129,13 @@ namespace KimodoUnityMotionTools.ProjectEditor
 
             EditorGUILayout.Space(6f);
             EditorGUILayout.BeginHorizontal();
-            if (GUILayout.Button("Cancel", GUILayout.Height(30f)))
+            if (GUILayout.Button(new GUIContent("Cancel", "Discard scene edit session changes and exit override edit mode."), GUILayout.Height(30f)))
             {
                 KimodoConstraintOverrideEditSession.Cancel(marker);
                 Close();
             }
 
-            if (GUILayout.Button("End Edit", GUILayout.Height(30f)))
+            if (GUILayout.Button(new GUIContent("End Edit", "Commit edited override values from preview rig back to marker data."), GUILayout.Height(30f)))
             {
                 if (!KimodoConstraintOverrideEditSession.TryCommit(marker, out string error))
                 {
@@ -151,6 +147,20 @@ namespace KimodoUnityMotionTools.ProjectEditor
                 }
             }
             EditorGUILayout.EndHorizontal();
+        }
+
+        private static void DrawPropertyIfExists(SerializedObject so, string name)
+        {
+            if (so == null || string.IsNullOrWhiteSpace(name))
+            {
+                return;
+            }
+
+            SerializedProperty prop = so.FindProperty(name);
+            if (prop != null)
+            {
+                EditorGUILayout.PropertyField(prop, true);
+            }
         }
     }
 }

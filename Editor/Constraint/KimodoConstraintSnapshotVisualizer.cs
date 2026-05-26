@@ -16,7 +16,6 @@ namespace KimodoUnityMotionTools.ProjectEditor
         private const string LogPrefix = "[Kimodo][ConstraintSnapshot]";
 
         private static readonly Dictionary<string, RigCacheEntry> RigCache = new Dictionary<string, RigCacheEntry>(StringComparer.OrdinalIgnoreCase);
-        private static readonly Dictionary<int, SnapshotCacheEntry> SnapshotCache = new Dictionary<int, SnapshotCacheEntry>();
         private static readonly List<SnapshotRenderEntry> ActiveRenders = new List<SnapshotRenderEntry>();
 
         private static bool dirty = true;
@@ -167,11 +166,6 @@ namespace KimodoUnityMotionTools.ProjectEditor
             for (int i = 0; i < markers.Count; i++)
             {
                 KimodoConstraintMarkerBase marker = markers[i];
-                if (KimodoConstraintOverrideEditSession.HasActiveSession(marker))
-                {
-                    continue;
-                }
-
                 if (!TryBuildRenderEntry(marker, out SnapshotRenderEntry entry, out string error))
                 {
                     if (!string.IsNullOrWhiteSpace(error))
@@ -196,6 +190,9 @@ namespace KimodoUnityMotionTools.ProjectEditor
                     result.Add(marker);
                 }
             }
+
+            // Keep preview alive while override edit session is active, even when selection changes.
+            KimodoConstraintOverrideEditSession.AppendActiveMarkers(result);
             return result;
         }
 
@@ -257,14 +254,10 @@ namespace KimodoUnityMotionTools.ProjectEditor
                 return false;
             }
 
-            int cacheKey = BuildSnapshotKey(marker, clipRange, boundAnimator, playableClip.bridgeModelName, rigType);
-            if (!SnapshotCache.TryGetValue(cacheKey, out SnapshotCacheEntry cache) || !cache.IsValid)
+            string modelName = playableClip.bridgeModelName;
+            if (!TryBuildSnapshot(marker, clipRange, boundAnimator, modelName, out SnapshotPose cache, out error))
             {
-                if (!TryBuildSnapshot(marker, clipRange, boundAnimator, rigType, rig, out cache, out error))
-                {
-                    return false;
-                }
-                SnapshotCache[cacheKey] = cache;
+                return false;
             }
 
             if (!ApplySnapshotToRig(cache, rig))
@@ -335,88 +328,18 @@ namespace KimodoUnityMotionTools.ProjectEditor
             return false;
         }
 
-        private static int BuildSnapshotKey(
-            KimodoConstraintMarkerBase marker,
-            TimelineClip clipRange,
-            Animator boundAnimator,
-            string modelName,
-            SkeletonPreviewRigType rigType)
-        {
-            unchecked
-            {
-                int hash = 23;
-                hash = hash * 31 + marker.GetInstanceID();
-                hash = hash * 31 + (clipRange.asset != null ? clipRange.asset.GetInstanceID() : 0);
-                hash = hash * 31 + (boundAnimator != null ? boundAnimator.GetInstanceID() : 0);
-                hash = hash * 31 + (int)rigType;
-                hash = hash * 31 + StableStringHash(modelName ?? string.Empty);
-                hash = hash * 31 + StableStringHash(BuildMarkerDigest(marker));
-                hash = hash * 31 + clipRange.start.GetHashCode();
-                hash = hash * 31 + clipRange.end.GetHashCode();
-                hash = hash * 31 + marker.time.GetHashCode();
-                return hash;
-            }
-        }
-
-        private static int StableStringHash(string s)
-        {
-            unchecked
-            {
-                int hash = 5381;
-                for (int i = 0; i < s.Length; i++)
-                {
-                    hash = ((hash << 5) + hash) ^ s[i];
-                }
-                return hash;
-            }
-        }
-
-        private static string BuildMarkerDigest(KimodoConstraintMarkerBase marker)
-        {
-            if (marker == null)
-            {
-                return string.Empty;
-            }
-
-            try
-            {
-                SerializedObject so = new SerializedObject(marker);
-                return JsonUtility.ToJson(new MarkerDigestWrapper
-                {
-                    markerType = marker.ConstraintType ?? string.Empty,
-                    markerTime = marker.time,
-                    useOverride = so.FindProperty("useOverride")?.boolValue ?? false,
-                    serializedStamp = marker.GetHashCode()
-                });
-            }
-            catch
-            {
-                return marker.name + "|" + marker.time.ToString("F6");
-            }
-        }
-
         private static bool TryBuildSnapshot(
             KimodoConstraintMarkerBase marker,
             TimelineClip clipRange,
             Animator boundAnimator,
-            SkeletonPreviewRigType rigType,
-            RigCacheEntry rig,
-            out SnapshotCacheEntry snapshot,
+            string modelName,
+            out SnapshotPose snapshot,
             out string error)
         {
             snapshot = default;
             error = string.Empty;
 
             int frameIndex = KimodoConstraintMarkerEditorUtility.TimeToKimodoFrameIndex(clipRange, marker.time);
-            bool isCustomEndEffector = marker is KimodoEndEffectorConstraintMarker ee &&
-                                       string.Equals(ee.ConstraintType, "end-effector", StringComparison.OrdinalIgnoreCase);
-            bool forceOverridePath = marker.useOverride && !isCustomEndEffector;
-            if (!forceOverridePath &&
-                TryBuildRetargetedSnapshotFromTimeline(marker, clipRange, boundAnimator, rig, frameIndex, out snapshot))
-            {
-                return true;
-            }
-
             KimodoMarkerSampleResult unityPose;
 
             if (!TryResolveUnityPoseForMarker(marker, clipRange, boundAnimator, frameIndex, out unityPose, out error))
@@ -430,110 +353,270 @@ namespace KimodoUnityMotionTools.ProjectEditor
                 return false;
             }
 
-            if (!TryBuildLocalPoseArrays(unityPose, rig.Transforms.Length, out Vector3 rootPos, out Quaternion[] localRotations))
+            if (!TryBuildLocalPoseArrays(unityPose, out Vector3 rootPos, out Quaternion[] localRotations))
             {
                 error = "failed to build local pose arrays";
                 return false;
             }
 
-            snapshot = new SnapshotCacheEntry
+            List<int> sampledIndices = unityPose.sampledJointIndices != null
+                ? unityPose.sampledJointIndices
+                : null;
+
+            ResolveSnapshotJointPose(
+                marker,
+                modelName,
+                localRotations,
+                sampledIndices,
+                out string[] jointNames,
+                out Quaternion[] rotations,
+                out string resolveError);
+            if (!string.IsNullOrWhiteSpace(resolveError))
             {
-                IsValid = true,
+                error = resolveError;
+                return false;
+            }
+
+            snapshot = new SnapshotPose
+            {
                 FrameIndex = frameIndex,
                 RootPosition = rootPos,
-                LocalRotations = localRotations
+                LocalRotations = rotations,
+                JointNames = jointNames,
+                RootJointName = KimodoMarkerSamplingUtility.GetRootJointNameForModel(modelName)
             };
+
             return true;
         }
 
-        private static bool TryBuildRetargetedSnapshotFromTimeline(
+        private static void ResolveSnapshotJointPose(
             KimodoConstraintMarkerBase marker,
-            TimelineClip clipRange,
-            Animator boundAnimator,
-            RigCacheEntry rig,
-            int frameIndex,
-            out SnapshotCacheEntry snapshot)
+            string modelName,
+            Quaternion[] sourceRotations,
+            List<int> sampledIndices,
+            out string[] jointNames,
+            out Quaternion[] rotations,
+            out string error)
         {
-            snapshot = default;
-            if (marker == null || clipRange == null || boundAnimator == null || !rig.IsAlive || rig.Animator == null)
+            error = string.Empty;
+            if (marker is KimodoEndEffectorConstraintMarker eeMarker)
             {
-                return false;
-            }
-
-            PlayableDirector director = TimelineEditor.inspectedDirector;
-            if (director == null)
-            {
-                return false;
-            }
-
-            if (!KimodoLocalAvatarUtility.TryEnsureHumanoidAvatar(boundAnimator, out Avatar sourceAvatar, out _, out _))
-            {
-                return false;
-            }
-
-            if (!KimodoLocalAvatarUtility.TryEnsureHumanoidAvatar(rig.Animator, out Avatar targetAvatar, out _, out _))
-            {
-                return false;
-            }
-
-            if (sourceAvatar == null || targetAvatar == null)
-            {
-                return false;
-            }
-
-            double originalTime = director.time;
-            DirectorWrapMode originalWrap = director.extrapolationMode;
-            try
-            {
-                director.extrapolationMode = DirectorWrapMode.Hold;
-                director.time = marker.time;
-                director.Evaluate();
-
-                var srcPoseHandler = new HumanPoseHandler(sourceAvatar, boundAnimator.transform);
-                var dstPoseHandler = new HumanPoseHandler(targetAvatar, rig.Animator.transform);
-                try
+                if (!TryResolveEndEffectorSnapshotPose(
+                    eeMarker,
+                    modelName,
+                    sourceRotations,
+                    sampledIndices,
+                    out jointNames,
+                    out rotations,
+                    out error))
                 {
-                    var pose = new HumanPose();
-                    srcPoseHandler.GetHumanPose(ref pose);
-                    dstPoseHandler.SetHumanPose(ref pose);
+                    return;
                 }
-                finally
+                return;
+            }
+
+            if (!TryResolveSnapshotJointNames(modelName, sourceRotations != null ? sourceRotations.Length : 0, out jointNames, out error))
+            {
+                rotations = Array.Empty<Quaternion>();
+                return;
+            }
+
+            rotations = sourceRotations ?? Array.Empty<Quaternion>();
+            if (sampledIndices != null &&
+                sampledIndices.Count > 0 &&
+                TryFilterSnapshotBySampledIndices(rotations, jointNames, sampledIndices, out Quaternion[] filteredRots, out string[] filteredNames))
+            {
+                rotations = filteredRots;
+                jointNames = filteredNames;
+            }
+            else if (sampledIndices != null && sampledIndices.Count > 0)
+            {
+                error = "sampled joint filter removed all joints.";
+                rotations = Array.Empty<Quaternion>();
+                jointNames = Array.Empty<string>();
+            }
+        }
+
+        private static bool TryResolveEndEffectorSnapshotPose(
+            KimodoEndEffectorConstraintMarker marker,
+            string modelName,
+            Quaternion[] sourceRotations,
+            List<int> sampledIndices,
+            out string[] jointNames,
+            out Quaternion[] rotations,
+            out string error)
+        {
+            error = string.Empty;
+            sourceRotations ??= Array.Empty<Quaternion>();
+            if (marker == null || marker.jointNames == null || marker.jointNames.Count == 0)
+            {
+                error = "end-effector marker has no joint_names.";
+                jointNames = Array.Empty<string>();
+                rotations = Array.Empty<Quaternion>();
+                return false;
+            }
+
+            if (sourceRotations.Length == marker.jointNames.Count)
+            {
+                int exactCount = marker.jointNames.Count;
+                jointNames = new string[exactCount];
+                rotations = new Quaternion[exactCount];
+                for (int i = 0; i < exactCount; i++)
                 {
-                    srcPoseHandler.Dispose();
-                    dstPoseHandler.Dispose();
+                    jointNames[i] = marker.jointNames[i];
+                    rotations[i] = sourceRotations[i];
+                }
+                return true;
+            }
+
+            string[] modelJointNames = KimodoMarkerSamplingUtility.GetJointNamesForModel(modelName);
+            if (modelJointNames == null || modelJointNames.Length == 0)
+            {
+                error = $"end-effector model joint layout not found for model '{modelName}'.";
+                jointNames = Array.Empty<string>();
+                rotations = Array.Empty<Quaternion>();
+                return false;
+            }
+
+            if (sourceRotations.Length != modelJointNames.Length)
+            {
+                error = $"end-effector rotation count mismatch: rotations={sourceRotations.Length}, modelJoints={modelJointNames.Length}, markerJoints={marker.jointNames.Count}.";
+                jointNames = Array.Empty<string>();
+                rotations = Array.Empty<Quaternion>();
+                return false;
+            }
+
+            var indexByName = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+            for (int i = 0; i < modelJointNames.Length; i++)
+            {
+                string name = modelJointNames[i];
+                if (!string.IsNullOrWhiteSpace(name) && !indexByName.ContainsKey(name))
+                {
+                    indexByName[name] = i;
+                }
+            }
+
+            var mappedNames = new List<string>(marker.jointNames.Count);
+            var mappedRotations = new List<Quaternion>(marker.jointNames.Count);
+            HashSet<int> sampledSet = sampledIndices != null && sampledIndices.Count > 0
+                ? new HashSet<int>(sampledIndices)
+                : null;
+            for (int i = 0; i < marker.jointNames.Count; i++)
+            {
+                string targetName = marker.jointNames[i];
+                if (string.IsNullOrWhiteSpace(targetName))
+                {
+                    continue;
                 }
 
-                Transform[] ts = rig.Transforms;
-                if (ts == null || ts.Length == 0)
+                if (!indexByName.TryGetValue(targetName, out int sourceIndex))
                 {
+                    error = $"end-effector joint '{targetName}' not found in model joint layout.";
+                    jointNames = Array.Empty<string>();
+                    rotations = Array.Empty<Quaternion>();
                     return false;
                 }
 
-                Quaternion[] rots = new Quaternion[ts.Length];
-                for (int i = 0; i < ts.Length; i++)
+                if (sourceIndex < 0 || sourceIndex >= sourceRotations.Length)
                 {
-                    rots[i] = ts[i].localRotation;
+                    error = $"end-effector joint '{targetName}' index out of range in sampled rotations.";
+                    jointNames = Array.Empty<string>();
+                    rotations = Array.Empty<Quaternion>();
+                    return false;
                 }
 
-                snapshot = new SnapshotCacheEntry
+                if (sampledSet != null && !sampledSet.Contains(sourceIndex))
                 {
-                    IsValid = true,
-                    FrameIndex = frameIndex,
-                    RootPosition = ts[0].position,
-                    LocalRotations = rots
-                };
-                return true;
+                    error = $"end-effector joint '{targetName}' missing from sampled joint indices.";
+                    jointNames = Array.Empty<string>();
+                    rotations = Array.Empty<Quaternion>();
+                    return false;
+                }
+
+                mappedNames.Add(targetName);
+                mappedRotations.Add(sourceRotations[sourceIndex]);
             }
-            catch
+
+            if (mappedNames.Count != marker.jointNames.Count)
+            {
+                error = $"end-effector mapped joint count mismatch: mapped={mappedNames.Count}, marker={marker.jointNames.Count}.";
+                jointNames = Array.Empty<string>();
+                rotations = Array.Empty<Quaternion>();
+                return false;
+            }
+
+            jointNames = mappedNames.ToArray();
+            rotations = mappedRotations.ToArray();
+            return true;
+        }
+
+        private static bool TryResolveSnapshotJointNames(
+            string modelName,
+            int rotationCount,
+            out string[] jointNames,
+            out string error)
+        {
+            error = string.Empty;
+            jointNames = Array.Empty<string>();
+            if (rotationCount <= 0)
+            {
+                error = "rotation count is zero.";
+                return false;
+            }
+
+            string[] modelJointNames = KimodoMarkerSamplingUtility.GetJointNamesForModel(modelName);
+            if (modelJointNames == null || modelJointNames.Length == 0)
+            {
+                error = $"model joint layout not found for model '{modelName}'.";
+                return false;
+            }
+
+            if (modelJointNames.Length != rotationCount)
+            {
+                error = $"rotation count mismatch for model '{modelName}': rotations={rotationCount}, modelJoints={modelJointNames.Length}.";
+                return false;
+            }
+
+            jointNames = modelJointNames;
+            return true;
+        }
+
+        private static bool TryFilterSnapshotBySampledIndices(
+            Quaternion[] localRotations,
+            string[] jointNames,
+            List<int> sampledIndices,
+            out Quaternion[] filteredRotations,
+            out string[] filteredJointNames)
+        {
+            filteredRotations = localRotations ?? Array.Empty<Quaternion>();
+            filteredJointNames = jointNames ?? Array.Empty<string>();
+            if (localRotations == null || jointNames == null || sampledIndices == null || sampledIndices.Count == 0)
             {
                 return false;
             }
-            finally
+
+            var rots = new List<Quaternion>(sampledIndices.Count);
+            var names = new List<string>(sampledIndices.Count);
+            for (int i = 0; i < sampledIndices.Count; i++)
             {
-                director.time = originalTime;
-                director.Evaluate();
-                director.extrapolationMode = originalWrap;
+                int index = sampledIndices[i];
+                if (index < 0 || index >= localRotations.Length || index >= jointNames.Length)
+                {
+                    continue;
+                }
+
+                rots.Add(localRotations[index]);
+                names.Add(jointNames[index]);
             }
+
+            if (rots.Count == 0 || names.Count == 0)
+            {
+                return false;
+            }
+
+            filteredRotations = rots.ToArray();
+            filteredJointNames = names.ToArray();
+            return true;
         }
 
         private static bool TryResolveUnityPoseForMarker(
@@ -556,10 +639,52 @@ namespace KimodoUnityMotionTools.ProjectEditor
             bool isCustomEndEffector = marker is KimodoEndEffectorConstraintMarker ee &&
                                        string.Equals(ee.ConstraintType, "end-effector", StringComparison.OrdinalIgnoreCase);
             bool useOverride = marker.useOverride && !isCustomEndEffector;
-            if (useOverride && TryBuildPoseFromOverride(marker, clipRange, out unityPose))
+            bool readPoseOk = KimodoConstraintPosePipeline.TryBuildUnityPoseFromMarker(marker, out unityPose, out error);
+            if (!readPoseOk)
             {
+                if (useOverride)
+                {
+                    error = "failed to read override pose from marker";
+                }
+                return false;
+            }
+
+            if (marker is KimodoRoot2DConstraintMarker root2D)
+            {
+                if (!TrySampleUnityPoseFromTimeline(
+                        marker,
+                        clipRange,
+                        boundAnimator,
+                        frameIndex,
+                        out KimodoMarkerSampleResult sampledPose,
+                        out string sampleError))
+                {
+                    error = sampleError;
+                    return false;
+                }
+
+                // root2d markers only store planar root data, so keep rotations and Y from sampled timeline pose.
+                Vector2 r = root2D.smoothRoot2D;
+                unityPose.rootPosition = new Vector3(r.x, sampledPose.rootPosition.y, r.y);
+                unityPose.localAxisAngles = sampledPose.localAxisAngles != null
+                    ? new List<Vector3>(sampledPose.localAxisAngles)
+                    : new List<Vector3>();
                 return true;
             }
+
+            return true;
+        }
+
+        private static bool TrySampleUnityPoseFromTimeline(
+            KimodoConstraintMarkerBase marker,
+            TimelineClip clipRange,
+            Animator boundAnimator,
+            int frameIndex,
+            out KimodoMarkerSampleResult unityPose,
+            out string error)
+        {
+            unityPose = null;
+            error = string.Empty;
 
             if (!KimodoConstraintExportUtility.TrySamplePoseFromClipAsset(
                     clipRange,
@@ -581,42 +706,17 @@ namespace KimodoUnityMotionTools.ProjectEditor
                 return false;
             }
 
-            if (marker is KimodoRoot2DConstraintMarker root2D)
-            {
-                // root2d: keep sampled rotations, override root plane/heading.
-                if (root2D.smoothRoot2D != null && root2D.smoothRoot2D.Count > 0)
-                {
-                    Vector2 r = root2D.smoothRoot2D[0];
-                    unityPose.rootPosition = new Vector3(r.x, unityPose.rootPosition.y, r.y);
-                }
-            }
-
             return true;
-        }
-
-        private static bool TryBuildPoseFromOverride(
-            KimodoConstraintMarkerBase marker,
-            TimelineClip clipRange,
-            out KimodoMarkerSampleResult unityPose)
-        {
-            return KimodoConstraintOverridePoseUtility.TryBuildUnityPoseFromMarker(marker, out unityPose, out _);
         }
 
         private static bool TryBuildLocalPoseArrays(
             KimodoMarkerSampleResult unityPose,
-            int rigJointCount,
             out Vector3 rootPosition,
             out Quaternion[] localRotations)
         {
             rootPosition = unityPose.rootPosition;
-            localRotations = new Quaternion[rigJointCount];
-
-            for (int i = 0; i < localRotations.Length; i++)
-            {
-                localRotations[i] = Quaternion.identity;
-            }
-
-            int count = Mathf.Min(rigJointCount, unityPose.localAxisAngles.Count);
+            int count = unityPose.localAxisAngles != null ? unityPose.localAxisAngles.Count : 0;
+            localRotations = new Quaternion[count];
             for (int i = 0; i < count; i++)
             {
                 Vector3 aa = unityPose.localAxisAngles[i];
@@ -747,9 +847,9 @@ namespace KimodoUnityMotionTools.ProjectEditor
             return path.Replace('\\', '/').TrimEnd('/');
         }
 
-        private static bool ApplySnapshotToRig(SnapshotCacheEntry snapshot, RigCacheEntry rig)
+        private static bool ApplySnapshotToRig(SnapshotPose snapshot, RigCacheEntry rig)
         {
-            if (!snapshot.IsValid || !rig.IsAlive)
+            if (!rig.IsAlive)
             {
                 return false;
             }
@@ -760,14 +860,71 @@ namespace KimodoUnityMotionTools.ProjectEditor
                 return false;
             }
 
-            int rotCount = Mathf.Min(snapshot.LocalRotations != null ? snapshot.LocalRotations.Length : 0, t.Length);
-            for (int i = 0; i < t.Length; i++)
+            Dictionary<string, Transform> nameMap = BuildTransformNameMap(t);
+            int rotCount = snapshot.LocalRotations != null ? snapshot.LocalRotations.Length : 0;
+            int nameCount = snapshot.JointNames != null ? snapshot.JointNames.Length : 0;
+            int count = Mathf.Min(rotCount, nameCount);
+            for (int i = 0; i < count; i++)
             {
-                t[i].localRotation = i < rotCount ? snapshot.LocalRotations[i] : Quaternion.identity;
+                string jointName = snapshot.JointNames[i];
+                if (string.IsNullOrWhiteSpace(jointName))
+                {
+                    continue;
+                }
+
+                if (!nameMap.TryGetValue(jointName, out Transform jointTransform) || jointTransform == null)
+                {
+                    continue;
+                }
+
+                Quaternion rotation = snapshot.LocalRotations[i];
+                if (Quaternion.Dot(rotation, Quaternion.identity) >= 0.999999f)
+                {
+                    continue;
+                }
+
+                jointTransform.localRotation = rotation;
             }
 
-            t[0].position = snapshot.RootPosition;
+            string rootJointName = snapshot.RootJointName;
+            if (string.IsNullOrWhiteSpace(rootJointName) && snapshot.JointNames != null && snapshot.JointNames.Length > 0)
+            {
+                rootJointName = snapshot.JointNames[0];
+            }
+            if (!string.IsNullOrWhiteSpace(rootJointName) && nameMap.TryGetValue(rootJointName, out Transform rootTransform) && rootTransform != null)
+            {
+                rootTransform.position = snapshot.RootPosition;
+            }
+            else
+            {
+                t[0].position = snapshot.RootPosition;
+            }
             return true;
+        }
+
+        private static Dictionary<string, Transform> BuildTransformNameMap(Transform[] transforms)
+        {
+            var map = new Dictionary<string, Transform>(StringComparer.OrdinalIgnoreCase);
+            if (transforms == null || transforms.Length == 0)
+            {
+                return map;
+            }
+
+            for (int i = 0; i < transforms.Length; i++)
+            {
+                Transform tr = transforms[i];
+                if (tr == null || string.IsNullOrWhiteSpace(tr.name))
+                {
+                    continue;
+                }
+
+                if (!map.ContainsKey(tr.name))
+                {
+                    map[tr.name] = tr;
+                }
+            }
+
+            return map;
         }
 
         private static void OnSceneGui(SceneView sceneView)
@@ -849,52 +1006,9 @@ namespace KimodoUnityMotionTools.ProjectEditor
             return SkeletonPreviewRigType.Soma30;
         }
 
-        internal static bool TryCreateStandalonePreviewRigForModel(
-            string modelName,
-            string namePrefix,
-            out GameObject rootObject,
-            out Transform[] transforms,
-            out string error)
-        {
-            rootObject = null;
-            transforms = null;
-            error = string.Empty;
-
-            SkeletonPreviewRigType rigType = ResolveRigTypeFromModel(modelName);
-            GameObject prefab = LoadRigPrefab(rigType);
-            if (prefab == null)
-            {
-                error = $"preview rig prefab missing for {rigType}";
-                return false;
-            }
-
-            GameObject instance = UnityEngine.Object.Instantiate(prefab);
-            instance.name = $"{namePrefix}_{rigType}";
-            transforms = instance.GetComponentsInChildren<Transform>(true);
-            if (transforms == null || transforms.Length == 0)
-            {
-                UnityEngine.Object.DestroyImmediate(instance);
-                error = "preview rig has no transforms";
-                return false;
-            }
-
-            instance.hideFlags = HideFlags.DontSaveInEditor;
-            for (int i = 0; i < transforms.Length; i++)
-            {
-                if (transforms[i] != null)
-                {
-                    transforms[i].gameObject.hideFlags = HideFlags.DontSaveInEditor;
-                }
-            }
-
-            rootObject = instance;
-            return true;
-        }
-
         private static void ClearAllCaches()
         {
             ActiveRenders.Clear();
-            SnapshotCache.Clear();
 
             foreach (KeyValuePair<string, RigCacheEntry> kv in RigCache)
             {
@@ -930,15 +1044,6 @@ namespace KimodoUnityMotionTools.ProjectEditor
             }
         }
 
-        [Serializable]
-        private sealed class MarkerDigestWrapper
-        {
-            public string markerType;
-            public double markerTime;
-            public bool useOverride;
-            public int serializedStamp;
-        }
-
         internal enum SkeletonPreviewRigType
         {
             Soma30 = 0,
@@ -957,12 +1062,13 @@ namespace KimodoUnityMotionTools.ProjectEditor
             public bool IsAlive => Root != null && Root.gameObject != null;
         }
 
-        private struct SnapshotCacheEntry
+        private struct SnapshotPose
         {
-            public bool IsValid;
             public int FrameIndex;
             public Vector3 RootPosition;
             public Quaternion[] LocalRotations;
+            public string[] JointNames;
+            public string RootJointName;
         }
 
         private struct SnapshotRenderEntry

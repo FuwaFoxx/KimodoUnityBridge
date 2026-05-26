@@ -99,7 +99,7 @@ namespace KimodoUnityMotionTools.ProjectEditor
             EditorGUILayout.LabelField("Runtime Root", runtimeRoot, EditorStyles.wordWrappedMiniLabel);
 
             EditorGUILayout.BeginHorizontal();
-            if (GUILayout.Button("Refresh", GUILayout.Width(100f)))
+            if (GUILayout.Button(new GUIContent("Refresh", "Rescan runtime/model folders and request latest bridge server status."), GUILayout.Width(100f)))
             {
                 Refresh();
                 DispatchBridgeCommand(KimodoBridgeOperation.RefreshStatus);
@@ -107,7 +107,7 @@ namespace KimodoUnityMotionTools.ProjectEditor
 
             if (!runtimeExists)
             {
-                if (GUILayout.Button("Create Kimodo Server", GUILayout.Width(180f)))
+                if (GUILayout.Button(new GUIContent("Create Kimodo Server", "Bootstrap Kimodo runtime folder and required server files."), GUILayout.Width(180f)))
                 {
                     DispatchBridgeCommand(KimodoBridgeOperation.EnsureRuntimeRoot);
                 }
@@ -154,7 +154,7 @@ namespace KimodoUnityMotionTools.ProjectEditor
                 idx = 0;
             }
 
-            int newIdx = EditorGUILayout.Popup("Model", idx, options);
+            int newIdx = EditorGUILayout.Popup(new GUIContent("Model", "Default model used when starting server from this settings page."), idx, options);
             selectedModel = options[Mathf.Clamp(newIdx, 0, options.Length - 1)];
             selectedVramMode = (KimodoBridgeVramMode)EditorGUILayout.EnumPopup(
                 new GUIContent("VRAM Mode", "Low: quantized encoder (~4G). High: full model stack (~16G)."),
@@ -164,7 +164,7 @@ namespace KimodoUnityMotionTools.ProjectEditor
 
             EditorGUI.BeginChangeCheck();
             int newLimit = EditorGUILayout.IntSlider(
-                new GUIContent("Max Cached Clip", "Range: 1-1000"),
+                new GUIContent("Max Cached Clip", "Maximum number of generated clips kept in runtime cache. Range: 1-1000."),
                 settings.MaxGeneratedClips,
                 KimodoPlayableClipGenerationSettings.MinGeneratedClipsLimit,
                 KimodoPlayableClipGenerationSettings.MaxGeneratedClipsLimit);
@@ -198,11 +198,11 @@ namespace KimodoUnityMotionTools.ProjectEditor
             EditorGUILayout.BeginHorizontal();
             EditorGUI.BeginChangeCheck();
             localModelsPath = EditorGUILayout.DelayedTextField(
-                new GUIContent("Local Models Path", "Optional. Use this path for model detection list only."),
+                new GUIContent("Local Models Path", "Optional override for model detection list source. Does not move runtime root."),
                 localModelsPath);
             bool textChanged = EditorGUI.EndChangeCheck();
 
-            if (GUILayout.Button("Browse...", GUILayout.Width(90f)))
+            if (GUILayout.Button(new GUIContent("Browse...", "Pick local models folder path for detection list."), GUILayout.Width(90f)))
             {
                 string startDir = string.IsNullOrWhiteSpace(localModelsPath)
                     ? runtimeRoot
@@ -286,7 +286,7 @@ namespace KimodoUnityMotionTools.ProjectEditor
 
             using (new EditorGUI.DisabledScope(operationInProgress || inMaintenance))
             {
-                if (GUILayout.Button(buttonLabel, GUILayout.Width(140f)))
+                if (GUILayout.Button(new GUIContent(buttonLabel, "Start or stop Kimodo bridge server with current startup model and VRAM mode settings."), GUILayout.Width(140f)))
                 {
                     if (stopMode)
                     {
@@ -351,7 +351,7 @@ namespace KimodoUnityMotionTools.ProjectEditor
 
                     using (new EditorGUI.DisabledScope(usingCustomModelsPath || operationInProgress))
                     {
-                        if (GUI.Button(deleteRect, "Delete"))
+                        if (GUI.Button(deleteRect, new GUIContent("Delete", "Delete this detected model directory from disk.")))
                         {
                             TryDeleteModelDirectory(model.DirectoryPath, model.Name);
                             RefreshModelList();
@@ -385,12 +385,12 @@ namespace KimodoUnityMotionTools.ProjectEditor
 
             using (new EditorGUI.DisabledScope(operationInProgress))
             {
-                if (GUILayout.Button("Try Fix (delete and reconfigure)", GUILayout.Height(24f)))
+                if (GUILayout.Button(new GUIContent("Try Fix (delete and reconfigure)", "Run bridge self-repair flow: clean broken parts and reconfigure runtime."), GUILayout.Height(24f)))
                 {
                     EnqueueOrRun(PendingServerOperation.TryFix, () => DispatchBridgeCommand(KimodoBridgeOperation.TryFix));
                 }
 
-                if (GUILayout.Button("Delete All Data", GUILayout.Height(24f)))
+                if (GUILayout.Button(new GUIContent("Delete All Data", "Delete the full Kimodo runtime folder including downloaded models and cache."), GUILayout.Height(24f)))
                 {
                     if (EditorUtility.DisplayDialog("Delete All Data", "Delete entire Kimodo runtime folder? This cannot be undone.", "Delete", "Cancel"))
                     {

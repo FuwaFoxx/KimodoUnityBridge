@@ -40,6 +40,7 @@ namespace UnityEngine.Timeline
         public Animator animator;
         public Transform skeletonRoot;
         public TimelineClip sourceClip;
+        public string modelName;
         public double globalTime;
         public int frameIndex;
         public string markerType;
@@ -51,6 +52,8 @@ namespace UnityEngine.Timeline
         public Vector3 rootPosition;
         public Vector2 rootHeading;
         public List<Vector3> localAxisAngles = new List<Vector3>();
+        // Optional: indices of joints that were actually resolved/sampled.
+        public List<int> sampledJointIndices = new List<int>();
     }
 
     public interface IKimodoSampleMarker
@@ -70,7 +73,8 @@ namespace UnityEngine.Timeline
         {
             return new KimodoConstraintJson
             {
-                type = ConstraintType
+                type = ConstraintType,
+                frame_indices = new List<int>()
             };
         }
 
@@ -82,34 +86,22 @@ namespace UnityEngine.Timeline
     {
         public override string ConstraintType => "root2d";
 
-        public List<int> frameIndices = new List<int> { 0 };
-        public List<Vector2> smoothRoot2D = new List<Vector2> { Vector2.zero };
+        public int frameIndex;
+        public Vector2 smoothRoot2D = Vector2.zero;
         public bool includeGlobalHeading;
-        public List<Vector2> globalRootHeading = new List<Vector2> { Vector2.right };
+        public Vector2 globalRootHeading = Vector2.right;
 
         public override KimodoConstraintJson ToJson()
         {
             KimodoConstraintJson json = CreateBase();
-            json.frame_indices = new List<int>(frameIndices ?? new List<int>());
+            json.frame_indices.Add(frameIndex);
+            Vector2 kimodoRoot2D = new Vector2(-smoothRoot2D.x, smoothRoot2D.y);
+            json.smooth_root_2d = new List<float[]> { kimodoRoot2D.ToArray() };
 
-            var root2d = new List<float[]>();
-            if (smoothRoot2D != null)
+            if (includeGlobalHeading)
             {
-                for (int i = 0; i < smoothRoot2D.Count; i++)
-                {
-                    root2d.Add(smoothRoot2D[i].ToArray());
-                }
-            }
-            json.smooth_root_2d = root2d;
-
-            if (includeGlobalHeading && globalRootHeading != null && globalRootHeading.Count > 0)
-            {
-                var heading = new List<float[]>();
-                for (int i = 0; i < globalRootHeading.Count; i++)
-                {
-                    heading.Add(globalRootHeading[i].ToArray());
-                }
-                json.global_root_heading = heading;
+                Vector2 kimodoHeading = new Vector2(-globalRootHeading.x, globalRootHeading.y);
+                json.global_root_heading = new List<float[]> { kimodoHeading.ToArray() };
             }
 
             return json;
@@ -121,67 +113,82 @@ namespace UnityEngine.Timeline
     {
         public override string ConstraintType => "fullbody";
 
-        public List<int> frameIndices = new List<int> { 0 };
-        public List<Vector2> smoothRoot2D = new List<Vector2> { Vector2.zero };
-        public List<Vector3> rootPositions = new List<Vector3> { new Vector3(0f, 1f, 0f) };
-        [Tooltip("Per frame: local_joints_rot[frame][joint] = axis-angle xyz (radians).")]
-        public List<KimodoAxisAngleFrame> localJointRots = new List<KimodoAxisAngleFrame>();
+        public int frameIndex;
+        public Vector2 smoothRoot2D = Vector2.zero;
+        public Vector3 rootPosition = new Vector3(0f, 1f, 0f);
+        [Tooltip("Single frame local joints axis-angle xyz (radians).")]
+        public List<Vector3> localJointRots = new List<Vector3>();
 
         public override KimodoConstraintJson ToJson()
         {
             KimodoConstraintJson json = CreateBase();
-            json.frame_indices = new List<int>(frameIndices ?? new List<int>());
-
-            var root2d = new List<float[]>();
-            if (smoothRoot2D != null)
-            {
-                for (int i = 0; i < smoothRoot2D.Count; i++)
-                {
-                    root2d.Add(smoothRoot2D[i].ToArray());
-                }
-            }
-            json.smooth_root_2d = root2d;
-
-            var roots = new List<float[]>();
-            if (rootPositions != null)
-            {
-                for (int i = 0; i < rootPositions.Count; i++)
-                {
-                    roots.Add(rootPositions[i].ToArray());
-                }
-            }
-            json.root_positions = roots;
-
-            json.local_joints_rot = BuildLocalJointRotJson(localJointRots);
+            json.frame_indices.Add(frameIndex);
+            Vector3 kimodoRoot = new Vector3(-rootPosition.x, rootPosition.y, rootPosition.z);
+            Vector2 kimodoRoot2D = new Vector2(kimodoRoot.x, kimodoRoot.z);
+            json.smooth_root_2d = new List<float[]> { kimodoRoot2D.ToArray() };
+            json.root_positions = new List<float[]> { kimodoRoot.ToArray() };
+            json.local_joints_rot = new List<float[][]> { BuildSingleLocalJointRotFrame(ToKimodoAxisAngles(localJointRots)) };
             return json;
         }
 
-        internal static List<float[][]> BuildLocalJointRotJson(List<KimodoAxisAngleFrame> frames)
+        internal static float[][] BuildSingleLocalJointRotFrame(List<Vector3> joints)
         {
-            var result = new List<float[][]>();
-            if (frames == null)
+            if (joints == null || joints.Count == 0)
+            {
+                return Array.Empty<float[]>();
+            }
+
+            float[][] data = new float[joints.Count][];
+            for (int i = 0; i < joints.Count; i++)
+            {
+                data[i] = joints[i].ToArray();
+            }
+
+            return data;
+        }
+
+        internal static List<Vector3> ToKimodoAxisAngles(List<Vector3> unityAxisAngles)
+        {
+            var result = new List<Vector3>();
+            if (unityAxisAngles == null || unityAxisAngles.Count == 0)
             {
                 return result;
             }
 
-            for (int i = 0; i < frames.Count; i++)
+            for (int i = 0; i < unityAxisAngles.Count; i++)
             {
-                KimodoAxisAngleFrame frame = frames[i];
-                if (frame == null || frame.joints == null)
+                Vector3 unityAxisAngle = unityAxisAngles[i];
+                float angleRad = unityAxisAngle.magnitude;
+                if (angleRad <= 1e-8f)
                 {
-                    result.Add(Array.Empty<float[]>());
+                    result.Add(Vector3.zero);
                     continue;
                 }
 
-                float[][] joints = new float[frame.joints.Count][];
-                for (int j = 0; j < frame.joints.Count; j++)
-                {
-                    joints[j] = frame.joints[j].ToArray();
-                }
-                result.Add(joints);
+                Vector3 axis = unityAxisAngle / angleRad;
+                Quaternion unityLocal = Quaternion.AngleAxis(angleRad * Mathf.Rad2Deg, axis);
+                Quaternion kimodoLocal = new Quaternion(unityLocal.x, -unityLocal.y, -unityLocal.z, unityLocal.w);
+                result.Add(QuaternionToAxisAngleVector(kimodoLocal));
             }
 
             return result;
+        }
+
+        private static Vector3 QuaternionToAxisAngleVector(Quaternion q)
+        {
+            q.Normalize();
+            q.ToAngleAxis(out float degrees, out Vector3 axis);
+            if (float.IsNaN(axis.x) || axis == Vector3.zero)
+            {
+                return Vector3.zero;
+            }
+
+            if (degrees > 180f)
+            {
+                degrees -= 360f;
+            }
+
+            return axis.normalized * (degrees * Mathf.Deg2Rad);
         }
     }
 
@@ -190,40 +197,24 @@ namespace UnityEngine.Timeline
     {
         public override string ConstraintType => "end-effector";
 
-        public List<int> frameIndices = new List<int> { 0 };
+        public int frameIndex;
         [Tooltip("Allowed values follow Kimodo convention, e.g. LeftHand/RightHand/LeftFoot/RightFoot/Hips.")]
         public List<string> jointNames = new List<string> { "LeftHand" };
-        public List<Vector2> smoothRoot2D = new List<Vector2> { Vector2.zero };
-        public List<Vector3> rootPositions = new List<Vector3> { new Vector3(0f, 1f, 0f) };
-        [Tooltip("Per frame: local_joints_rot[frame][joint] = axis-angle xyz (radians).")]
-        public List<KimodoAxisAngleFrame> localJointRots = new List<KimodoAxisAngleFrame>();
+        public Vector2 smoothRoot2D = Vector2.zero;
+        public Vector3 rootPosition = new Vector3(0f, 1f, 0f);
+        [Tooltip("Single frame local joints axis-angle xyz (radians).")]
+        public List<Vector3> localJointRots = new List<Vector3>();
 
         public override KimodoConstraintJson ToJson()
         {
             KimodoConstraintJson json = CreateBase();
-            json.frame_indices = new List<int>(frameIndices ?? new List<int>());
+            json.frame_indices.Add(frameIndex);
             json.joint_names = new List<string>(jointNames ?? new List<string>());
-
-            var root2d = new List<float[]>();
-            if (smoothRoot2D != null)
-            {
-                for (int i = 0; i < smoothRoot2D.Count; i++)
-                {
-                    root2d.Add(smoothRoot2D[i].ToArray());
-                }
-            }
-            json.smooth_root_2d = root2d;
-
-            var roots = new List<float[]>();
-            if (rootPositions != null)
-            {
-                for (int i = 0; i < rootPositions.Count; i++)
-                {
-                    roots.Add(rootPositions[i].ToArray());
-                }
-            }
-            json.root_positions = roots;
-            json.local_joints_rot = KimodoFullBodyConstraintMarker.BuildLocalJointRotJson(localJointRots);
+            Vector3 kimodoRoot = new Vector3(-rootPosition.x, rootPosition.y, rootPosition.z);
+            Vector2 kimodoRoot2D = new Vector2(kimodoRoot.x, kimodoRoot.z);
+            json.smooth_root_2d = new List<float[]> { kimodoRoot2D.ToArray() };
+            json.root_positions = new List<float[]> { kimodoRoot.ToArray() };
+            json.local_joints_rot = new List<float[][]> { KimodoFullBodyConstraintMarker.BuildSingleLocalJointRotFrame(KimodoFullBodyConstraintMarker.ToKimodoAxisAngles(localJointRots)) };
             return json;
         }
     }
@@ -250,11 +241,5 @@ namespace UnityEngine.Timeline
     public sealed class KimodoRightFootConstraintMarker : KimodoEndEffectorConstraintMarker
     {
         public override string ConstraintType => "right-foot";
-    }
-
-    [Serializable]
-    public sealed class KimodoAxisAngleFrame
-    {
-        public List<Vector3> joints = new List<Vector3>();
     }
 }

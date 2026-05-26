@@ -2,7 +2,9 @@ using System;
 using System.Collections.Generic;
 using KimodoUnityMotionTools.ProjectEditor.Manager;
 using UnityEditor;
+using UnityEditor.Timeline;
 using UnityEngine;
+using UnityEngine.Playables;
 using UnityEngine.Timeline;
 
 namespace KimodoUnityMotionTools.ProjectEditor
@@ -50,6 +52,43 @@ namespace KimodoUnityMotionTools.ProjectEditor
         internal static bool HasActiveSession(KimodoConstraintMarkerBase marker)
         {
             return marker != null && Sessions.ContainsKey(marker.GetInstanceID());
+        }
+
+        internal static bool HasAnyActiveSession()
+        {
+            return Sessions.Count > 0;
+        }
+
+        internal static void AppendActiveMarkers(List<KimodoConstraintMarkerBase> output)
+        {
+            if (output == null || Sessions.Count == 0)
+            {
+                return;
+            }
+
+            var existing = new HashSet<int>();
+            for (int i = 0; i < output.Count; i++)
+            {
+                if (output[i] != null)
+                {
+                    existing.Add(output[i].GetInstanceID());
+                }
+            }
+
+            foreach (KeyValuePair<int, SessionData> kv in Sessions)
+            {
+                SessionData session = kv.Value;
+                if (session?.Marker == null)
+                {
+                    continue;
+                }
+
+                int id = session.Marker.GetInstanceID();
+                if (existing.Add(id))
+                {
+                    output.Add(session.Marker);
+                }
+            }
         }
 
         internal static bool TryGetSession(KimodoConstraintMarkerBase marker, out SessionData session)
@@ -126,17 +165,18 @@ namespace KimodoUnityMotionTools.ProjectEditor
                 return false;
             }
 
-            if (!KimodoConstraintOverridePoseUtility.TryBuildUnityPoseFromMarker(marker, out KimodoMarkerSampleResult initialPose, out error))
+            if (!TryResolveSessionBinding(marker, clipRange, out PlayableDirector director, out Animator boundAnimator, out error))
             {
                 return false;
             }
 
-            if (!KimodoConstraintSnapshotVisualizer.TryCreateStandalonePreviewRigForModel(
-                    playableClip.bridgeModelName,
-                    "__KimodoOverrideEditRig",
-                    out GameObject previewRig,
-                    out Transform[] transforms,
-                    out error))
+            if (!TrySampleCurrentPreviewPose(marker, clipRange, director, boundAnimator, out KimodoMarkerSampleResult initialPose, out error))
+            {
+                return false;
+            }
+
+            // Seed marker override data at session start so strict preview path always has complete pose data.
+            if (!KimodoConstraintPosePipeline.TryWriteUnityPoseToMarkerData(marker, initialPose, keepOverrideEnabled: true, out error))
             {
                 return false;
             }
@@ -144,14 +184,7 @@ namespace KimodoUnityMotionTools.ProjectEditor
             string serializedMarkerSnapshot = EditorJsonUtility.ToJson(marker);
             if (string.IsNullOrWhiteSpace(serializedMarkerSnapshot))
             {
-                UnityEngine.Object.DestroyImmediate(previewRig);
                 error = "failed to snapshot marker";
-                return false;
-            }
-
-            if (!ApplyUnityPoseToTransforms(transforms, initialPose, out error))
-            {
-                UnityEngine.Object.DestroyImmediate(previewRig);
                 return false;
             }
 
@@ -159,7 +192,6 @@ namespace KimodoUnityMotionTools.ProjectEditor
             EditorUtility.SetDirty(marker);
 
             EnsureAnimationModeOn();
-            Selection.activeObject = previewRig;
             SceneView.RepaintAll();
 
             session = new SessionData
@@ -167,11 +199,12 @@ namespace KimodoUnityMotionTools.ProjectEditor
                 Marker = marker,
                 ClipRange = clipRange,
                 PlayableClip = playableClip,
-                PreviewRig = previewRig,
-                RigTransforms = transforms,
+                Director = director,
+                BoundAnimator = boundAnimator,
                 SerializedMarkerSnapshot = serializedMarkerSnapshot,
-                LastPoseSignature = ComputePoseSignature(transforms),
-                LastPingTime = EditorApplication.timeSinceStartup
+                LastPoseSignature = ComputePoseSignature(initialPose),
+                LastPingTime = EditorApplication.timeSinceStartup,
+                FixedMarkerTime = marker.time
             };
             return true;
         }
@@ -187,15 +220,8 @@ namespace KimodoUnityMotionTools.ProjectEditor
             foreach (KeyValuePair<int, SessionData> kv in Sessions)
             {
                 SessionData session = kv.Value;
-                if (session == null || session.Marker == null || session.PreviewRig == null)
+                if (session == null || session.Marker == null || session.BoundAnimator == null)
                 {
-                    removed.Add(kv.Key);
-                    continue;
-                }
-
-                if (!KimodoConstraintOverrideEditWindow.IsOpenForMarker(session.Marker))
-                {
-                    EndSession(session, keepMarkerChanges: false, removeFromMap: false);
                     removed.Add(kv.Key);
                     continue;
                 }
@@ -215,13 +241,23 @@ namespace KimodoUnityMotionTools.ProjectEditor
         private static bool CapturePoseAndWriteBack(SessionData session, out string error)
         {
             error = string.Empty;
-            if (session?.Marker == null || session.RigTransforms == null)
+            if (session?.Marker == null || session.BoundAnimator == null)
             {
                 error = "session is invalid";
                 return false;
             }
 
-            int currentSig = ComputePoseSignature(session.RigTransforms);
+            if (System.Math.Abs(session.Marker.time - session.FixedMarkerTime) > 1e-6)
+            {
+                session.Marker.time = session.FixedMarkerTime;
+            }
+
+            if (!TrySampleCurrentPreviewPose(session.Marker, session.ClipRange, session.Director, session.BoundAnimator, out KimodoMarkerSampleResult pose, out error, session.FixedMarkerTime))
+            {
+                return false;
+            }
+
+            int currentSig = ComputePoseSignature(pose);
             if (currentSig == session.LastPoseSignature)
             {
                 return true;
@@ -229,13 +265,7 @@ namespace KimodoUnityMotionTools.ProjectEditor
 
             session.LastPoseSignature = currentSig;
 
-            bool captureHeading = session.Marker is KimodoRoot2DConstraintMarker root2D && root2D.includeGlobalHeading;
-            if (!KimodoConstraintOverridePoseUtility.TryCapturePoseFromRig(session.RigTransforms, captureHeading, out KimodoMarkerSampleResult pose, out error))
-            {
-                return false;
-            }
-
-            if (!KimodoConstraintOverridePoseUtility.TryWriteUnityPoseToMarker(session.Marker, pose, out error))
+            if (!KimodoConstraintPosePipeline.TryWriteUnityPoseToMarker(session.Marker, pose, out error))
             {
                 return false;
             }
@@ -245,67 +275,142 @@ namespace KimodoUnityMotionTools.ProjectEditor
             return true;
         }
 
-        private static bool ApplyUnityPoseToTransforms(Transform[] transforms, KimodoMarkerSampleResult pose, out string error)
+        private static bool TryResolveSessionBinding(
+            KimodoConstraintMarkerBase marker,
+            TimelineClip clipRange,
+            out PlayableDirector director,
+            out Animator boundAnimator,
+            out string error)
         {
+            director = null;
+            boundAnimator = null;
             error = string.Empty;
-            if (transforms == null || transforms.Length == 0 || pose == null)
+
+            if (marker == null || clipRange == null)
             {
-                error = "invalid pose or transforms";
+                error = "invalid marker or clip";
                 return false;
             }
 
-            transforms[0].position = pose.rootPosition;
+            TrackAsset track = clipRange.GetParentTrack();
+            if (track == null && marker.parent is TrackAsset markerTrack)
+            {
+                track = markerTrack;
+            }
+            if (track == null)
+            {
+                error = "parent track not found";
+                return false;
+            }
 
-            int count = Mathf.Min(transforms.Length, pose.localAxisAngles != null ? pose.localAxisAngles.Count : 0);
-            if (count <= 0)
+            director = TimelineEditor.inspectedDirector;
+            if (director == null)
+            {
+                error = "Timeline inspected director is null";
+                return false;
+            }
+
+            boundAnimator = director.GetGenericBinding(track) as Animator;
+            if (boundAnimator != null && boundAnimator.transform != null)
             {
                 return true;
             }
 
-            for (int i = 0; i < count; i++)
+            TrackAsset current = track.parent as TrackAsset;
+            while (current != null)
             {
-                Quaternion q = Quaternion.identity;
-                Vector3 aa = pose.localAxisAngles[i];
-                float angleRad = aa.magnitude;
-                if (angleRad > 1e-8f)
+                boundAnimator = director.GetGenericBinding(current) as Animator;
+                if (boundAnimator != null && boundAnimator.transform != null)
                 {
-                    q = Quaternion.AngleAxis(angleRad * Mathf.Rad2Deg, aa / angleRad);
+                    return true;
                 }
 
-                transforms[i].localRotation = q;
+                current = current.parent as TrackAsset;
             }
 
-            return true;
+            error = "track has no animator binding on self track or parent tracks";
+            return false;
         }
 
-        private static int ComputePoseSignature(Transform[] transforms)
+        private static bool TrySampleCurrentPreviewPose(
+            KimodoConstraintMarkerBase marker,
+            TimelineClip clipRange,
+            PlayableDirector director,
+            Animator boundAnimator,
+            out KimodoMarkerSampleResult pose,
+            out string error,
+            double? fixedTime = null)
+        {
+            pose = null;
+            error = string.Empty;
+
+            if (marker == null || clipRange == null || boundAnimator == null || boundAnimator.transform == null)
+            {
+                error = "invalid marker/clip/animator";
+                return false;
+            }
+
+            double sampleTime = fixedTime ?? marker.time;
+            if (director != null)
+            {
+                director.time = sampleTime;
+                director.Evaluate();
+            }
+
+            KimodoMarkerSampleRequest request = BuildSampleRequest(marker, clipRange, boundAnimator, sampleTime);
+            if (!KimodoMarkerSamplingUtility.TrySampleMarker(request, out pose, out error))
+            {
+                return false;
+            }
+
+            return pose != null;
+        }
+
+        private static KimodoMarkerSampleRequest BuildSampleRequest(
+            KimodoConstraintMarkerBase marker,
+            TimelineClip clipRange,
+            Animator boundAnimator,
+            double sampleTime)
+        {
+            return new KimodoMarkerSampleRequest
+            {
+                animator = boundAnimator,
+                skeletonRoot = boundAnimator.transform,
+                sourceClip = clipRange,
+                modelName = (clipRange.asset as KimodoPlayableClip)?.bridgeModelName,
+                globalTime = sampleTime,
+                frameIndex = KimodoConstraintMarkerEditorUtility.TimeToKimodoFrameIndex(clipRange, sampleTime),
+                markerType = marker.ConstraintType
+            };
+        }
+
+        private static int ComputePoseSignature(KimodoMarkerSampleResult pose)
         {
             unchecked
             {
                 int hash = 486187739;
-                if (transforms == null)
+                if (pose == null)
                 {
                     return hash;
                 }
 
-                for (int i = 0; i < transforms.Length; i++)
-                {
-                    Transform t = transforms[i];
-                    if (t == null)
-                    {
-                        hash = hash * 31 + 17;
-                        continue;
-                    }
+                Vector3 p = pose.rootPosition;
+                Vector2 h = pose.rootHeading;
+                hash = hash * 31 + Quantize(p.x);
+                hash = hash * 31 + Quantize(p.y);
+                hash = hash * 31 + Quantize(p.z);
+                hash = hash * 31 + Quantize(h.x);
+                hash = hash * 31 + Quantize(h.y);
 
-                    Vector3 p = t.localPosition;
-                    Quaternion r = t.localRotation;
-                    hash = hash * 31 + Quantize(p.x);
-                    hash = hash * 31 + Quantize(p.y);
-                    hash = hash * 31 + Quantize(p.z);
-                    hash = hash * 31 + Quantize(r.x);
-                    hash = hash * 31 + Quantize(r.y);
-                    hash = hash * 31 + Quantize(r.z);
-                    hash = hash * 31 + Quantize(r.w);
+                int count = pose.localAxisAngles != null ? pose.localAxisAngles.Count : 0;
+                hash = hash * 31 + count;
+                int maxSample = Mathf.Min(count, 40);
+                for (int i = 0; i < maxSample; i++)
+                {
+                    Vector3 aa = pose.localAxisAngles[i];
+                    hash = hash * 31 + Quantize(aa.x);
+                    hash = hash * 31 + Quantize(aa.y);
+                    hash = hash * 31 + Quantize(aa.z);
                 }
 
                 return hash;
@@ -345,11 +450,6 @@ namespace KimodoUnityMotionTools.ProjectEditor
                 EditorUtility.SetDirty(session.Marker);
             }
 
-            if (session.PreviewRig != null)
-            {
-                UnityEngine.Object.DestroyImmediate(session.PreviewRig);
-            }
-
             if (removeFromMap && session.Marker != null)
             {
                 Sessions.Remove(session.Marker.GetInstanceID());
@@ -386,11 +486,12 @@ namespace KimodoUnityMotionTools.ProjectEditor
             public KimodoConstraintMarkerBase Marker;
             public TimelineClip ClipRange;
             public KimodoPlayableClip PlayableClip;
-            public GameObject PreviewRig;
-            public Transform[] RigTransforms;
+            public PlayableDirector Director;
+            public Animator BoundAnimator;
             public string SerializedMarkerSnapshot;
             public int LastPoseSignature;
             public double LastPingTime;
+            public double FixedMarkerTime;
         }
     }
 }

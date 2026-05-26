@@ -17,7 +17,10 @@ namespace KimodoUnityMotionTools.ProjectEditor
             {
                 rootPosition = ToKimodoRootPosition(unitySample.rootPosition),
                 rootHeading = ToKimodoHeading(unitySample.rootHeading),
-                localAxisAngles = new List<Vector3>()
+                localAxisAngles = new List<Vector3>(),
+                sampledJointIndices = unitySample.sampledJointIndices != null
+                    ? new List<int>(unitySample.sampledJointIndices)
+                    : new List<int>()
             };
 
             if (unitySample.localAxisAngles != null)
@@ -66,7 +69,10 @@ namespace KimodoUnityMotionTools.ProjectEditor
             {
                 rootPosition = ToUnityRootPosition(kimodoSample.rootPosition),
                 rootHeading = ToUnityHeading(kimodoSample.rootHeading),
-                localAxisAngles = new List<Vector3>()
+                localAxisAngles = new List<Vector3>(),
+                sampledJointIndices = kimodoSample.sampledJointIndices != null
+                    ? new List<int>(kimodoSample.sampledJointIndices)
+                    : new List<int>()
             };
 
             if (kimodoSample.localAxisAngles != null)

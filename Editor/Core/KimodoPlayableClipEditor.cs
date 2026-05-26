@@ -159,22 +159,23 @@ namespace KimodoUnityMotionTools.ProjectEditor
                 EditorGUILayout.HelpBox("Workflow source is fixed to Runtime/Resources/kimodo-unity-workflow.json.", MessageType.Info);
             }
 
+            EditorGUILayout.LabelField(new GUIContent("Prompt", "Natural-language motion prompt sent to the selected generation backend."));
             motionPrompt.stringValue = EditorGUILayout.TextArea(motionPrompt.stringValue, GUILayout.Height(60));
 
             int oldFrames = generationFrames.intValue;
-            int newFrames = EditorGUILayout.IntSlider("Duration (frames)", oldFrames, KimodoPlayableClip.MIN_FRAMES, KimodoPlayableClip.MAX_FRAMES);
+            int newFrames = EditorGUILayout.IntSlider(new GUIContent("Duration (frames)", "Target generated clip length in frames (30 FPS). Also syncs timeline clip duration when changed."), oldFrames, KimodoPlayableClip.MIN_FRAMES, KimodoPlayableClip.MAX_FRAMES);
             if (newFrames != oldFrames)
             {
                 generationFrames.intValue = newFrames;
                 TrySyncTimelineDuration(newFrames);
             }
 
-            diffusionSteps.intValue = Mathf.Clamp(EditorGUILayout.IntField("Diffusion Steps", diffusionSteps.intValue), 1, 1000);
+            diffusionSteps.intValue = Mathf.Clamp(EditorGUILayout.IntField(new GUIContent("Diffusion Steps", "Sampling steps for generation. Higher values increase compute time and may improve fidelity."), diffusionSteps.intValue), 1, 1000);
 
             EditorGUILayout.BeginHorizontal();
-            randomProp.boolValue = EditorGUILayout.ToggleLeft("Random", randomProp.boolValue, GUILayout.Width(110f));
+            randomProp.boolValue = EditorGUILayout.ToggleLeft(new GUIContent("Random", "Use a random seed on each generation run."), randomProp.boolValue, GUILayout.Width(110f));
             EditorGUI.BeginDisabledGroup(randomProp.boolValue);
-            seed.intValue = EditorGUILayout.IntField("Seed", seed.intValue);
+            seed.intValue = EditorGUILayout.IntField(new GUIContent("Seed", "Deterministic seed used when Random is disabled."), seed.intValue);
             EditorGUI.EndDisabledGroup();
             EditorGUILayout.EndHorizontal();
             if (enableInbetweenInterpolation != null)
@@ -190,7 +191,7 @@ namespace KimodoUnityMotionTools.ProjectEditor
 
             bool disableGenerate = isGenerating || KimodoBridgeController.IsRuntimeMaintenanceInProgress;
             GUI.enabled = !disableGenerate;
-            if (GUILayout.Button("Generate & Bake", GUILayout.Height(32)))
+            if (GUILayout.Button(new GUIContent("Generate & Bake", "Generate motion using current settings and bake result back into this playable clip."), GUILayout.Height(32)))
             {
                 bool accepted = KimodoEditorCommandManager.Dispatch(
                     new GeneratePlayableClipCommand(clip));
@@ -202,7 +203,7 @@ namespace KimodoUnityMotionTools.ProjectEditor
                 }
             }
             GUI.enabled = isGenerating;
-            if (GUILayout.Button("Cancel", GUILayout.Height(24)))
+            if (GUILayout.Button(new GUIContent("Cancel", "Cancel the current generation command for this clip."), GUILayout.Height(24)))
             {
                 KimodoEditorCommandManager.Dispatch(
                     new CancelPlayableClipGenerationCommand(clip));
@@ -223,7 +224,7 @@ namespace KimodoUnityMotionTools.ProjectEditor
 
                 bool closeAllowed = bridgeRunningCached || isGenerating;
                 EditorGUI.BeginDisabledGroup(!closeAllowed);
-                if (GUILayout.Button("Close Bridge Server", GUILayout.Height(22)))
+                if (GUILayout.Button(new GUIContent("Close Bridge Server", "Request bridge runtime shutdown. Use when idle or to recover server state."), GUILayout.Height(22)))
                 {
                     KimodoEditorCommandManager.Dispatch(
                         new BridgeControlCommand(
@@ -302,7 +303,7 @@ namespace KimodoUnityMotionTools.ProjectEditor
 
             if (animationClipProp != null)
             {
-                EditorGUILayout.PropertyField(animationClipProp, new GUIContent("Clip"));
+                EditorGUILayout.PropertyField(animationClipProp, new GUIContent("Clip", "Baked Unity AnimationClip used by this playable clip."));
             }
             else
             {
@@ -311,12 +312,12 @@ namespace KimodoUnityMotionTools.ProjectEditor
 
             if (footIKProp != null)
             {
-                EditorGUILayout.PropertyField(footIKProp, new GUIContent("Foot IK"));
+                EditorGUILayout.PropertyField(footIKProp, new GUIContent("Foot IK", "Enable Animator foot IK during playback."));
             }
 
             if (loopProp != null)
             {
-                EditorGUILayout.PropertyField(loopProp, new GUIContent("Loop"));
+                EditorGUILayout.PropertyField(loopProp, new GUIContent("Loop", "Loop this clip when timeline playback exceeds clip duration."));
             }
 
             EditorGUILayout.EndVertical();
@@ -330,11 +331,11 @@ namespace KimodoUnityMotionTools.ProjectEditor
 
             if (autoRetargetOnBindingProp != null)
             {
-                EditorGUILayout.PropertyField(autoRetargetOnBindingProp, new GUIContent("Auto Retarget On Binding"));
+                EditorGUILayout.PropertyField(autoRetargetOnBindingProp, new GUIContent("Auto Retarget On Binding", "Automatically retarget baked motion to the bound character avatar at playback/bind time."));
             }
             if (autoRetargetOnBindingProp != null && !autoRetargetOnBindingProp.boolValue && customRetargetAvatarProp != null)
             {
-                EditorGUILayout.PropertyField(customRetargetAvatarProp, new GUIContent("Custom Avatar"));
+                EditorGUILayout.PropertyField(customRetargetAvatarProp, new GUIContent("Custom Avatar", "Humanoid avatar used for retargeting when auto retarget on binding is disabled."));
                 Avatar customAvatar = clip != null ? clip.CustomRetargetAvatar : null;
                 if (customAvatar == null)
                 {
@@ -360,7 +361,7 @@ namespace KimodoUnityMotionTools.ProjectEditor
                 idx = 0;
             }
 
-            int newIdx = EditorGUILayout.Popup(new GUIContent("Bridge Model"), idx, options);
+            int newIdx = EditorGUILayout.Popup(new GUIContent("Bridge Model", "Installed Kimodo model package to use for bridge generation."), idx, options);
             bridgeModelName.stringValue = options[Mathf.Clamp(newIdx, 0, options.Length - 1)];
         }
 
@@ -520,7 +521,7 @@ namespace KimodoUnityMotionTools.ProjectEditor
             }
 
             EditorGUILayout.Space(4f);
-            bool newFoldout = EditorGUILayout.Foldout(showAdvancedFoldout, "Advanced", true);
+            bool newFoldout = EditorGUILayout.Foldout(showAdvancedFoldout, new GUIContent("Advanced", "Curve filtering and post-processing options for generated animation curves."), true);
             if (newFoldout != showAdvancedFoldout)
             {
                 showAdvancedFoldout = newFoldout;
@@ -543,7 +544,7 @@ namespace KimodoUnityMotionTools.ProjectEditor
 
             if (enabledProp != null)
             {
-                EditorGUILayout.PropertyField(enabledProp, new GUIContent("Reduce Keyframes"));
+                EditorGUILayout.PropertyField(enabledProp, new GUIContent("Reduce Keyframes", "Enable curve keyframe reduction after bake."));
             }
 
             bool curveFilterEnabled = enabledProp == null || enabledProp.boolValue;
@@ -552,7 +553,7 @@ namespace KimodoUnityMotionTools.ProjectEditor
                 if (positionErrorProp != null)
                 {
                     positionErrorProp.floatValue = EditorGUILayout.Slider(
-                        new GUIContent("Position Error"),
+                        new GUIContent("Position Error", "Maximum tolerated positional error during keyframe reduction."),
                         positionErrorProp.floatValue,
                         0f,
                         1f);
@@ -561,7 +562,7 @@ namespace KimodoUnityMotionTools.ProjectEditor
                 if (rotationErrorProp != null)
                 {
                     rotationErrorProp.floatValue = EditorGUILayout.Slider(
-                        new GUIContent("Rotation Error"),
+                        new GUIContent("Rotation Error", "Maximum tolerated rotational error during keyframe reduction."),
                         rotationErrorProp.floatValue,
                         0f,
                         1f);
@@ -570,7 +571,7 @@ namespace KimodoUnityMotionTools.ProjectEditor
                 if (floatErrorProp != null)
                 {
                     floatErrorProp.floatValue = EditorGUILayout.Slider(
-                        new GUIContent("Float Error"),
+                        new GUIContent("Float Error", "Maximum tolerated scalar-property error during keyframe reduction."),
                         floatErrorProp.floatValue,
                         0f,
                         1f);
@@ -579,7 +580,7 @@ namespace KimodoUnityMotionTools.ProjectEditor
 
             if (ensureQuatProp != null)
             {
-                EditorGUILayout.PropertyField(ensureQuatProp, new GUIContent("Ensure Quaternion Continuity"));
+                EditorGUILayout.PropertyField(ensureQuatProp, new GUIContent("Ensure Quaternion Continuity", "Fix quaternion sign continuity to reduce rotation flips after keyframe reduction."));
             }
 
             EditorGUI.indentLevel--;
@@ -614,7 +615,7 @@ namespace KimodoUnityMotionTools.ProjectEditor
                 EditorGUILayout.LabelField($"Constraints: {lastConstraintsPath}", EditorStyles.miniLabel);
             }
 
-            if (GUILayout.Button("Reset", GUILayout.Width(100)))
+            if (GUILayout.Button(new GUIContent("Reset", "Clear generated metadata/state on this clip. Does not delete external assets."), GUILayout.Width(100)))
             {
                 Undo.RecordObject(clip, "Reset Kimodo Clip");
                 clip.ResetGeneration();

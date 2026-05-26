@@ -1,7 +1,6 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Linq;
-using System.Reflection;
 using Newtonsoft.Json;
 using UnityEditor;
 using UnityEditor.Timeline;
@@ -181,7 +180,7 @@ namespace KimodoUnityMotionTools.ProjectEditor
                 director.time = marker.time;
                 director.Evaluate();
 
-                if (!TrySamplePoseFromClipAsset(
+                if (!TrySampleUnityPoseFromClipAsset(
                         clipRange,
                         animator,
                         skeletonRoot,
@@ -195,7 +194,7 @@ namespace KimodoUnityMotionTools.ProjectEditor
                 }
 
                 int frameIndex = KimodoConstraintMarkerEditorUtility.TimeToKimodoFrameIndex(clipRange, marker.time);
-                output = BuildAutoConstraint(marker, frameIndex, sample);
+                output = BuildAutoConstraintPreview(marker, frameIndex, sample);
                 return ValidateConstraint(output, out error);
             }
             finally
@@ -248,7 +247,7 @@ namespace KimodoUnityMotionTools.ProjectEditor
             bool allowOverride = marker is not KimodoEndEffectorConstraintMarker ee || !string.Equals(ee.ConstraintType, "end-effector", StringComparison.OrdinalIgnoreCase);
             if (allowOverride && marker.useOverride)
             {
-                output = marker.ToJson();
+                output = KimodoConstraintPosePipeline.BuildConstraintJsonForExport(marker);
                 if (ValidateConstraint(output, out error))
                 {
                     return true;
@@ -372,7 +371,7 @@ namespace KimodoUnityMotionTools.ProjectEditor
         {
             if (marker is KimodoRoot2DConstraintMarker root2DMarker)
             {
-                var json = root2DMarker.ToJson();
+                var json = KimodoConstraintPosePipeline.BuildConstraintJsonForExport(root2DMarker);
                 json.frame_indices = new List<int> { frameIndex };
                 json.smooth_root_2d = new List<float[]> { new[] { sample.rootPosition.x, sample.rootPosition.z } };
                 if (root2DMarker.includeGlobalHeading)
@@ -392,7 +391,39 @@ namespace KimodoUnityMotionTools.ProjectEditor
                 return BuildEndEffectorConstraint(eeMarker, frameIndex, sample);
             }
 
-            return marker.ToJson();
+            return KimodoConstraintPosePipeline.BuildConstraintJsonForExport(marker);
+        }
+
+        private static KimodoConstraintJson BuildAutoConstraintPreview(KimodoConstraintMarkerBase marker, int frameIndex, KimodoMarkerSampleResult sample)
+        {
+            if (marker is KimodoRoot2DConstraintMarker root2DMarker)
+            {
+                var json = new KimodoConstraintJson
+                {
+                    type = root2DMarker.ConstraintType,
+                    frame_indices = new List<int> { frameIndex },
+                    smooth_root_2d = new List<float[]> { new[] { sample.rootPosition.x, sample.rootPosition.z } }
+                };
+
+                if (root2DMarker.includeGlobalHeading)
+                {
+                    json.global_root_heading = new List<float[]> { new[] { sample.rootHeading.x, sample.rootHeading.y } };
+                }
+
+                return json;
+            }
+
+            if (marker is KimodoFullBodyConstraintMarker)
+            {
+                return BuildFullBodyConstraint(frameIndex, sample);
+            }
+
+            if (marker is KimodoEndEffectorConstraintMarker eeMarker)
+            {
+                return BuildEndEffectorConstraint(eeMarker, frameIndex, sample);
+            }
+
+            return null;
         }
 
         private static KimodoConstraintJson BuildFullBodyConstraint(int frameIndex, KimodoMarkerSampleResult sample)
@@ -712,28 +743,16 @@ namespace KimodoUnityMotionTools.ProjectEditor
                 return false;
             }
 
-            var request = new KimodoMarkerSampleRequest
-            {
-                animator = animator,
-                skeletonRoot = skeletonRoot,
-                sourceClip = sourceClip,
-                globalTime = globalTime,
-                frameIndex = frameIndex,
-                markerType = markerType
-            };
+            KimodoMarkerSampleRequest request = BuildSampleRequest(
+                sourceClip,
+                animator,
+                skeletonRoot,
+                globalTime,
+                frameIndex,
+                markerType);
 
-            if (!KimodoMarkerSamplingUtility.TrySampleMarker(request, out KimodoMarkerSampleResult unitySample, out error))
+            if (!TrySampleUnityPose(request, globalTime, out KimodoMarkerSampleResult unitySample, out error))
             {
-                if (string.IsNullOrWhiteSpace(error))
-                {
-                    error = $"Failed to sample skeleton pose at marker {globalTime:F3}s.";
-                }
-                return false;
-            }
-
-            if (unitySample == null || unitySample.localAxisAngles == null || unitySample.localAxisAngles.Count == 0)
-            {
-                error = $"Failed to sample skeleton pose at marker {globalTime:F3}s.";
                 return false;
             }
 
@@ -746,5 +765,99 @@ namespace KimodoUnityMotionTools.ProjectEditor
 
             return true;
         }
+
+        private static bool TrySampleUnityPoseFromClipAsset(
+            TimelineClip sourceClip,
+            Animator animator,
+            Transform skeletonRoot,
+            double globalTime,
+            int frameIndex,
+            string markerType,
+            out KimodoMarkerSampleResult sample,
+            out string error)
+        {
+            sample = null;
+            error = string.Empty;
+
+            if (sourceClip == null)
+            {
+                error = "Source clip is null.";
+                return false;
+            }
+
+            KimodoMarkerSampleRequest request = BuildSampleRequest(
+                sourceClip,
+                animator,
+                skeletonRoot,
+                globalTime,
+                frameIndex,
+                markerType);
+
+            if (!TrySampleUnityPose(request, globalTime, out sample, out error))
+            {
+                return false;
+            }
+
+            return true;
+        }
+
+        private static KimodoMarkerSampleRequest BuildSampleRequest(
+            TimelineClip sourceClip,
+            Animator animator,
+            Transform skeletonRoot,
+            double globalTime,
+            int frameIndex,
+            string markerType)
+        {
+            return new KimodoMarkerSampleRequest
+            {
+                animator = animator,
+                skeletonRoot = skeletonRoot,
+                sourceClip = sourceClip,
+                modelName = ResolveModelNameFromSourceClip(sourceClip),
+                globalTime = globalTime,
+                frameIndex = frameIndex,
+                markerType = markerType
+            };
+        }
+
+        private static bool TrySampleUnityPose(
+            KimodoMarkerSampleRequest request,
+            double globalTime,
+            out KimodoMarkerSampleResult sample,
+            out string error)
+        {
+            sample = null;
+            error = string.Empty;
+
+            if (!KimodoMarkerSamplingUtility.TrySampleMarker(request, out sample, out error))
+            {
+                if (string.IsNullOrWhiteSpace(error))
+                {
+                    error = $"Failed to sample skeleton pose at marker {globalTime:F3}s.";
+                }
+                return false;
+            }
+
+            if (sample == null || sample.localAxisAngles == null || sample.localAxisAngles.Count == 0)
+            {
+                error = $"Failed to sample skeleton pose at marker {globalTime:F3}s.";
+                return false;
+            }
+
+            return true;
+        }
+
+        private static string ResolveModelNameFromSourceClip(TimelineClip sourceClip)
+        {
+            if (sourceClip != null && sourceClip.asset is KimodoPlayableClip clip && !string.IsNullOrWhiteSpace(clip.bridgeModelName))
+            {
+                return clip.bridgeModelName;
+            }
+
+            return string.Empty;
+        }
     }
 }
+
+

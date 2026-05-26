@@ -741,19 +741,19 @@ namespace KimodoUnityMotionTools.ProjectEditor
             EditorGUILayout.Space(6f);
 
             options.Prompt = EditorGUILayout.TextArea(options.Prompt ?? string.Empty, GUILayout.Height(72f));
-            options.Steps = Mathf.Clamp(EditorGUILayout.IntField("Diffusion Steps", options.Steps), 1, 1000);
-            options.UseRandomSeed = EditorGUILayout.ToggleLeft("Random Seed", options.UseRandomSeed);
+            options.Steps = Mathf.Clamp(EditorGUILayout.IntField(new GUIContent("Diffusion Steps", "Sampling steps used by the generation model. Higher values are slower but can improve quality."), options.Steps), 1, 1000);
+            options.UseRandomSeed = EditorGUILayout.ToggleLeft(new GUIContent("Random Seed", "When enabled, a new random seed is used each run. Disable to make results reproducible with the fixed seed."), options.UseRandomSeed);
             using (new EditorGUI.DisabledScope(options.UseRandomSeed))
             {
-                options.Seed = EditorGUILayout.IntField("Seed", options.Seed);
+                options.Seed = EditorGUILayout.IntField(new GUIContent("Seed", "Fixed random seed used when Random Seed is disabled."), options.Seed);
             }
 
-            options.ModelName = EditorGUILayout.TextField("Model", options.ModelName);
-            options.VramMode = (KimodoBridgeVramMode)EditorGUILayout.EnumPopup("VRAM Mode", options.VramMode);
+            options.ModelName = EditorGUILayout.TextField(new GUIContent("Model", "Kimodo model folder/name used for generation, for example Kimodo-SOMA-RP-v1."), options.ModelName);
+            options.VramMode = (KimodoBridgeVramMode)EditorGUILayout.EnumPopup(new GUIContent("VRAM Mode", "Low uses less VRAM with quantized encoder. High uses more VRAM with full model stack."), options.VramMode);
 
             EditorGUILayout.BeginHorizontal();
-            options.OutputFolderAssetPath = EditorGUILayout.TextField("Output Folder", options.OutputFolderAssetPath);
-            if (GUILayout.Button("Browse...", GUILayout.Width(84f)))
+            options.OutputFolderAssetPath = EditorGUILayout.TextField(new GUIContent("Output Folder", "Project-relative output path under Assets/ for generated .anim clips."), options.OutputFolderAssetPath);
+            if (GUILayout.Button(new GUIContent("Browse...", "Pick an output folder inside this project's Assets directory."), GUILayout.Width(84f)))
             {
                 string absBase = Path.GetFullPath(Directory.GetCurrentDirectory());
                 string selected = EditorUtility.OpenFolderPanel("Select Output Folder (under Assets)", absBase, string.Empty);
@@ -788,7 +788,7 @@ namespace KimodoUnityMotionTools.ProjectEditor
             EditorGUILayout.Space(8f);
             using (new EditorGUI.DisabledScope(generating))
             {
-                if (GUILayout.Button("Generate And Insert", GUILayout.Height(30f)))
+                if (GUILayout.Button(new GUIContent("Generate And Insert", "Generate a transition-length motion clip and insert it between source and destination states."), GUILayout.Height(30f)))
                 {
                     _ = RunAsync();
                 }
@@ -796,7 +796,7 @@ namespace KimodoUnityMotionTools.ProjectEditor
 
             using (new EditorGUI.DisabledScope(!generating))
             {
-                if (GUILayout.Button("Cancel", GUILayout.Height(24f)))
+                if (GUILayout.Button(new GUIContent("Cancel", "Cancel the running split-insert generation request."), GUILayout.Height(24f)))
                 {
                     CancelInternal();
                 }
