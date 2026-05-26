@@ -171,7 +171,7 @@ namespace KimodoUnityMotionTools.ProjectEditor
 
         private static string BuildAvatarCachePath(GameObject avatarRoot)
         {
-            string safeName = SanitizeName(avatarRoot != null ? avatarRoot.name : "Avatar");
+            string safeName = KimodoRuntimeUtility.SanitizeName(avatarRoot != null ? avatarRoot.name : "Avatar", "Avatar");
             int hash = ComputeHierarchyHash(avatarRoot != null ? avatarRoot.transform : null);
             return $"{AvatarCacheFolder}/{safeName}_{hash:X8}.asset";
         }
@@ -201,23 +201,6 @@ namespace KimodoUnityMotionTools.ProjectEditor
             }
         }
 
-        private static string SanitizeName(string input)
-        {
-            if (string.IsNullOrWhiteSpace(input))
-            {
-                return "Avatar";
-            }
-
-            char[] chars = input.ToCharArray();
-            for (int i = 0; i < chars.Length; i++)
-            {
-                if (!char.IsLetterOrDigit(chars[i]) && chars[i] != '_' && chars[i] != '-')
-                {
-                    chars[i] = '_';
-                }
-            }
-            return new string(chars);
-        }
 
         private static void EnsureFolderExists(string folderPath)
         {
@@ -245,3 +228,4 @@ namespace KimodoUnityMotionTools.ProjectEditor
         }
     }
 }
+

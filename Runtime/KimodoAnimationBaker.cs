@@ -148,7 +148,7 @@ namespace KimodoUnityMotionTools
                 recorder.SaveToClip(recordedClip, fps, filter);
 
                 filteredClip = BuildFilteredRecordedClip(recordedClip, jointPaths, rootJoint, targetClip.name, fps);
-                CopyClipData(filteredClip, targetClip);
+                KimodoRuntimeUtility.CopyClipData(filteredClip, targetClip);
 
                 if ((options ?? new KimodoCurveFilterOptions()).ensureQuaternionContinuity)
                 {
@@ -307,40 +307,6 @@ namespace KimodoUnityMotionTools
             return true;
         }
 
-        private static void CopyClipData(AnimationClip sourceClip, AnimationClip targetClip)
-        {
-            if (sourceClip == null || targetClip == null)
-            {
-                return;
-            }
-
-            targetClip.ClearCurves();
-            targetClip.frameRate = sourceClip.frameRate > 0f ? sourceClip.frameRate : targetClip.frameRate;
-            AnimationUtility.SetAnimationClipSettings(targetClip, AnimationUtility.GetAnimationClipSettings(sourceClip));
-
-            EditorCurveBinding[] bindings = AnimationUtility.GetCurveBindings(sourceClip);
-            for (int i = 0; i < bindings.Length; i++)
-            {
-                EditorCurveBinding binding = bindings[i];
-                AnimationCurve curve = AnimationUtility.GetEditorCurve(sourceClip, binding);
-                if (curve != null)
-                {
-                    targetClip.SetCurve(binding.path, binding.type, binding.propertyName, curve);
-                }
-            }
-            var resultBinding = AnimationUtility.GetCurveBindings(targetClip);
-
-            EditorCurveBinding[] objectBindings = AnimationUtility.GetObjectReferenceCurveBindings(sourceClip);
-            for (int i = 0; i < objectBindings.Length; i++)
-            {
-                EditorCurveBinding binding = objectBindings[i];
-                ObjectReferenceKeyframe[] curve = AnimationUtility.GetObjectReferenceCurve(sourceClip, binding);
-                if (curve != null)
-                {
-                    AnimationUtility.SetObjectReferenceCurve(targetClip, binding, curve);
-                }
-            }
-        }
 
         private static bool TryLoadAndBuildAvatarHierarchy(string modelName, Transform root, out Avatar avatar, out string error)
         {
@@ -611,12 +577,12 @@ namespace KimodoUnityMotionTools
 
             if (visiting[joint])
             {
-                cache[joint] = SanitizeName(data.joint_names[joint]);
+                cache[joint] = KimodoRuntimeUtility.SanitizeName(data.joint_names[joint]);
                 return cache[joint];
             }
 
             visiting[joint] = true;
-            string safeName = SanitizeName(data.joint_names[joint]);
+            string safeName = KimodoRuntimeUtility.SanitizeName(data.joint_names[joint]);
             int parent = (data.joint_parents != null && joint < data.joint_parents.Length) ? data.joint_parents[joint] : -1;
             if (parent >= 0 && parent < jointCount && parent != joint)
             {
@@ -632,15 +598,7 @@ namespace KimodoUnityMotionTools
             return cache[joint];
         }
 
-        private static string SanitizeName(string input)
-        {
-            if (string.IsNullOrWhiteSpace(input))
-            {
-                return "joint";
-            }
-
-            return input.Replace("/", "_").Replace("\\", "_").Replace(":", "_");
-        }
     }
 }
 #endif
+

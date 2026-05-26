@@ -106,11 +106,11 @@ namespace KimodoUnityMotionTools.ProjectEditor
                 KimodoMarkerSampleResult pose = entries[i].pose;
                 KimodoMarkerSampleResult sample = pose.Clone();
                 sample.constraintType = "fullbody";
-                sample.frameIndex = frame;
+                sample.sampleTime = frame / TargetFps;
                 samples.Add(sample);
             }
 
-            return KimodoConstraintJsonExporter.ToConstraintsJson(samples);
+            return KimodoConstraintJsonExporter.ToConstraintsJson(samples, clipStartSeconds: 0.0, clipDurationSeconds: clampedFrames / TargetFps);
         }
 
         private static bool IsValidPose(KimodoMarkerSampleResult pose)

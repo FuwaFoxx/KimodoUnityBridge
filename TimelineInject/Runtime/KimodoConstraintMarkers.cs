@@ -41,7 +41,7 @@ namespace UnityEngine.Timeline
     public sealed class KimodoMarkerSampleResult
     {
         public string constraintType = string.Empty;
-        public int frameIndex;
+        public double sampleTime;
         public KimodoConstraintRigType rigType = KimodoConstraintRigType.Soma30;
         public bool hasRootHeading = true;
         public Vector3 rootPosition;
@@ -55,7 +55,7 @@ namespace UnityEngine.Timeline
             return new KimodoMarkerSampleResult
             {
                 constraintType = constraintType ?? string.Empty,
-                frameIndex = frameIndex,
+                sampleTime = sampleTime,
                 rigType = rigType,
                 hasRootHeading = hasRootHeading,
                 rootPosition = rootPosition,
@@ -75,7 +75,6 @@ namespace UnityEngine.Timeline
             TimelineClip sourceClip,
             string modelName,
             double globalTime,
-            int frameIndex,
             string markerType,
             out KimodoMarkerSampleResult result,
             out string error);
@@ -121,12 +120,6 @@ namespace UnityEngine.Timeline
             {
                 sampleData.constraintType = ConstraintType;
             }
-        }
-
-        public int frameIndex
-        {
-            get => SampleData.frameIndex;
-            set => SampleData.frameIndex = value;
         }
 
         public Vector3 rootPosition

@@ -6,37 +6,46 @@ namespace KimodoUnityMotionTools.ProjectEditor
 {
     internal sealed class KimodoConstraintOverrideEditWindow : EditorWindow
     {
-        private sealed class WindowPreviewConsumer : IConstraintPreviewConsumer
-        {
-            public void OnMarkerEnabled(global::UnityEngine.Timeline.KimodoConstraintMarkerBase marker)
-            {
-                KimodoConstraintSnapshotVisualizer.RequestManualRefresh();
-            }
-
-            public void OnMarkerDisabled(global::UnityEngine.Timeline.KimodoConstraintMarkerBase marker)
-            {
-                KimodoConstraintSnapshotVisualizer.RequestManualRefresh();
-            }
-
-            public void OnMarkerChanged(global::UnityEngine.Timeline.KimodoConstraintMarkerBase marker, MarkerChangeReason reason)
-            {
-                KimodoConstraintSnapshotVisualizer.RequestManualRefresh();
-            }
-        }
-
-        private static readonly WindowPreviewConsumer PreviewConsumer = new WindowPreviewConsumer();
+        private static KimodoConstraintOverrideEditWindow currentWindow;
+        private static KimodoConstraintMarkerBase lastKnownMarker;
         private KimodoConstraintMarkerBase marker;
         private Vector2 scroll;
         private string lastError;
+
+        internal KimodoConstraintMarkerBase TargetMarker => marker;
 
         internal static void ShowWindow(KimodoConstraintMarkerBase marker)
         {
             var window = GetWindow<KimodoConstraintOverrideEditWindow>(true, "Kimodo Constraint Override Edit");
             window.minSize = new Vector2(420f, 260f);
             window.marker = marker;
+            if (marker != null)
+            {
+                lastKnownMarker = marker;
+            }
             window.lastError = string.Empty;
             window.Show();
             window.Focus();
+        }
+
+        internal static KimodoConstraintOverrideEditWindow GetOpenWindow()
+        {
+            if (currentWindow != null)
+            {
+                return currentWindow;
+            }
+
+            KimodoConstraintOverrideEditWindow[] windows = Resources.FindObjectsOfTypeAll<KimodoConstraintOverrideEditWindow>();
+            for (int i = 0; i < windows.Length; i++)
+            {
+                if (windows[i] != null)
+                {
+                    currentWindow = windows[i];
+                    return currentWindow;
+                }
+            }
+
+            return null;
         }
 
         internal static bool IsOpenForMarker(KimodoConstraintMarkerBase marker)
@@ -58,27 +67,78 @@ namespace KimodoUnityMotionTools.ProjectEditor
             return false;
         }
 
+        internal static bool HasAnyOpenWindow()
+        {
+            return Resources.FindObjectsOfTypeAll<KimodoConstraintOverrideEditWindow>().Length > 0;
+        }
+
         private void OnEnable()
         {
+            currentWindow = this;
+            if (marker != null)
+            {
+                lastKnownMarker = marker;
+            }
             EditorApplication.update += OnEditorUpdate;
-            ConstraintPreviewCoordinator.ActivateConsumer(PreviewConsumer);
         }
 
         private void OnDisable()
         {
+            KimodoConstraintMarkerBase restoreMarker = marker != null ? marker : lastKnownMarker;
+
+            if (marker != null && marker.useOverride)
+            {
+                if (!KimodoConstraintPoseCache.TryCaptureToMarkerData(marker, out string captureError) && !string.IsNullOrWhiteSpace(captureError))
+                {
+                    Debug.LogWarning($"[Kimodo][ConstraintOverride] capture on close failed: {captureError}");
+                }
+                else
+                {
+                    EditorUtility.SetDirty(marker);
+                    AssetDatabase.SaveAssets();
+                }
+            }
+
+            if (currentWindow == this)
+            {
+                currentWindow = null;
+            }
             EditorApplication.update -= OnEditorUpdate;
-            ConstraintPreviewCoordinator.RestoreDefaultConsumer();
+            KimodoConstraintPoseCache.Hide();
+            SceneView.RepaintAll();
+
+            if (restoreMarker != null)
+            {
+                EditorApplication.delayCall += () =>
+                {
+                    if (restoreMarker != null)
+                    {
+                        Selection.activeObject = restoreMarker;
+                        EditorApplication.delayCall += () =>
+                        {
+                            if (restoreMarker != null)
+                            {
+                                Selection.activeObject = restoreMarker;
+                            }
+                        };
+                    }
+                };
+            }
         }
 
         private void OnEditorUpdate()
         {
-            if (marker == null || !KimodoConstraintOverrideEditSession.HasActiveSession(marker))
+            if (marker == null)
             {
                 Close();
                 return;
             }
 
-            KimodoConstraintOverrideEditSession.PingSession(marker);
+            if (!marker.useOverride)
+            {
+                lastError = "override is disabled.";
+            }
+
             Repaint();
         }
 
@@ -87,16 +147,6 @@ namespace KimodoUnityMotionTools.ProjectEditor
             if (marker == null)
             {
                 EditorGUILayout.HelpBox("Marker is null.", MessageType.Error);
-                return;
-            }
-
-            if (!KimodoConstraintOverrideEditSession.HasActiveSession(marker))
-            {
-                EditorGUILayout.HelpBox("Edit session is not active.", MessageType.Warning);
-                if (GUILayout.Button(new GUIContent("Close", "Close this window. No changes are committed when session is inactive."), GUILayout.Height(28f)))
-                {
-                    Close();
-                }
                 return;
             }
 
@@ -109,23 +159,27 @@ namespace KimodoUnityMotionTools.ProjectEditor
 
         private void DrawHeader()
         {
-            EditorGUILayout.LabelField("Constraint Override Edit Session", EditorStyles.boldLabel);
-            EditorGUILayout.HelpBox(
-                "Edit the preview rig pose directly in Scene view. Marker override data updates in real time.",
-                MessageType.Info);
+            EditorGUILayout.LabelField("Constraint Override Edit", EditorStyles.boldLabel);
+            EditorGUILayout.HelpBox("Edit the pose cache directly. Marker data updates immediately.", MessageType.Info);
             EditorGUILayout.Space(4f);
-            EditorGUILayout.LabelField("Marker", KimodoConstraintOverrideEditSession.DescribeMarker(marker));
+            EditorGUILayout.LabelField("Marker", marker != null ? marker.name : "(null)");
             EditorGUILayout.LabelField("Override", marker.useOverride ? "Enabled" : "Disabled");
             EditorGUILayout.Space(6f);
         }
 
         private void DrawMarkerPayload()
         {
-            using (new EditorGUI.DisabledScope(true))
+            if (!marker.useOverride)
             {
-                var so = new SerializedObject(marker);
-                so.Update();
-                DrawPropertyIfExists(so, "sampleData.frameIndex");
+                EditorGUILayout.HelpBox("Override is disabled. Enable it to edit cached pose values.", MessageType.Warning);
+            }
+
+            var so = new SerializedObject(marker);
+            so.Update();
+
+            using (new EditorGUI.DisabledScope(!marker.useOverride))
+            {
+                DrawPropertyIfExists(so, "sampleData.sampleTime");
                 DrawPropertyIfExists(so, "sampleData.rootPosition");
                 DrawPropertyIfExists(so, "sampleData.localAxisAngles");
                 SerializedProperty includeHeadingProp = so.FindProperty("sampleData.hasRootHeading");
@@ -138,6 +192,15 @@ namespace KimodoUnityMotionTools.ProjectEditor
                     }
                 }
             }
+
+            if (so.ApplyModifiedProperties())
+            {
+                EditorUtility.SetDirty(marker);
+                KimodoConstraintPoseCache.ShowOrUpdateFromMarkerData(marker);
+                lastError = string.Empty;
+            }
+
+            EditorGUILayout.HelpBox("Pose writes back continuously while this window is open.", MessageType.None);
         }
 
         private void DrawFooter()
@@ -148,25 +211,12 @@ namespace KimodoUnityMotionTools.ProjectEditor
             }
 
             EditorGUILayout.Space(6f);
-            EditorGUILayout.BeginHorizontal();
-            if (GUILayout.Button(new GUIContent("Cancel", "Discard scene edit session changes and exit override edit mode."), GUILayout.Height(30f)))
+            if (GUILayout.Button(new GUIContent("Close", "Close the edit window and keep current marker data."), GUILayout.Height(30f)))
             {
-                KimodoConstraintOverrideEditSession.Cancel(marker);
+                EditorUtility.SetDirty(marker);
+                AssetDatabase.SaveAssets();
                 Close();
             }
-
-            if (GUILayout.Button(new GUIContent("End Edit", "Commit edited override values from preview rig back to marker data."), GUILayout.Height(30f)))
-            {
-                if (!KimodoConstraintOverrideEditSession.TryCommit(marker, out string error))
-                {
-                    lastError = string.IsNullOrWhiteSpace(error) ? "Commit failed." : error;
-                }
-                else
-                {
-                    Close();
-                }
-            }
-            EditorGUILayout.EndHorizontal();
         }
 
         private static void DrawPropertyIfExists(SerializedObject so, string name)

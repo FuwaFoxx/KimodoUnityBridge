@@ -259,7 +259,7 @@ namespace KimodoUnityMotionTools.ProjectEditor.Manager
                             Directory.Delete(runtimeRoot, recursive: true);
                         }
 
-                        if (!KimodoBridgeController.EnsureRuntimeRootExists())
+                        if (!KimodoBridgeController.BootstrapRuntimeRootIfMissing())
                         {
                             throw new InvalidOperationException("TryFix failed: cannot bootstrap runtime.");
                         }
@@ -290,7 +290,7 @@ namespace KimodoUnityMotionTools.ProjectEditor.Manager
                     break;
                 case KimodoBridgeOperation.EnsureRuntimeRoot:
                     EmitProgress(command, "Creating runtime root...");
-                    if (!KimodoBridgeController.EnsureRuntimeRootExists())
+                    if (!KimodoBridgeController.BootstrapRuntimeRootIfMissing())
                     {
                         throw new InvalidOperationException("Failed to create runtime root from package template.");
                     }

@@ -138,7 +138,7 @@ namespace KimodoUnityMotionTools.ProjectEditor.GenerationPipeline
                 recorder.SaveToClip(recordedClip, fps, filter);
 
                 filteredClip = BuildFilteredRecordedClip(recordedClip, targetClip.name, fps);
-                CopyClipData(filteredClip, targetClip);
+                KimodoRuntimeUtility.CopyClipData(filteredClip, targetClip, forceNoLoopKeepY: true);
 
                 if (options.ensureQuaternionContinuity)
                 {
@@ -263,46 +263,6 @@ namespace KimodoUnityMotionTools.ProjectEditor.GenerationPipeline
             }
 
             return bestPath;
-        }
-
-        private static void CopyClipData(AnimationClip sourceClip, AnimationClip targetClip)
-        {
-            if (sourceClip == null || targetClip == null)
-            {
-                return;
-            }
-
-            targetClip.ClearCurves();
-            targetClip.frameRate = sourceClip.frameRate > 0f ? sourceClip.frameRate : targetClip.frameRate;
-            UnityEditor.AnimationUtility.SetAnimationClipSettings(
-                targetClip,
-                new UnityEditor.AnimationClipSettings
-                {
-                    loopTime = false,
-                    keepOriginalPositionY = true
-                });
-
-            UnityEditor.EditorCurveBinding[] bindings = UnityEditor.AnimationUtility.GetCurveBindings(sourceClip);
-            for (int i = 0; i < bindings.Length; i++)
-            {
-                UnityEditor.EditorCurveBinding binding = bindings[i];
-                AnimationCurve curve = UnityEditor.AnimationUtility.GetEditorCurve(sourceClip, binding);
-                if (curve != null)
-                {
-                    targetClip.SetCurve(binding.path, binding.type, binding.propertyName, curve);
-                }
-            }
-
-            UnityEditor.EditorCurveBinding[] objectBindings = UnityEditor.AnimationUtility.GetObjectReferenceCurveBindings(sourceClip);
-            for (int i = 0; i < objectBindings.Length; i++)
-            {
-                UnityEditor.EditorCurveBinding binding = objectBindings[i];
-                UnityEditor.ObjectReferenceKeyframe[] curve = UnityEditor.AnimationUtility.GetObjectReferenceCurve(sourceClip, binding);
-                if (curve != null)
-                {
-                    UnityEditor.AnimationUtility.SetObjectReferenceCurve(targetClip, binding, curve);
-                }
-            }
         }
 
         private static GameObject BuildHierarchyFromClipBindings(AnimationClip clipAsset, string rootName)
@@ -447,3 +407,4 @@ namespace KimodoUnityMotionTools.ProjectEditor.GenerationPipeline
         }
     }
 }
+

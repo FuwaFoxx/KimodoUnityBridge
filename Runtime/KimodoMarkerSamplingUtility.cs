@@ -90,7 +90,6 @@ namespace KimodoUnityMotionTools
             TimelineClip sourceClip,
             string modelName,
             double globalTime,
-            int frameIndex,
             string markerType,
             out KimodoMarkerSampleResult result,
             out string error)
@@ -156,14 +155,14 @@ namespace KimodoUnityMotionTools
                 Quaternion local = parent >= 0 && parent < worldRots.Length
                     ? Quaternion.Inverse(worldRots[parent]) * worldRots[i]
                     : worldRots[i];
-                unityLocalAxisAngles.Add(QuaternionToAxisAngleVector(local));
+                unityLocalAxisAngles.Add(KimodoRuntimeUtility.QuaternionToAxisAngleVector(local));
                 sampledJointIndices.Add(i);
             }
 
             result = new KimodoMarkerSampleResult
             {
                 constraintType = markerType ?? string.Empty,
-                frameIndex = frameIndex,
+                sampleTime = globalTime,
                 rigType = ToConstraintRigType(ResolveProfileType(modelName)),
                 hasRootHeading = true,
                 rootPosition = unityRootPosition,
@@ -356,22 +355,6 @@ namespace KimodoUnityMotionTools
             return null;
         }
 
-        private static Vector3 QuaternionToAxisAngleVector(Quaternion q)
-        {
-            q.Normalize();
-            q.ToAngleAxis(out float degrees, out Vector3 axis);
-            if (float.IsNaN(axis.x) || axis == Vector3.zero)
-            {
-                return Vector3.zero;
-            }
-
-            if (degrees > 180f)
-            {
-                degrees -= 360f;
-            }
-
-            float radians = degrees * Mathf.Deg2Rad;
-            return axis.normalized * radians;
-        }
     }
 }
+

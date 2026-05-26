@@ -13,9 +13,9 @@ namespace KimodoUnityMotionTools.ProjectEditor
             return KimodoServerRuntimeUtil.GetRuntimeRootPath();
         }
 
-        internal static bool EnsureRuntimeRootExists()
+        internal static bool BootstrapRuntimeRootIfMissing()
         {
-            return KimodoServerRuntimeUtil.EnsureRuntimeRootExists();
+            return KimodoServerRuntimeUtil.BootstrapRuntimeRootIfMissing();
         }
 
         internal static string ResolveStartScript(string runtimeRoot)
@@ -26,7 +26,7 @@ namespace KimodoUnityMotionTools.ProjectEditor
         internal static string ResolveRuntimeRootOrThrow()
         {
             string runtimeRoot = GetRuntimeRootPath();
-            if (!Directory.Exists(runtimeRoot) && !EnsureRuntimeRootExists())
+            if (!Directory.Exists(runtimeRoot) && !BootstrapRuntimeRootIfMissing())
             {
                 throw new DirectoryNotFoundException(
                     $"Bridge runtime root not found and bootstrap failed: {runtimeRoot}");

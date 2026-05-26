@@ -23,7 +23,7 @@ namespace KimodoUnityMotionTools.ProjectEditor
             constraintsJson = string.Empty;
             error = string.Empty;
 
-            if (!KimodoConstraintExportUtility.TryBuildMarkerSamplesForExport(sourceClip, out List<KimodoMarkerSampleResult> samples, out error))
+            if (!TryBuildMarkerSamplesForExport(sourceClip, out List<KimodoMarkerSampleResult> samples, out error))
             {
                 return false;
             }
@@ -39,7 +39,185 @@ namespace KimodoUnityMotionTools.ProjectEditor
                 }
             }
 
-            constraintsJson = KimodoConstraintJsonExporter.ToConstraintsJson(samples);
+            constraintsJson = KimodoConstraintJsonExporter.ToConstraintsJson(
+                samples,
+                clipStartSeconds: sourceClip.start,
+                clipDurationSeconds: sourceClip.duration);
+            return true;
+        }
+
+        internal static bool TryBuildMarkerSamplesForExport(
+            TimelineClip sourceClip,
+            out List<KimodoMarkerSampleResult> samples,
+            out string error)
+        {
+            samples = new List<KimodoMarkerSampleResult>();
+            error = string.Empty;
+
+            if (sourceClip == null)
+            {
+                error = "No selected timeline clip for constraint export.";
+                return false;
+            }
+
+            TrackAsset track = sourceClip.GetParentTrack();
+            if (track == null)
+            {
+                error = "Cannot resolve parent animation track.";
+                return false;
+            }
+
+            List<KimodoConstraintMarkerBase> markers = GatherKimodoMarkers(track, sourceClip);
+            if (markers.Count == 0)
+            {
+                return true;
+            }
+
+            PlayableDirector director = TimelineEditor.inspectedDirector;
+            if (director == null)
+            {
+                error = "Timeline inspected director is null.";
+                return false;
+            }
+
+            Animator animator = director.GetGenericBinding(track) as Animator;
+            if (animator == null)
+            {
+                error = "Animation track has no Animator binding.";
+                return false;
+            }
+
+            Transform skeletonRoot = animator.transform;
+            if (skeletonRoot == null)
+            {
+                error = "Animator transform is null.";
+                return false;
+            }
+
+            double originalTime = director.time;
+            DirectorWrapMode originalWrap = director.extrapolationMode;
+
+            try
+            {
+                director.extrapolationMode = DirectorWrapMode.Hold;
+                for (int i = 0; i < markers.Count; i++)
+                {
+                    if (!TryBuildMarkerSample(markers[i], sourceClip, skeletonRoot, animator, director, out KimodoMarkerSampleResult sample, out error))
+                    {
+                        return false;
+                    }
+
+                    samples.Add(sample);
+                }
+            }
+            finally
+            {
+                director.time = originalTime;
+                director.Evaluate();
+                director.extrapolationMode = originalWrap;
+            }
+
+            return true;
+        }
+
+        internal static bool TrySamplePoseFromClipAsset(
+            TimelineClip sourceClip,
+            Animator animator,
+            Transform skeletonRoot,
+            double sampleTime,
+            string markerType,
+            out KimodoMarkerSampleResult sample,
+            out string error)
+        {
+            sample = null;
+            error = string.Empty;
+
+            if (sourceClip == null)
+            {
+                error = "Source clip is null.";
+                return false;
+            }
+
+            string modelName = sourceClip.asset is KimodoPlayableClip playableClip
+                ? playableClip.bridgeModelName
+                : "Kimodo-SOMA-RP-v1";
+
+            if (!KimodoMarkerSamplingUtility.TrySampleMarker(
+                    animator,
+                    skeletonRoot,
+                    sourceClip,
+                    modelName,
+                    sampleTime,
+                    markerType,
+                    out sample,
+                    out error))
+            {
+                return false;
+            }
+
+            if (sample == null)
+            {
+                error = "sample result is null";
+                return false;
+            }
+
+            sample.constraintType = markerType ?? string.Empty;
+            sample.sampleTime = sampleTime;
+            return true;
+        }
+
+        private static bool TryBuildMarkerSample(
+            KimodoConstraintMarkerBase marker,
+            TimelineClip sourceClip,
+            Transform skeletonRoot,
+            Animator animator,
+            PlayableDirector director,
+            out KimodoMarkerSampleResult sample,
+            out string error)
+        {
+            sample = null;
+            error = string.Empty;
+            if (marker == null)
+            {
+                error = "Marker is null.";
+                return false;
+            }
+
+            bool isCustomEndEffector = marker is KimodoEndEffectorConstraintMarker ee &&
+                                       string.Equals(ee.ConstraintType, "end-effector", StringComparison.OrdinalIgnoreCase);
+            if (marker.useOverride && !isCustomEndEffector)
+            {
+                if (!KimodoConstraintMarkerPoseMapper.TryReadSample(marker, out sample, out error))
+                {
+                    return false;
+                }
+
+                return true;
+            }
+
+            double sampleTime = marker.time;
+            director.time = sampleTime;
+            director.Evaluate();
+
+            if (!TrySamplePoseFromClipAsset(
+                    sourceClip,
+                    animator,
+                    skeletonRoot,
+                    sampleTime,
+                    marker.ConstraintType,
+                    out KimodoMarkerSampleResult captured,
+                    out error))
+            {
+                return false;
+            }
+
+            sample = KimodoConstraintMarkerPoseMapper.BuildSampleFromCapture(marker, sampleTime, captured);
+            if (sample == null)
+            {
+                error = "failed to map sampled pose to marker sample data";
+                return false;
+            }
+
             return true;
         }
 
@@ -91,8 +269,8 @@ namespace KimodoUnityMotionTools.ProjectEditor
                 return true;
             }
 
-            var occupiedManualFrames = new HashSet<int>();
-            CollectManualFrames(samples, occupiedManualFrames);
+            var occupiedManualTimes = new HashSet<long>();
+            CollectManualTimes(samples, occupiedManualTimes);
 
             double originalTime = director.time;
             DirectorWrapMode originalWrapMode = director.extrapolationMode;
@@ -101,10 +279,10 @@ namespace KimodoUnityMotionTools.ProjectEditor
             {
                 director.extrapolationMode = DirectorWrapMode.Hold;
 
-                if (leftNeighbor != null && !occupiedManualFrames.Contains(0))
+                if (leftNeighbor != null && !occupiedManualTimes.Contains(ToTimeKey(0.0)))
                 {
                     double evalTime = Math.Max(leftNeighbor.start, leftNeighbor.end - NeighborSampleDeltaSeconds);
-                    if (TryCapturePoseAtTime(leftNeighbor, director, skeletonRoot, animator, evalTime, 0, "fullbody", out KimodoMarkerSampleResult pose, out string captureError))
+                    if (TryCapturePoseAtTime(leftNeighbor, director, skeletonRoot, animator, evalTime, "fullbody", out KimodoMarkerSampleResult pose, out string captureError))
                     {
                         samples.Add(pose);
                     }
@@ -115,10 +293,10 @@ namespace KimodoUnityMotionTools.ProjectEditor
                 }
 
                 int endFrame = Math.Max(0, generationFrames - 1);
-                if (rightNeighbor != null && !occupiedManualFrames.Contains(endFrame))
+                if (rightNeighbor != null && !occupiedManualTimes.Contains(ToTimeKey(endFrame / (double)generationFrames)))
                 {
                     double evalTime = rightNeighbor.start;
-                    if (TryCapturePoseAtTime(rightNeighbor, director, skeletonRoot, animator, evalTime, endFrame, "fullbody", out KimodoMarkerSampleResult pose, out string captureError))
+                    if (TryCapturePoseAtTime(rightNeighbor, director, skeletonRoot, animator, evalTime, "fullbody", out KimodoMarkerSampleResult pose, out string captureError))
                     {
                         samples.Add(pose);
                     }
@@ -138,7 +316,7 @@ namespace KimodoUnityMotionTools.ProjectEditor
             return true;
         }
 
-        private static void CollectManualFrames(List<KimodoMarkerSampleResult> samples, HashSet<int> output)
+        private static void CollectManualTimes(List<KimodoMarkerSampleResult> samples, HashSet<long> output)
         {
             if (samples == null || output == null)
             {
@@ -153,8 +331,30 @@ namespace KimodoUnityMotionTools.ProjectEditor
                     continue;
                 }
 
-                output.Add(s.frameIndex);
+                output.Add(ToTimeKey(s.sampleTime));
             }
+        }
+
+        private static List<KimodoConstraintMarkerBase> GatherKimodoMarkers(TrackAsset track, TimelineClip clipRange)
+        {
+            var markers = new List<KimodoConstraintMarkerBase>();
+            double minTime = clipRange != null ? clipRange.start : double.MinValue;
+            double maxTime = clipRange != null ? clipRange.end : double.MaxValue;
+            foreach (IMarker marker in track.GetMarkers())
+            {
+                if (marker is KimodoConstraintMarkerBase kimodoMarker)
+                {
+                    if (kimodoMarker.time < minTime || kimodoMarker.time > maxTime)
+                    {
+                        continue;
+                    }
+
+                    markers.Add(kimodoMarker);
+                }
+            }
+
+            markers.Sort((a, b) => a.time.CompareTo(b.time));
+            return markers;
         }
 
         private static void FindNeighborClips(TimelineClip sourceClip, out TimelineClip leftNeighbor, out TimelineClip rightNeighbor)
@@ -199,7 +399,6 @@ namespace KimodoUnityMotionTools.ProjectEditor
             Transform skeletonRoot,
             Animator animator,
             double evalTime,
-            int frameIndex,
             string markerType,
             out KimodoMarkerSampleResult pose,
             out string error)
@@ -211,12 +410,11 @@ namespace KimodoUnityMotionTools.ProjectEditor
             {
                 director.time = evalTime;
                 director.Evaluate();
-                if (!KimodoConstraintExportUtility.TrySamplePoseFromClipAsset(
+                if (!TrySamplePoseFromClipAsset(
                         sourceClip,
                         animator,
                         skeletonRoot,
                         evalTime,
-                        frameIndex,
                         markerType,
                         out pose,
                         out error))
@@ -231,6 +429,11 @@ namespace KimodoUnityMotionTools.ProjectEditor
                 error = ex.Message;
                 return false;
             }
+        }
+
+        private static long ToTimeKey(double time)
+        {
+            return (long)Math.Round(time * 1000000.0);
         }
     }
 }

@@ -124,7 +124,6 @@ namespace KimodoUnityMotionTools
             TimelineClip sourceClip,
             string modelName,
             double globalTime,
-            int frameIndex,
             string markerType,
             out KimodoMarkerSampleResult result,
             out string error)
@@ -135,7 +134,6 @@ namespace KimodoUnityMotionTools
                 sourceClip,
                 modelName,
                 globalTime,
-                frameIndex,
                 markerType,
                 out result,
                 out error);

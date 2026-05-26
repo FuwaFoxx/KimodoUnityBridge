@@ -56,7 +56,7 @@ namespace KimodoUnityMotionTools.Bridge
         public async Task<bool> AttachAsync(Action<string> progress, CancellationToken token)
         {
             ThrowIfDisposed();
-            EnsureRuntimeRootExists();
+            ValidateRuntimeRootOrThrow();
 
             currentPortFilePath = BridgeEndpointResolver.GetServerPortFilePath(settings.runtimeRoot);
             if (!BridgeEndpointResolver.TryReadServerEndpoint(settings.runtimeRoot, settings.hostFallback, out string host, out int port, out _))
@@ -80,7 +80,7 @@ namespace KimodoUnityMotionTools.Bridge
         public async Task<string> StartAsync(Action<string> progress, CancellationToken token)
         {
             ThrowIfDisposed();
-            EnsureRuntimeRootExists();
+            ValidateRuntimeRootOrThrow();
             EnsureLauncherExists();
 
             currentPortFilePath = BridgeEndpointResolver.GetServerPortFilePath(settings.runtimeRoot);
@@ -261,7 +261,7 @@ namespace KimodoUnityMotionTools.Bridge
             }
         }
 
-        private void EnsureRuntimeRootExists()
+        private void ValidateRuntimeRootOrThrow()
         {
             if (string.IsNullOrWhiteSpace(settings.runtimeRoot))
             {

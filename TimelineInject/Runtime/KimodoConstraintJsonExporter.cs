@@ -7,9 +7,14 @@ namespace UnityEngine.Timeline
 {
     public static class KimodoConstraintJsonExporter
     {
-        public static string ToConstraintsJson(IReadOnlyList<KimodoMarkerSampleResult> samples)
+        private const double ExportFps = 30.0;
+
+        public static string ToConstraintsJson(
+            IReadOnlyList<KimodoMarkerSampleResult> samples,
+            double clipStartSeconds = 0.0,
+            double? clipDurationSeconds = null)
         {
-            List<KimodoConstraintJson> constraints = BuildConstraints(samples, mergeByType: true);
+            List<KimodoConstraintJson> constraints = BuildConstraints(samples, mergeByType: true, clipStartSeconds: clipStartSeconds, clipDurationSeconds: clipDurationSeconds);
             if (constraints.Count == 0)
             {
                 return string.Empty;
@@ -23,6 +28,14 @@ namespace UnityEngine.Timeline
 
         public static List<KimodoConstraintJson> BuildConstraints(IReadOnlyList<KimodoMarkerSampleResult> samples)
         {
+            return BuildConstraints(samples, 0.0, null);
+        }
+
+        private static List<KimodoConstraintJson> BuildConstraints(
+            IReadOnlyList<KimodoMarkerSampleResult> samples,
+            double clipStartSeconds,
+            double? clipDurationSeconds)
+        {
             var output = new List<KimodoConstraintJson>();
             if (samples == null)
             {
@@ -32,7 +45,7 @@ namespace UnityEngine.Timeline
             for (int i = 0; i < samples.Count; i++)
             {
                 KimodoMarkerSampleResult sample = samples[i];
-                KimodoConstraintJson json = BuildConstraint(sample);
+                KimodoConstraintJson json = BuildConstraint(sample, clipStartSeconds, clipDurationSeconds);
                 if (json != null)
                 {
                     output.Add(json);
@@ -43,6 +56,14 @@ namespace UnityEngine.Timeline
         }
 
         public static KimodoConstraintJson BuildConstraint(KimodoMarkerSampleResult sample)
+        {
+            return BuildConstraint(sample, 0.0, null);
+        }
+
+        public static KimodoConstraintJson BuildConstraint(
+            KimodoMarkerSampleResult sample,
+            double clipStartSeconds,
+            double? clipDurationSeconds)
         {
             if (sample == null)
             {
@@ -57,29 +78,33 @@ namespace UnityEngine.Timeline
 
             if (string.Equals(type, "root2d", StringComparison.OrdinalIgnoreCase))
             {
-                return BuildRoot2D(sample);
+                return BuildRoot2D(sample, clipStartSeconds, clipDurationSeconds);
             }
 
             if (string.Equals(type, "fullbody", StringComparison.OrdinalIgnoreCase))
             {
-                return BuildFullBody(sample);
+                return BuildFullBody(sample, clipStartSeconds, clipDurationSeconds);
             }
 
-            return BuildEndEffector(sample);
+            return BuildEndEffector(sample, clipStartSeconds, clipDurationSeconds);
         }
 
-        public static List<KimodoConstraintJson> BuildConstraints(IReadOnlyList<KimodoMarkerSampleResult> samples, bool mergeByType)
+        public static List<KimodoConstraintJson> BuildConstraints(
+            IReadOnlyList<KimodoMarkerSampleResult> samples,
+            bool mergeByType,
+            double clipStartSeconds = 0.0,
+            double? clipDurationSeconds = null)
         {
-            List<KimodoConstraintJson> constraints = BuildConstraints(samples);
+            List<KimodoConstraintJson> constraints = BuildConstraints(samples, clipStartSeconds, clipDurationSeconds);
             return mergeByType ? MergeConstraintsByType(constraints) : constraints;
         }
 
-        private static KimodoConstraintJson BuildRoot2D(KimodoMarkerSampleResult sample)
+        private static KimodoConstraintJson BuildRoot2D(KimodoMarkerSampleResult sample, double clipStartSeconds, double? clipDurationSeconds)
         {
             var json = new KimodoConstraintJson
             {
                 type = "root2d",
-                frame_indices = new List<int> { sample.frameIndex },
+                frame_indices = BuildFrameIndices(sample.sampleTime - clipStartSeconds, clipDurationSeconds),
                 smooth_root_2d = new List<float[]>
                 {
                     new[] { -sample.rootPosition.x, sample.rootPosition.z }
@@ -97,13 +122,13 @@ namespace UnityEngine.Timeline
             return json;
         }
 
-        private static KimodoConstraintJson BuildFullBody(KimodoMarkerSampleResult sample)
+        private static KimodoConstraintJson BuildFullBody(KimodoMarkerSampleResult sample, double clipStartSeconds, double? clipDurationSeconds)
         {
             Vector3 kimodoRoot = new Vector3(-sample.rootPosition.x, sample.rootPosition.y, sample.rootPosition.z);
             var json = new KimodoConstraintJson
             {
                 type = "fullbody",
-                frame_indices = new List<int> { sample.frameIndex },
+                frame_indices = BuildFrameIndices(sample.sampleTime - clipStartSeconds, clipDurationSeconds),
                 smooth_root_2d = new List<float[]>
                 {
                     new[] { kimodoRoot.x, kimodoRoot.z }
@@ -121,13 +146,13 @@ namespace UnityEngine.Timeline
             return json;
         }
 
-        private static KimodoConstraintJson BuildEndEffector(KimodoMarkerSampleResult sample)
+        private static KimodoConstraintJson BuildEndEffector(KimodoMarkerSampleResult sample, double clipStartSeconds, double? clipDurationSeconds)
         {
             Vector3 kimodoRoot = new Vector3(-sample.rootPosition.x, sample.rootPosition.y, sample.rootPosition.z);
             var json = new KimodoConstraintJson
             {
                 type = sample.constraintType,
-                frame_indices = new List<int> { sample.frameIndex },
+                frame_indices = BuildFrameIndices(sample.sampleTime - clipStartSeconds, clipDurationSeconds),
                 joint_names = sample.jointNames != null ? new List<string>(sample.jointNames) : new List<string>(),
                 smooth_root_2d = new List<float[]>
                 {
@@ -146,6 +171,23 @@ namespace UnityEngine.Timeline
             return json;
         }
 
+        private static List<int> BuildFrameIndices(double sampleTime, double? clipDurationSeconds)
+        {
+            return new List<int> { ToFrameIndex(sampleTime, clipDurationSeconds) };
+        }
+
+        private static int ToFrameIndex(double sampleTime, double? clipDurationSeconds)
+        {
+            int frame = Mathf.Max(0, (int)Math.Ceiling(sampleTime * ExportFps));
+            if (clipDurationSeconds.HasValue)
+            {
+                int maxFrame = Mathf.Max(0, Mathf.CeilToInt((float)(clipDurationSeconds.Value * ExportFps)) - 1);
+                frame = Mathf.Clamp(frame, 0, maxFrame);
+            }
+
+            return frame;
+        }
+
         private static float[][] BuildLocalJointFrame(List<Vector3> joints)
         {
             if (joints == null || joints.Count == 0)
@@ -156,11 +198,43 @@ namespace UnityEngine.Timeline
             float[][] data = new float[joints.Count][];
             for (int i = 0; i < joints.Count; i++)
             {
-                Vector3 v = joints[i];
+                Vector3 v = ToKimodoAxisAngle(joints[i]);
                 data[i] = new[] { v.x, v.y, v.z };
             }
 
             return data;
+        }
+
+        private static Vector3 ToKimodoAxisAngle(Vector3 unityAxisAngle)
+        {
+            float angleRad = unityAxisAngle.magnitude;
+            if (angleRad <= 1e-8f)
+            {
+                return Vector3.zero;
+            }
+
+            Vector3 axis = unityAxisAngle / angleRad;
+            Quaternion unityLocal = Quaternion.AngleAxis(angleRad * Mathf.Rad2Deg, axis);
+            Quaternion kimodoLocal = new Quaternion(unityLocal.x, -unityLocal.y, -unityLocal.z, unityLocal.w);
+            return QuaternionToAxisAngleVector(kimodoLocal);
+        }
+
+        private static Vector3 QuaternionToAxisAngleVector(Quaternion q)
+        {
+            q.Normalize();
+            q.ToAngleAxis(out float degrees, out Vector3 axis);
+            if (float.IsNaN(axis.x) || axis == Vector3.zero)
+            {
+                return Vector3.zero;
+            }
+
+            if (degrees > 180f)
+            {
+                degrees -= 360f;
+            }
+
+            float radians = degrees * Mathf.Deg2Rad;
+            return axis.normalized * radians;
         }
 
         private static List<KimodoConstraintJson> MergeConstraintsByType(List<KimodoConstraintJson> constraints)

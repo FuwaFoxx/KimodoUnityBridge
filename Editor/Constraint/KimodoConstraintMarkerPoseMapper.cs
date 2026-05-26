@@ -20,6 +20,7 @@ namespace KimodoUnityMotionTools.ProjectEditor
 
             sample = marker.SampleData != null ? marker.SampleData.Clone() : new KimodoMarkerSampleResult();
             sample.constraintType = marker.ConstraintType;
+            sample.sampleTime = marker.time;
             EnsureMarkerShape(marker, sample);
             return true;
         }
@@ -47,6 +48,7 @@ namespace KimodoUnityMotionTools.ProjectEditor
             cloned.constraintType = marker.ConstraintType;
             EnsureMarkerShape(marker, cloned);
             marker.SampleData = cloned;
+            marker.time = cloned.sampleTime;
 
             if (keepOverrideEnabled)
             {
@@ -59,7 +61,7 @@ namespace KimodoUnityMotionTools.ProjectEditor
 
         internal static KimodoMarkerSampleResult BuildSampleFromCapture(
             KimodoConstraintMarkerBase marker,
-            int frameIndex,
+            double sampleTime,
             KimodoMarkerSampleResult captured)
         {
             if (marker == null || captured == null)
@@ -69,7 +71,7 @@ namespace KimodoUnityMotionTools.ProjectEditor
 
             KimodoMarkerSampleResult sample = captured.Clone();
             sample.constraintType = marker.ConstraintType;
-            sample.frameIndex = frameIndex;
+            sample.sampleTime = sampleTime;
             if (sample.jointNames == null)
             {
                 sample.jointNames = new List<string>();
@@ -102,18 +104,6 @@ namespace KimodoUnityMotionTools.ProjectEditor
 
             EnsureMarkerShape(marker, sample);
             return sample;
-        }
-
-        internal static void EnsureMarkerDefaults(KimodoConstraintMarkerBase marker)
-        {
-            if (marker == null)
-            {
-                return;
-            }
-
-            KimodoMarkerSampleResult sample = marker.SampleData ?? new KimodoMarkerSampleResult();
-            EnsureMarkerShape(marker, sample);
-            marker.SampleData = sample;
         }
 
         private static void EnsureMarkerShape(KimodoConstraintMarkerBase marker, KimodoMarkerSampleResult sample)

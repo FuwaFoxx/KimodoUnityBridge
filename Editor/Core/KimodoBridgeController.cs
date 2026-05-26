@@ -90,9 +90,9 @@ namespace KimodoUnityMotionTools.ProjectEditor
             return KimodoBridgeRuntimeInstallFacade.GetRuntimeRootPath();
         }
 
-        internal static bool EnsureRuntimeRootExists()
+        internal static bool BootstrapRuntimeRootIfMissing()
         {
-            return KimodoBridgeRuntimeInstallFacade.EnsureRuntimeRootExists();
+            return KimodoBridgeRuntimeInstallFacade.BootstrapRuntimeRootIfMissing();
         }
 
         internal static string ResolveStartScript(string runtimeRoot)

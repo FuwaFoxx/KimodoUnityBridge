@@ -55,7 +55,7 @@ namespace KimodoUnityMotionTools.ProjectEditor
             Vector3 axis = unityAxisAngle / angleRad;
             Quaternion unityLocal = Quaternion.AngleAxis(angleRad * Mathf.Rad2Deg, axis);
             Quaternion kimodoLocal = new Quaternion(unityLocal.x, -unityLocal.y, -unityLocal.z, unityLocal.w);
-            return QuaternionToAxisAngleVector(kimodoLocal);
+            return KimodoRuntimeUtility.QuaternionToAxisAngleVector(kimodoLocal);
         }
 
         public static KimodoMarkerSampleResult ToUnitySample(KimodoMarkerSampleResult kimodoSample)
@@ -107,25 +107,8 @@ namespace KimodoUnityMotionTools.ProjectEditor
             Vector3 axis = kimodoAxisAngle / angleRad;
             Quaternion kimodoLocal = Quaternion.AngleAxis(angleRad * Mathf.Rad2Deg, axis);
             Quaternion unityLocal = new Quaternion(kimodoLocal.x, -kimodoLocal.y, -kimodoLocal.z, kimodoLocal.w);
-            return QuaternionToAxisAngleVector(unityLocal);
-        }
-
-        private static Vector3 QuaternionToAxisAngleVector(Quaternion q)
-        {
-            q.Normalize();
-            q.ToAngleAxis(out float degrees, out Vector3 axis);
-            if (float.IsNaN(axis.x) || axis == Vector3.zero)
-            {
-                return Vector3.zero;
-            }
-
-            if (degrees > 180f)
-            {
-                degrees -= 360f;
-            }
-
-            float radians = degrees * Mathf.Deg2Rad;
-            return axis.normalized * radians;
+            return KimodoRuntimeUtility.QuaternionToAxisAngleVector(unityLocal);
         }
     }
 }
+

@@ -52,7 +52,7 @@ namespace KimodoUnityMotionTools.ProjectEditor
             return Path.Combine(ResolveProjectRoot(), "NvlabKimodoQuickServer");
         }
 
-        internal static bool EnsureRuntimeRootExists()
+        internal static bool BootstrapRuntimeRootIfMissing()
         {
             string runtimeRoot = GetRuntimeRootPath();
             if (Directory.Exists(runtimeRoot))
