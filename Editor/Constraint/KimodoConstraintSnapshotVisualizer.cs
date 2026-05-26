@@ -23,11 +23,16 @@ namespace KimodoUnityMotionTools.ProjectEditor
         private static double rebuildAfterTime;
         private static int lastSelectionHash;
         private static int lastMarkerStateHash;
+        private static readonly ConstraintPreviewConsumer PreviewConsumer = new ConstraintPreviewConsumer();
 
         static KimodoConstraintSnapshotVisualizer()
         {
             EnsureHooks();
-            MarkDirty();
+            ConstraintPreviewCoordinator.SetDefaultConsumer(PreviewConsumer);
+            KimodoConstraintMarkerEventHub.MarkerEnabled += OnMarkerEnabled;
+            KimodoConstraintMarkerEventHub.MarkerDisabled += OnMarkerDisabled;
+            KimodoConstraintMarkerEventHub.MarkerChanged += OnMarkerChanged;
+            KimodoConstraintMarkerEventHub.RaiseMarkerChanged(null, MarkerChangeReason.SelectionContextChanged);
         }
 
         private static void EnsureHooks()
@@ -53,17 +58,17 @@ namespace KimodoUnityMotionTools.ProjectEditor
                 HideAllRigsAndClearActiveRenders();
                 SceneView.RepaintAll();
             }
-            MarkDirty();
+            KimodoConstraintMarkerEventHub.RaiseMarkerChanged(null, MarkerChangeReason.SelectionContextChanged);
         }
 
         private static void OnUndoRedoPerformed()
         {
-            MarkDirty();
+            KimodoConstraintMarkerEventHub.RaiseMarkerChanged(null, MarkerChangeReason.DataChanged);
         }
 
         private static void OnPlayModeChanged(PlayModeStateChange _)
         {
-            MarkDirty();
+            KimodoConstraintMarkerEventHub.RaiseMarkerChanged(null, MarkerChangeReason.SelectionContextChanged);
         }
 
         private static void OnBeforeAssemblyReload()
@@ -79,8 +84,22 @@ namespace KimodoUnityMotionTools.ProjectEditor
 
         internal static void RequestManualRefresh()
         {
-            MarkDirty();
-            SceneView.RepaintAll();
+            KimodoConstraintMarkerEventHub.RaiseMarkerChanged(null, MarkerChangeReason.DataChanged);
+        }
+
+        private static void OnMarkerEnabled(KimodoConstraintMarkerBase marker)
+        {
+            ConstraintPreviewCoordinator.NotifyMarkerEnabled(marker);
+        }
+
+        private static void OnMarkerDisabled(KimodoConstraintMarkerBase marker)
+        {
+            ConstraintPreviewCoordinator.NotifyMarkerDisabled(marker);
+        }
+
+        private static void OnMarkerChanged(KimodoConstraintMarkerBase marker, MarkerChangeReason reason)
+        {
+            ConstraintPreviewCoordinator.NotifyMarkerChanged(marker, reason);
         }
 
         private static void OnEditorUpdate()
@@ -385,7 +404,7 @@ namespace KimodoUnityMotionTools.ProjectEditor
                 JointNames = jointNames,
                 RootJointName = KimodoMarkerSamplingUtility.GetRootJointNameForModel(modelName)
             };
-
+            Debug.Log   ($"{LogPrefix} Built snapshot for marker '{marker.name}' at frame {frameIndex} with {rootPos} position .");
             return true;
         }
 
@@ -636,77 +655,7 @@ namespace KimodoUnityMotionTools.ProjectEditor
                 return false;
             }
 
-            bool isCustomEndEffector = marker is KimodoEndEffectorConstraintMarker ee &&
-                                       string.Equals(ee.ConstraintType, "end-effector", StringComparison.OrdinalIgnoreCase);
-            bool useOverride = marker.useOverride && !isCustomEndEffector;
-            bool readPoseOk = KimodoConstraintPosePipeline.TryBuildUnityPoseFromMarker(marker, out unityPose, out error);
-            if (!readPoseOk)
-            {
-                if (useOverride)
-                {
-                    error = "failed to read override pose from marker";
-                }
-                return false;
-            }
-
-            if (marker is KimodoRoot2DConstraintMarker root2D)
-            {
-                if (!TrySampleUnityPoseFromTimeline(
-                        marker,
-                        clipRange,
-                        boundAnimator,
-                        frameIndex,
-                        out KimodoMarkerSampleResult sampledPose,
-                        out string sampleError))
-                {
-                    error = sampleError;
-                    return false;
-                }
-
-                // root2d markers only store planar root data, so keep rotations and Y from sampled timeline pose.
-                Vector2 r = root2D.smoothRoot2D;
-                unityPose.rootPosition = new Vector3(r.x, sampledPose.rootPosition.y, r.y);
-                unityPose.localAxisAngles = sampledPose.localAxisAngles != null
-                    ? new List<Vector3>(sampledPose.localAxisAngles)
-                    : new List<Vector3>();
-                return true;
-            }
-
-            return true;
-        }
-
-        private static bool TrySampleUnityPoseFromTimeline(
-            KimodoConstraintMarkerBase marker,
-            TimelineClip clipRange,
-            Animator boundAnimator,
-            int frameIndex,
-            out KimodoMarkerSampleResult unityPose,
-            out string error)
-        {
-            unityPose = null;
-            error = string.Empty;
-
-            if (!KimodoConstraintExportUtility.TrySamplePoseFromClipAsset(
-                    clipRange,
-                    boundAnimator,
-                    boundAnimator.transform,
-                    marker.time,
-                    frameIndex,
-                    marker.ConstraintType,
-                    out KimodoMarkerSampleResult kimodoPose,
-                    out error))
-            {
-                return false;
-            }
-
-            unityPose = KimodoSpaceConversionUtility.ToUnitySample(kimodoPose);
-            if (unityPose == null)
-            {
-                error = "Kimodo->Unity pose conversion failed";
-                return false;
-            }
-
-            return true;
+            return KimodoConstraintMarkerPoseMapper.TryReadSample(marker, out unityPose, out error);
         }
 
         private static bool TryBuildLocalPoseArrays(
@@ -877,13 +826,7 @@ namespace KimodoUnityMotionTools.ProjectEditor
                     continue;
                 }
 
-                Quaternion rotation = snapshot.LocalRotations[i];
-                if (Quaternion.Dot(rotation, Quaternion.identity) >= 0.999999f)
-                {
-                    continue;
-                }
-
-                jointTransform.localRotation = rotation;
+                jointTransform.localRotation = snapshot.LocalRotations[i];
             }
 
             string rootJointName = snapshot.RootJointName;
@@ -1078,6 +1021,27 @@ namespace KimodoUnityMotionTools.ProjectEditor
             public SkeletonPreviewRigType RigType;
             public string RigKey;
             public int FrameIndex;
+        }
+
+        private sealed class ConstraintPreviewConsumer : IConstraintPreviewConsumer
+        {
+            public void OnMarkerEnabled(global::UnityEngine.Timeline.KimodoConstraintMarkerBase marker)
+            {
+                MarkDirty();
+                SceneView.RepaintAll();
+            }
+
+            public void OnMarkerDisabled(global::UnityEngine.Timeline.KimodoConstraintMarkerBase marker)
+            {
+                MarkDirty();
+                SceneView.RepaintAll();
+            }
+
+            public void OnMarkerChanged(global::UnityEngine.Timeline.KimodoConstraintMarkerBase marker, MarkerChangeReason reason)
+            {
+                MarkDirty();
+                SceneView.RepaintAll();
+            }
         }
     }
 }

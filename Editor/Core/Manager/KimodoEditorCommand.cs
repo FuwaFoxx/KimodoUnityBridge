@@ -13,8 +13,7 @@ namespace KimodoUnityMotionTools.ProjectEditor.Manager
         BridgeTryFix = 6,
         BridgeDeleteAllData = 7,
         BridgeRefreshStatus = 8,
-        BridgeEnsureRuntimeRoot = 9,
-        ConstraintSnapshotRefresh = 10
+        BridgeEnsureRuntimeRoot = 9
     }
 
     public interface IKimodoEditorCommand

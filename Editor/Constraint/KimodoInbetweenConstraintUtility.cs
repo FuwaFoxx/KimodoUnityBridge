@@ -1,6 +1,5 @@
 using System;
 using System.Collections.Generic;
-using Newtonsoft.Json;
 using UnityEditor;
 using UnityEditor.Timeline;
 using UnityEngine;
@@ -24,69 +23,33 @@ namespace KimodoUnityMotionTools.ProjectEditor
             constraintsJson = string.Empty;
             error = string.Empty;
 
-            if (!KimodoConstraintExportUtility.TryBuildConstraintsJson(sourceClip, out string markerConstraintsJson, out error))
+            if (!KimodoConstraintExportUtility.TryBuildMarkerSamplesForExport(sourceClip, out List<KimodoMarkerSampleResult> samples, out error))
             {
                 return false;
             }
 
-            if (!enableInbetweenInterpolation)
+            if (enableInbetweenInterpolation)
             {
-                constraintsJson = markerConstraintsJson ?? string.Empty;
-                return true;
+                if (!TryAddAutoInbetweenSamples(sourceClip, Mathf.Max(1, generationFrames), samples, out string warning))
+                {
+                    if (!string.IsNullOrWhiteSpace(warning))
+                    {
+                        Debug.LogWarning($"{LogPrefix} {warning}");
+                    }
+                }
             }
 
-            List<KimodoConstraintJson> constraints = LoadConstraintsFromJson(markerConstraintsJson);
-            if (TryBuildAutoInbetweenFullBodyConstraints(sourceClip, Mathf.Max(1, generationFrames), constraints, out bool _, out string autoWarning))
-            {
-                // no-op
-            }
-            else if (!string.IsNullOrWhiteSpace(autoWarning))
-            {
-                Debug.LogWarning($"{LogPrefix} {autoWarning}");
-            }
-
-            if (constraints.Count == 0)
-            {
-                constraintsJson = string.Empty;
-                return true;
-            }
-
-            constraintsJson = JsonConvert.SerializeObject(
-                constraints,
-                Formatting.Indented,
-                new JsonSerializerSettings { NullValueHandling = NullValueHandling.Ignore });
+            constraintsJson = KimodoConstraintJsonExporter.ToConstraintsJson(samples);
             return true;
         }
 
-        private static List<KimodoConstraintJson> LoadConstraintsFromJson(string json)
-        {
-            if (string.IsNullOrWhiteSpace(json))
-            {
-                return new List<KimodoConstraintJson>();
-            }
-
-            try
-            {
-                List<KimodoConstraintJson> parsed = JsonConvert.DeserializeObject<List<KimodoConstraintJson>>(json);
-                return parsed ?? new List<KimodoConstraintJson>();
-            }
-            catch (Exception ex)
-            {
-                Debug.LogWarning($"{LogPrefix} Failed to parse constraints json string, fallback to empty: {ex.Message}");
-                return new List<KimodoConstraintJson>();
-            }
-        }
-
-        private static bool TryBuildAutoInbetweenFullBodyConstraints(
+        private static bool TryAddAutoInbetweenSamples(
             TimelineClip sourceClip,
             int generationFrames,
-            List<KimodoConstraintJson> existingConstraints,
-            out bool autoAdded,
+            List<KimodoMarkerSampleResult> samples,
             out string warning)
         {
-            autoAdded = false;
             warning = string.Empty;
-
             if (sourceClip == null)
             {
                 warning = "source clip is null, skip inbetween interpolation.";
@@ -129,9 +92,8 @@ namespace KimodoUnityMotionTools.ProjectEditor
             }
 
             var occupiedManualFrames = new HashSet<int>();
-            CollectManualFrames(existingConstraints, occupiedManualFrames);
+            CollectManualFrames(samples, occupiedManualFrames);
 
-            var autoFrames = new List<(int Frame, KimodoMarkerSampleResult Pose)>();
             double originalTime = director.time;
             DirectorWrapMode originalWrapMode = director.extrapolationMode;
 
@@ -144,7 +106,7 @@ namespace KimodoUnityMotionTools.ProjectEditor
                     double evalTime = Math.Max(leftNeighbor.start, leftNeighbor.end - NeighborSampleDeltaSeconds);
                     if (TryCapturePoseAtTime(leftNeighbor, director, skeletonRoot, animator, evalTime, 0, "fullbody", out KimodoMarkerSampleResult pose, out string captureError))
                     {
-                        autoFrames.Add((0, pose));
+                        samples.Add(pose);
                     }
                     else
                     {
@@ -158,7 +120,7 @@ namespace KimodoUnityMotionTools.ProjectEditor
                     double evalTime = rightNeighbor.start;
                     if (TryCapturePoseAtTime(rightNeighbor, director, skeletonRoot, animator, evalTime, endFrame, "fullbody", out KimodoMarkerSampleResult pose, out string captureError))
                     {
-                        autoFrames.Add((endFrame, pose));
+                        samples.Add(pose);
                     }
                     else
                     {
@@ -173,76 +135,26 @@ namespace KimodoUnityMotionTools.ProjectEditor
                 director.extrapolationMode = originalWrapMode;
             }
 
-            if (autoFrames.Count == 0)
-            {
-                warning = "no usable sampled neighboring poses; fallback to manual constraints only.";
-                return true;
-            }
-
-            KimodoConstraintJson autoFullbody = BuildAutoFullBodyConstraint(autoFrames);
-            existingConstraints.Add(autoFullbody);
-            autoAdded = true;
-            Debug.Log($"{LogPrefix} Added inbetween fullbody constraints at frames: {string.Join(",", autoFullbody.frame_indices)}");
             return true;
         }
 
-        private static void CollectManualFrames(List<KimodoConstraintJson> constraints, HashSet<int> output)
+        private static void CollectManualFrames(List<KimodoMarkerSampleResult> samples, HashSet<int> output)
         {
-            if (constraints == null || output == null)
+            if (samples == null || output == null)
             {
                 return;
             }
 
-            for (int i = 0; i < constraints.Count; i++)
+            for (int i = 0; i < samples.Count; i++)
             {
-                KimodoConstraintJson c = constraints[i];
-                if (c == null || c.frame_indices == null || c.frame_indices.Count == 0)
+                KimodoMarkerSampleResult s = samples[i];
+                if (s == null)
                 {
                     continue;
                 }
 
-                for (int j = 0; j < c.frame_indices.Count; j++)
-                {
-                    output.Add(c.frame_indices[j]);
-                }
+                output.Add(s.frameIndex);
             }
-        }
-
-        private static KimodoConstraintJson BuildAutoFullBodyConstraint(List<(int Frame, KimodoMarkerSampleResult Pose)> framePoses)
-        {
-            framePoses.Sort((a, b) => a.Frame.CompareTo(b.Frame));
-
-            var json = new KimodoConstraintJson
-            {
-                type = "fullbody",
-                frame_indices = new List<int>(),
-                smooth_root_2d = new List<float[]>(),
-                root_positions = new List<float[]>(),
-                local_joints_rot = new List<float[][]>()
-            };
-
-            for (int i = 0; i < framePoses.Count; i++)
-            {
-                int frame = framePoses[i].Frame;
-                KimodoMarkerSampleResult pose = framePoses[i].Pose;
-                json.frame_indices.Add(frame);
-                json.smooth_root_2d.Add(new[] { pose.rootPosition.x, pose.rootPosition.z });
-                json.root_positions.Add(new[] { pose.rootPosition.x, pose.rootPosition.y, pose.rootPosition.z });
-                json.local_joints_rot.Add(ToAxisAngleArray(pose.localAxisAngles));
-            }
-
-            return json;
-        }
-
-        private static float[][] ToAxisAngleArray(List<Vector3> axisAngles)
-        {
-            float[][] data = new float[axisAngles.Count][];
-            for (int i = 0; i < axisAngles.Count; i++)
-            {
-                Vector3 v = axisAngles[i];
-                data[i] = new[] { v.x, v.y, v.z };
-            }
-            return data;
         }
 
         private static void FindNeighborClips(TimelineClip sourceClip, out TimelineClip leftNeighbor, out TimelineClip rightNeighbor)
@@ -299,15 +211,20 @@ namespace KimodoUnityMotionTools.ProjectEditor
             {
                 director.time = evalTime;
                 director.Evaluate();
-                return KimodoConstraintExportUtility.TrySamplePoseFromClipAsset(
-                    sourceClip,
-                    animator,
-                    skeletonRoot,
-                    evalTime,
-                    frameIndex,
-                    markerType,
-                    out pose,
-                    out error);
+                if (!KimodoConstraintExportUtility.TrySamplePoseFromClipAsset(
+                        sourceClip,
+                        animator,
+                        skeletonRoot,
+                        evalTime,
+                        frameIndex,
+                        markerType,
+                        out pose,
+                        out error))
+                {
+                    return false;
+                }
+
+                return pose != null;
             }
             catch (Exception ex)
             {
@@ -315,6 +232,5 @@ namespace KimodoUnityMotionTools.ProjectEditor
                 return false;
             }
         }
-
     }
 }

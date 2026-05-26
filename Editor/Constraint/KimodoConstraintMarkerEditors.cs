@@ -1,5 +1,4 @@
 using System;
-using KimodoUnityMotionTools.ProjectEditor.Manager;
 using UnityEditor;
 using UnityEditor.Timeline;
 using UnityEngine;
@@ -29,7 +28,7 @@ namespace KimodoUnityMotionTools.ProjectEditor
             bool activeEditSession = KimodoConstraintOverrideEditSession.HasActiveSession(markerTarget);
             if (!useOverride && !activeEditSession)
             {
-                if (!KimodoConstraintExportUtility.TryBuildAutoConstraintPreview(markerTarget, out KimodoConstraintJson preview, out string error))
+                if (!KimodoConstraintSamplingService.TrySampleMarkerDataFromMarker(markerTarget, out KimodoMarkerSampleResult preview, out string error))
                 {
                     EditorGUILayout.HelpBox($"Auto preview unavailable: {error}", MessageType.Warning);
                 }
@@ -59,7 +58,7 @@ namespace KimodoUnityMotionTools.ProjectEditor
 
         private void DrawAutoFrameIndex()
         {
-            SerializedProperty frameProp = serializedObject.FindProperty("frameIndex");
+            SerializedProperty frameProp = serializedObject.FindProperty("sampleData.frameIndex");
             if (frameProp == null)
             {
                 return;
@@ -98,24 +97,23 @@ namespace KimodoUnityMotionTools.ProjectEditor
             }
 
             EditorGUI.BeginDisabledGroup(readOnly);
-            EditorGUILayout.PropertyField(serializedObject.FindProperty("smoothRoot2D"));
-            EditorGUILayout.PropertyField(serializedObject.FindProperty("includeGlobalHeading"));
+            EditorGUILayout.PropertyField(serializedObject.FindProperty("sampleData.rootPosition"));
+            EditorGUILayout.PropertyField(serializedObject.FindProperty("sampleData.hasRootHeading"));
 
-            SerializedProperty includeGlobalHeadingProp = serializedObject.FindProperty("includeGlobalHeading");
+            SerializedProperty includeGlobalHeadingProp = serializedObject.FindProperty("sampleData.hasRootHeading");
             if (includeGlobalHeadingProp != null && includeGlobalHeadingProp.boolValue)
             {
-                EditorGUILayout.PropertyField(serializedObject.FindProperty("globalRootHeading"));
+                EditorGUILayout.PropertyField(serializedObject.FindProperty("sampleData.rootHeading"));
             }
 
             EditorGUI.EndDisabledGroup();
         }
 
-        private void ApplyPreviewToTarget(KimodoConstraintJson preview)
+        private void ApplyPreviewToTarget(KimodoMarkerSampleResult preview)
         {
             if (target is KimodoConstraintMarkerBase marker)
             {
-                KimodoConstraintPosePipeline.ApplyPreviewToMarkerData(marker, preview);
-                EditorUtility.SetDirty(marker);
+                KimodoConstraintMarkerPoseMapper.TryWriteSample(marker, preview, keepOverrideEnabled: false, out _);
             }
         }
     }
@@ -142,7 +140,7 @@ namespace KimodoUnityMotionTools.ProjectEditor
             bool activeEditSession = KimodoConstraintOverrideEditSession.HasActiveSession(markerTarget);
             if (!useOverride && !activeEditSession)
             {
-                if (!KimodoConstraintExportUtility.TryBuildAutoConstraintPreview(markerTarget, out KimodoConstraintJson preview, out string error))
+                if (!KimodoConstraintSamplingService.TrySampleMarkerDataFromMarker(markerTarget, out KimodoMarkerSampleResult preview, out string error))
                 {
                     EditorGUILayout.HelpBox($"Auto preview unavailable: {error}", MessageType.Warning);
                 }
@@ -172,7 +170,7 @@ namespace KimodoUnityMotionTools.ProjectEditor
 
         private void DrawAutoFrameIndex()
         {
-            SerializedProperty frameProp = serializedObject.FindProperty("frameIndex");
+            SerializedProperty frameProp = serializedObject.FindProperty("sampleData.frameIndex");
             if (frameProp == null)
             {
                 return;
@@ -211,18 +209,16 @@ namespace KimodoUnityMotionTools.ProjectEditor
             }
 
             EditorGUI.BeginDisabledGroup(readOnly);
-            EditorGUILayout.PropertyField(serializedObject.FindProperty("smoothRoot2D"));
-            EditorGUILayout.PropertyField(serializedObject.FindProperty("rootPosition"));
-            EditorGUILayout.PropertyField(serializedObject.FindProperty("localJointRots"), true);
+            EditorGUILayout.PropertyField(serializedObject.FindProperty("sampleData.rootPosition"));
+            EditorGUILayout.PropertyField(serializedObject.FindProperty("sampleData.localAxisAngles"), true);
             EditorGUI.EndDisabledGroup();
         }
 
-        private void ApplyPreviewToTarget(KimodoConstraintJson preview)
+        private void ApplyPreviewToTarget(KimodoMarkerSampleResult preview)
         {
             if (target is KimodoConstraintMarkerBase marker)
             {
-                KimodoConstraintPosePipeline.ApplyPreviewToMarkerData(marker, preview);
-                EditorUtility.SetDirty(marker);
+                KimodoConstraintMarkerPoseMapper.TryWriteSample(marker, preview, keepOverrideEnabled: false, out _);
             }
         }
     }
@@ -259,7 +255,7 @@ namespace KimodoUnityMotionTools.ProjectEditor
 
             if (!useOverride && !activeEditSession)
             {
-                if (!KimodoConstraintExportUtility.TryBuildAutoConstraintPreview(markerTarget, out KimodoConstraintJson preview, out string error))
+                if (!KimodoConstraintSamplingService.TrySampleMarkerDataFromMarker(markerTarget, out KimodoMarkerSampleResult preview, out string error))
                 {
                     EditorGUILayout.HelpBox($"Auto preview unavailable: {error}", MessageType.Warning);
                 }
@@ -291,7 +287,7 @@ namespace KimodoUnityMotionTools.ProjectEditor
 
         private void DrawAutoFrameIndex()
         {
-            SerializedProperty frameProp = serializedObject.FindProperty("frameIndex");
+            SerializedProperty frameProp = serializedObject.FindProperty("sampleData.frameIndex");
             if (frameProp == null)
             {
                 return;
@@ -343,7 +339,7 @@ namespace KimodoUnityMotionTools.ProjectEditor
         private void DrawEEFields(string typeName, bool readOnly)
         {
             EditorGUI.BeginDisabledGroup(readOnly);
-            SerializedProperty jointNamesProp = serializedObject.FindProperty("jointNames");
+            SerializedProperty jointNamesProp = serializedObject.FindProperty("sampleData.jointNames");
             if (jointNamesProp != null && typeName == "end-effector")
             {
                 EditorGUILayout.PropertyField(jointNamesProp, true);
@@ -353,18 +349,16 @@ namespace KimodoUnityMotionTools.ProjectEditor
                 EditorGUILayout.HelpBox("Fixed joint group marker type; joint_names is determined by marker class.", MessageType.None);
             }
 
-            EditorGUILayout.PropertyField(serializedObject.FindProperty("smoothRoot2D"));
-            EditorGUILayout.PropertyField(serializedObject.FindProperty("rootPosition"));
-            EditorGUILayout.PropertyField(serializedObject.FindProperty("localJointRots"), true);
+            EditorGUILayout.PropertyField(serializedObject.FindProperty("sampleData.rootPosition"));
+            EditorGUILayout.PropertyField(serializedObject.FindProperty("sampleData.localAxisAngles"), true);
             EditorGUI.EndDisabledGroup();
         }
 
-        private void ApplyPreviewToTarget(KimodoConstraintJson preview)
+        private void ApplyPreviewToTarget(KimodoMarkerSampleResult preview)
         {
             if (target is KimodoConstraintMarkerBase marker)
             {
-                KimodoConstraintPosePipeline.ApplyPreviewToMarkerData(marker, preview);
-                EditorUtility.SetDirty(marker);
+                KimodoConstraintMarkerPoseMapper.TryWriteSample(marker, preview, keepOverrideEnabled: false, out _);
             }
         }
     }
@@ -479,8 +473,7 @@ namespace KimodoUnityMotionTools.ProjectEditor
             Undo.RecordObject(marker as UnityEngine.Object, "Move Kimodo Constraint Marker");
             marker.time = absTime;
             EditorUtility.SetDirty(marker as UnityEngine.Object);
-            KimodoEditorCommandManager.Dispatch(
-                new ConstraintSnapshotRefreshCommand());
+            KimodoConstraintMarkerEventHub.RaiseMarkerChanged(marker as KimodoConstraintMarkerBase, MarkerChangeReason.TimeChanged);
         }
 
         public static void NotifyInspectorChanged(KimodoConstraintMarkerBase marker)
@@ -490,7 +483,7 @@ namespace KimodoUnityMotionTools.ProjectEditor
                 EditorUtility.SetDirty(marker);
             }
 
-            KimodoEditorCommandManager.Dispatch(new ConstraintSnapshotRefreshCommand());
+            KimodoConstraintMarkerEventHub.RaiseMarkerChanged(marker, MarkerChangeReason.DataChanged);
             SceneView.RepaintAll();
         }
 

@@ -29,194 +29,201 @@ namespace UnityEngine.Timeline
         public List<string> joint_names;
     }
 
-    public interface IKimodoConstraintMarker
+    public enum KimodoConstraintRigType
     {
-        KimodoConstraintJson ToJson();
-    }
-
-    [Serializable]
-    public sealed class KimodoMarkerSampleRequest
-    {
-        public Animator animator;
-        public Transform skeletonRoot;
-        public TimelineClip sourceClip;
-        public string modelName;
-        public double globalTime;
-        public int frameIndex;
-        public string markerType;
+        Soma30 = 0,
+        G1 = 1,
+        Smplx = 2,
+        Unknown = 3
     }
 
     [Serializable]
     public sealed class KimodoMarkerSampleResult
     {
+        public string constraintType = string.Empty;
+        public int frameIndex;
+        public KimodoConstraintRigType rigType = KimodoConstraintRigType.Soma30;
+        public bool hasRootHeading = true;
         public Vector3 rootPosition;
-        public Vector2 rootHeading;
+        public Vector2 rootHeading = Vector2.right;
+        public List<string> jointNames = new List<string>();
         public List<Vector3> localAxisAngles = new List<Vector3>();
-        // Optional: indices of joints that were actually resolved/sampled.
         public List<int> sampledJointIndices = new List<int>();
+
+        public KimodoMarkerSampleResult Clone()
+        {
+            return new KimodoMarkerSampleResult
+            {
+                constraintType = constraintType ?? string.Empty,
+                frameIndex = frameIndex,
+                rigType = rigType,
+                hasRootHeading = hasRootHeading,
+                rootPosition = rootPosition,
+                rootHeading = rootHeading,
+                jointNames = jointNames != null ? new List<string>(jointNames) : new List<string>(),
+                localAxisAngles = localAxisAngles != null ? new List<Vector3>(localAxisAngles) : new List<Vector3>(),
+                sampledJointIndices = sampledJointIndices != null ? new List<int>(sampledJointIndices) : new List<int>()
+            };
+        }
     }
 
     public interface IKimodoSampleMarker
     {
-        bool TrySampleMarker(KimodoMarkerSampleRequest request, out KimodoMarkerSampleResult result, out string error);
+        bool TrySampleMarker(
+            Animator animator,
+            Transform skeletonRoot,
+            TimelineClip sourceClip,
+            string modelName,
+            double globalTime,
+            int frameIndex,
+            string markerType,
+            out KimodoMarkerSampleResult result,
+            out string error);
     }
 
     [Serializable]
-    public abstract class KimodoConstraintMarkerBase : Marker, IKimodoConstraintMarker
+    public abstract class KimodoConstraintMarkerBase : Marker
     {
         [Tooltip("If enabled, use manually edited marker values. If disabled, values are sampled from timeline pose at this marker time.")]
         public bool useOverride;
+        [SerializeField]
+        private KimodoMarkerSampleResult sampleData = new KimodoMarkerSampleResult();
 
         public abstract string ConstraintType { get; }
 
-        protected KimodoConstraintJson CreateBase()
+        public KimodoMarkerSampleResult SampleData
         {
-            return new KimodoConstraintJson
+            get
             {
-                type = ConstraintType,
-                frame_indices = new List<int>()
-            };
+                EnsureSampleData();
+                return sampleData;
+            }
+            set
+            {
+                sampleData = value ?? new KimodoMarkerSampleResult();
+                SyncConstraintType();
+            }
         }
 
-        public abstract KimodoConstraintJson ToJson();
+        protected void EnsureSampleData()
+        {
+            if (sampleData == null)
+            {
+                sampleData = new KimodoMarkerSampleResult();
+            }
+
+            SyncConstraintType();
+        }
+
+        private void SyncConstraintType()
+        {
+            if (sampleData != null)
+            {
+                sampleData.constraintType = ConstraintType;
+            }
+        }
+
+        public int frameIndex
+        {
+            get => SampleData.frameIndex;
+            set => SampleData.frameIndex = value;
+        }
+
+        public Vector3 rootPosition
+        {
+            get => SampleData.rootPosition;
+            set => SampleData.rootPosition = value;
+        }
+
+        public Vector2 smoothRoot2D
+        {
+            get => new Vector2(rootPosition.x, rootPosition.z);
+            set => rootPosition = new Vector3(value.x, rootPosition.y, value.y);
+        }
+
+        public bool includeGlobalHeading
+        {
+            get => SampleData.hasRootHeading;
+            set => SampleData.hasRootHeading = value;
+        }
+
+        public Vector2 globalRootHeading
+        {
+            get => SampleData.rootHeading;
+            set => SampleData.rootHeading = value;
+        }
+
+        public List<string> jointNames
+        {
+            get => SampleData.jointNames;
+            set => SampleData.jointNames = value ?? new List<string>();
+        }
+
+        public List<Vector3> localJointRots
+        {
+            get => SampleData.localAxisAngles;
+            set => SampleData.localAxisAngles = value ?? new List<Vector3>();
+        }
+
+#if UNITY_EDITOR
+        protected virtual void OnEnable()
+        {
+            EnsureSampleData();
+            TryRaiseEditorMarkerEvent("RaiseMarkerEnabled");
+        }
+
+        protected virtual void OnDisable()
+        {
+            TryRaiseEditorMarkerEvent("RaiseMarkerDisabled");
+        }
+
+        private void TryRaiseEditorMarkerEvent(string methodName)
+        {
+            if (string.IsNullOrWhiteSpace(methodName))
+            {
+                return;
+            }
+
+            var hubType = Type.GetType("KimodoUnityMotionTools.ProjectEditor.KimodoConstraintMarkerEventHub, KimodoTool.Editor");
+            if (hubType == null)
+            {
+                return;
+            }
+
+            var method = hubType.GetMethod(methodName, System.Reflection.BindingFlags.Static | System.Reflection.BindingFlags.NonPublic);
+            if (method == null)
+            {
+                return;
+            }
+
+            try
+            {
+                method.Invoke(null, new object[] { this });
+            }
+            catch
+            {
+                // Ignore editor-only event dispatch failures.
+            }
+        }
+#endif
     }
 
     [Serializable]
     public sealed class KimodoRoot2DConstraintMarker : KimodoConstraintMarkerBase
     {
         public override string ConstraintType => "root2d";
-
-        public int frameIndex;
-        public Vector2 smoothRoot2D = Vector2.zero;
-        public bool includeGlobalHeading;
-        public Vector2 globalRootHeading = Vector2.right;
-
-        public override KimodoConstraintJson ToJson()
-        {
-            KimodoConstraintJson json = CreateBase();
-            json.frame_indices.Add(frameIndex);
-            Vector2 kimodoRoot2D = new Vector2(-smoothRoot2D.x, smoothRoot2D.y);
-            json.smooth_root_2d = new List<float[]> { kimodoRoot2D.ToArray() };
-
-            if (includeGlobalHeading)
-            {
-                Vector2 kimodoHeading = new Vector2(-globalRootHeading.x, globalRootHeading.y);
-                json.global_root_heading = new List<float[]> { kimodoHeading.ToArray() };
-            }
-
-            return json;
-        }
     }
 
     [Serializable]
     public sealed class KimodoFullBodyConstraintMarker : KimodoConstraintMarkerBase
     {
         public override string ConstraintType => "fullbody";
-
-        public int frameIndex;
-        public Vector2 smoothRoot2D = Vector2.zero;
-        public Vector3 rootPosition = new Vector3(0f, 1f, 0f);
-        [Tooltip("Single frame local joints axis-angle xyz (radians).")]
-        public List<Vector3> localJointRots = new List<Vector3>();
-
-        public override KimodoConstraintJson ToJson()
-        {
-            KimodoConstraintJson json = CreateBase();
-            json.frame_indices.Add(frameIndex);
-            Vector3 kimodoRoot = new Vector3(-rootPosition.x, rootPosition.y, rootPosition.z);
-            Vector2 kimodoRoot2D = new Vector2(kimodoRoot.x, kimodoRoot.z);
-            json.smooth_root_2d = new List<float[]> { kimodoRoot2D.ToArray() };
-            json.root_positions = new List<float[]> { kimodoRoot.ToArray() };
-            json.local_joints_rot = new List<float[][]> { BuildSingleLocalJointRotFrame(ToKimodoAxisAngles(localJointRots)) };
-            return json;
-        }
-
-        internal static float[][] BuildSingleLocalJointRotFrame(List<Vector3> joints)
-        {
-            if (joints == null || joints.Count == 0)
-            {
-                return Array.Empty<float[]>();
-            }
-
-            float[][] data = new float[joints.Count][];
-            for (int i = 0; i < joints.Count; i++)
-            {
-                data[i] = joints[i].ToArray();
-            }
-
-            return data;
-        }
-
-        internal static List<Vector3> ToKimodoAxisAngles(List<Vector3> unityAxisAngles)
-        {
-            var result = new List<Vector3>();
-            if (unityAxisAngles == null || unityAxisAngles.Count == 0)
-            {
-                return result;
-            }
-
-            for (int i = 0; i < unityAxisAngles.Count; i++)
-            {
-                Vector3 unityAxisAngle = unityAxisAngles[i];
-                float angleRad = unityAxisAngle.magnitude;
-                if (angleRad <= 1e-8f)
-                {
-                    result.Add(Vector3.zero);
-                    continue;
-                }
-
-                Vector3 axis = unityAxisAngle / angleRad;
-                Quaternion unityLocal = Quaternion.AngleAxis(angleRad * Mathf.Rad2Deg, axis);
-                Quaternion kimodoLocal = new Quaternion(unityLocal.x, -unityLocal.y, -unityLocal.z, unityLocal.w);
-                result.Add(QuaternionToAxisAngleVector(kimodoLocal));
-            }
-
-            return result;
-        }
-
-        private static Vector3 QuaternionToAxisAngleVector(Quaternion q)
-        {
-            q.Normalize();
-            q.ToAngleAxis(out float degrees, out Vector3 axis);
-            if (float.IsNaN(axis.x) || axis == Vector3.zero)
-            {
-                return Vector3.zero;
-            }
-
-            if (degrees > 180f)
-            {
-                degrees -= 360f;
-            }
-
-            return axis.normalized * (degrees * Mathf.Deg2Rad);
-        }
     }
 
     [Serializable]
     public class KimodoEndEffectorConstraintMarker : KimodoConstraintMarkerBase
     {
         public override string ConstraintType => "end-effector";
-
-        public int frameIndex;
-        [Tooltip("Allowed values follow Kimodo convention, e.g. LeftHand/RightHand/LeftFoot/RightFoot/Hips.")]
-        public List<string> jointNames = new List<string> { "LeftHand" };
-        public Vector2 smoothRoot2D = Vector2.zero;
-        public Vector3 rootPosition = new Vector3(0f, 1f, 0f);
-        [Tooltip("Single frame local joints axis-angle xyz (radians).")]
-        public List<Vector3> localJointRots = new List<Vector3>();
-
-        public override KimodoConstraintJson ToJson()
-        {
-            KimodoConstraintJson json = CreateBase();
-            json.frame_indices.Add(frameIndex);
-            json.joint_names = new List<string>(jointNames ?? new List<string>());
-            Vector3 kimodoRoot = new Vector3(-rootPosition.x, rootPosition.y, rootPosition.z);
-            Vector2 kimodoRoot2D = new Vector2(kimodoRoot.x, kimodoRoot.z);
-            json.smooth_root_2d = new List<float[]> { kimodoRoot2D.ToArray() };
-            json.root_positions = new List<float[]> { kimodoRoot.ToArray() };
-            json.local_joints_rot = new List<float[][]> { KimodoFullBodyConstraintMarker.BuildSingleLocalJointRotFrame(KimodoFullBodyConstraintMarker.ToKimodoAxisAngles(localJointRots)) };
-            return json;
-        }
     }
 
     [Serializable]

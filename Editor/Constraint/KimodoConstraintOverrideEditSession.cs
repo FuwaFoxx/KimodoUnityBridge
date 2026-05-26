@@ -1,6 +1,5 @@
 using System;
 using System.Collections.Generic;
-using KimodoUnityMotionTools.ProjectEditor.Manager;
 using UnityEditor;
 using UnityEditor.Timeline;
 using UnityEngine;
@@ -45,6 +44,7 @@ namespace KimodoUnityMotionTools.ProjectEditor
 
             Sessions[key] = session;
             KimodoConstraintOverrideEditWindow.ShowWindow(marker);
+            KimodoConstraintMarkerEventHub.RaiseMarkerChanged(marker, MarkerChangeReason.SessionStateChanged);
             KimodoConstraintMarkerEditorUtility.NotifyInspectorChanged(marker);
             return true;
         }
@@ -176,7 +176,7 @@ namespace KimodoUnityMotionTools.ProjectEditor
             }
 
             // Seed marker override data at session start so strict preview path always has complete pose data.
-            if (!KimodoConstraintPosePipeline.TryWriteUnityPoseToMarkerData(marker, initialPose, keepOverrideEnabled: true, out error))
+            if (!KimodoConstraintMarkerPoseMapper.TryWriteSample(marker, initialPose, keepOverrideEnabled: true, out error))
             {
                 return false;
             }
@@ -265,12 +265,12 @@ namespace KimodoUnityMotionTools.ProjectEditor
 
             session.LastPoseSignature = currentSig;
 
-            if (!KimodoConstraintPosePipeline.TryWriteUnityPoseToMarker(session.Marker, pose, out error))
+            if (!KimodoConstraintMarkerPoseMapper.TryWriteSample(session.Marker, pose, keepOverrideEnabled: true, out error))
             {
                 return false;
             }
 
-            KimodoEditorCommandManager.Dispatch(new ConstraintSnapshotRefreshCommand());
+            KimodoConstraintMarkerEventHub.RaiseMarkerChanged(session.Marker, MarkerChangeReason.DataChanged);
             SceneView.RepaintAll();
             return true;
         }
@@ -351,37 +351,30 @@ namespace KimodoUnityMotionTools.ProjectEditor
             }
 
             double sampleTime = fixedTime ?? marker.time;
+            int frameIndex = KimodoConstraintMarkerEditorUtility.TimeToKimodoFrameIndex(clipRange, sampleTime);
+            sampleTime = KimodoConstraintPosePipeline.ResolveSampleTimeFromFrameIndex(clipRange, frameIndex);
             if (director != null)
             {
                 director.time = sampleTime;
                 director.Evaluate();
             }
 
-            KimodoMarkerSampleRequest request = BuildSampleRequest(marker, clipRange, boundAnimator, sampleTime);
-            if (!KimodoMarkerSamplingUtility.TrySampleMarker(request, out pose, out error))
+            if (!KimodoConstraintPosePipeline.TrySampleUnityPoseForMarkerContext(
+                    clipRange,
+                    boundAnimator,
+                    boundAnimator.transform,
+                    sampleTime,
+                    marker.ConstraintType,
+                    out pose,
+                    out error))
             {
                 return false;
             }
 
-            return pose != null;
-        }
+            pose.frameIndex = frameIndex;
+            pose.constraintType = marker.ConstraintType;
 
-        private static KimodoMarkerSampleRequest BuildSampleRequest(
-            KimodoConstraintMarkerBase marker,
-            TimelineClip clipRange,
-            Animator boundAnimator,
-            double sampleTime)
-        {
-            return new KimodoMarkerSampleRequest
-            {
-                animator = boundAnimator,
-                skeletonRoot = boundAnimator.transform,
-                sourceClip = clipRange,
-                modelName = (clipRange.asset as KimodoPlayableClip)?.bridgeModelName,
-                globalTime = sampleTime,
-                frameIndex = KimodoConstraintMarkerEditorUtility.TimeToKimodoFrameIndex(clipRange, sampleTime),
-                markerType = marker.ConstraintType
-            };
+            return pose != null;
         }
 
         private static int ComputePoseSignature(KimodoMarkerSampleResult pose)
@@ -455,6 +448,7 @@ namespace KimodoUnityMotionTools.ProjectEditor
                 Sessions.Remove(session.Marker.GetInstanceID());
             }
 
+            KimodoConstraintMarkerEventHub.RaiseMarkerChanged(session.Marker, MarkerChangeReason.SessionStateChanged);
             EnsureAnimationModeOffWhenNoSessions();
             KimodoConstraintMarkerEditorUtility.NotifyInspectorChanged(session.Marker);
             SceneView.RepaintAll();

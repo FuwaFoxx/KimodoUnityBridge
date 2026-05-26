@@ -172,11 +172,4 @@ namespace KimodoUnityMotionTools.ProjectEditor.Manager
         }
     }
 
-    public sealed class ConstraintSnapshotRefreshCommand : KimodoEditorCommandBase
-    {
-        public ConstraintSnapshotRefreshCommand()
-            : base("constraint:snapshot", KimodoEditorCommandKind.ConstraintSnapshotRefresh)
-        {
-        }
-    }
 }

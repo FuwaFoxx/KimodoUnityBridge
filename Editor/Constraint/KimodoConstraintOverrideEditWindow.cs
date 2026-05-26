@@ -6,6 +6,25 @@ namespace KimodoUnityMotionTools.ProjectEditor
 {
     internal sealed class KimodoConstraintOverrideEditWindow : EditorWindow
     {
+        private sealed class WindowPreviewConsumer : IConstraintPreviewConsumer
+        {
+            public void OnMarkerEnabled(global::UnityEngine.Timeline.KimodoConstraintMarkerBase marker)
+            {
+                KimodoConstraintSnapshotVisualizer.RequestManualRefresh();
+            }
+
+            public void OnMarkerDisabled(global::UnityEngine.Timeline.KimodoConstraintMarkerBase marker)
+            {
+                KimodoConstraintSnapshotVisualizer.RequestManualRefresh();
+            }
+
+            public void OnMarkerChanged(global::UnityEngine.Timeline.KimodoConstraintMarkerBase marker, MarkerChangeReason reason)
+            {
+                KimodoConstraintSnapshotVisualizer.RequestManualRefresh();
+            }
+        }
+
+        private static readonly WindowPreviewConsumer PreviewConsumer = new WindowPreviewConsumer();
         private KimodoConstraintMarkerBase marker;
         private Vector2 scroll;
         private string lastError;
@@ -42,11 +61,13 @@ namespace KimodoUnityMotionTools.ProjectEditor
         private void OnEnable()
         {
             EditorApplication.update += OnEditorUpdate;
+            ConstraintPreviewCoordinator.ActivateConsumer(PreviewConsumer);
         }
 
         private void OnDisable()
         {
             EditorApplication.update -= OnEditorUpdate;
+            ConstraintPreviewCoordinator.RestoreDefaultConsumer();
         }
 
         private void OnEditorUpdate()
@@ -104,17 +125,16 @@ namespace KimodoUnityMotionTools.ProjectEditor
             {
                 var so = new SerializedObject(marker);
                 so.Update();
-                DrawPropertyIfExists(so, "frameIndex");
-                DrawPropertyIfExists(so, "smoothRoot2D");
-                DrawPropertyIfExists(so, "rootPosition");
-                DrawPropertyIfExists(so, "localJointRots");
-                SerializedProperty includeHeadingProp = so.FindProperty("includeGlobalHeading");
+                DrawPropertyIfExists(so, "sampleData.frameIndex");
+                DrawPropertyIfExists(so, "sampleData.rootPosition");
+                DrawPropertyIfExists(so, "sampleData.localAxisAngles");
+                SerializedProperty includeHeadingProp = so.FindProperty("sampleData.hasRootHeading");
                 if (includeHeadingProp != null)
                 {
                     EditorGUILayout.PropertyField(includeHeadingProp);
                     if (includeHeadingProp.boolValue)
                     {
-                        EditorGUILayout.PropertyField(so.FindProperty("globalRootHeading"), true);
+                        EditorGUILayout.PropertyField(so.FindProperty("sampleData.rootHeading"), true);
                     }
                 }
             }

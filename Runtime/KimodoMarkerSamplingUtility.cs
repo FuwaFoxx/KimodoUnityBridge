@@ -84,30 +84,34 @@ namespace KimodoUnityMotionTools
             return names != null && names.Length > 0 ? names[0] : string.Empty;
         }
 
-        public static bool TrySampleMarker(KimodoMarkerSampleRequest request, out KimodoMarkerSampleResult result, out string error)
+        public static bool TrySampleMarker(
+            Animator animator,
+            Transform skeletonRoot,
+            TimelineClip sourceClip,
+            string modelName,
+            double globalTime,
+            int frameIndex,
+            string markerType,
+            out KimodoMarkerSampleResult result,
+            out string error)
         {
             result = null;
             error = string.Empty;
 
-            if (request == null)
+            if (animator == null)
             {
-                error = "Sample request is null.";
+                error = "Animator is null.";
                 return false;
             }
 
-            Transform root = request.skeletonRoot != null
-                ? request.skeletonRoot
-                : request.animator != null ? request.animator.transform : null;
+            Transform root = skeletonRoot != null ? skeletonRoot : animator.transform;
             if (root == null)
             {
                 error = "Skeleton root is null.";
                 return false;
             }
 
-            string modelName = ResolveRequestModelName(request);
             ResolveProfile(modelName, out string[] jointNames, out int[] parentIndices);
-
-            Animator animator = request.animator;
             string rootJointName = jointNames != null && jointNames.Length > 0 ? jointNames[0] : "Hips";
             Transform pelvis = TryResolveTransformByJointName(rootJointName, root, animator) ?? root;
 
@@ -158,32 +162,31 @@ namespace KimodoUnityMotionTools
 
             result = new KimodoMarkerSampleResult
             {
+                constraintType = markerType ?? string.Empty,
+                frameIndex = frameIndex,
+                rigType = ToConstraintRigType(ResolveProfileType(modelName)),
+                hasRootHeading = true,
                 rootPosition = unityRootPosition,
                 rootHeading = unityHeading,
+                jointNames = jointNames != null ? new List<string>(jointNames) : new List<string>(),
                 localAxisAngles = unityLocalAxisAngles,
                 sampledJointIndices = sampledJointIndices
             };
             return true;
         }
 
-        private static string ResolveRequestModelName(KimodoMarkerSampleRequest request)
+        private static KimodoConstraintRigType ToConstraintRigType(SkeletonProfile profile)
         {
-            if (request == null)
+            switch (profile)
             {
-                return string.Empty;
+                case SkeletonProfile.G1Skel34:
+                    return KimodoConstraintRigType.G1;
+                case SkeletonProfile.Smplx22:
+                    return KimodoConstraintRigType.Smplx;
+                case SkeletonProfile.Soma30:
+                default:
+                    return KimodoConstraintRigType.Soma30;
             }
-
-            if (!string.IsNullOrWhiteSpace(request.modelName))
-            {
-                return request.modelName;
-            }
-
-            if (request.sourceClip != null && request.sourceClip.asset is KimodoPlayableClip clip && !string.IsNullOrWhiteSpace(clip.bridgeModelName))
-            {
-                return clip.bridgeModelName;
-            }
-
-            return string.Empty;
         }
 
         private static void ResolveProfile(string modelName, out string[] jointNames, out int[] parentIndices)

@@ -98,29 +98,19 @@ namespace KimodoUnityMotionTools.ProjectEditor
 
             entries.Sort((a, b) => a.frame.CompareTo(b.frame));
 
-            var full = new KimodoConstraintJson
-            {
-                type = "fullbody",
-                frame_indices = new List<int>(entries.Count),
-                smooth_root_2d = new List<float[]>(entries.Count),
-                root_positions = new List<float[]>(entries.Count),
-                local_joints_rot = new List<float[][]>(entries.Count)
-            };
+            var samples = new List<KimodoMarkerSampleResult>(entries.Count);
 
             for (int i = 0; i < entries.Count; i++)
             {
                 int frame = entries[i].frame;
                 KimodoMarkerSampleResult pose = entries[i].pose;
-                full.frame_indices.Add(frame);
-                full.smooth_root_2d.Add(new[] { pose.rootPosition.x, pose.rootPosition.z });
-                full.root_positions.Add(new[] { pose.rootPosition.x, pose.rootPosition.y, pose.rootPosition.z });
-                full.local_joints_rot.Add(ToAxisAngleArray(pose.localAxisAngles));
+                KimodoMarkerSampleResult sample = pose.Clone();
+                sample.constraintType = "fullbody";
+                sample.frameIndex = frame;
+                samples.Add(sample);
             }
 
-            return JsonConvert.SerializeObject(
-                new List<KimodoConstraintJson> { full },
-                Formatting.Indented,
-                new JsonSerializerSettings { NullValueHandling = NullValueHandling.Ignore });
+            return KimodoConstraintJsonExporter.ToConstraintsJson(samples);
         }
 
         private static bool IsValidPose(KimodoMarkerSampleResult pose)
@@ -130,16 +120,5 @@ namespace KimodoUnityMotionTools.ProjectEditor
                 && pose.localAxisAngles.Count > 0;
         }
 
-        private static float[][] ToAxisAngleArray(List<Vector3> axisAngles)
-        {
-            float[][] data = new float[axisAngles.Count][];
-            for (int i = 0; i < axisAngles.Count; i++)
-            {
-                Vector3 v = axisAngles[i];
-                data[i] = new[] { v.x, v.y, v.z };
-            }
-
-            return data;
-        }
     }
 }

@@ -118,9 +118,27 @@ namespace KimodoUnityMotionTools
             return base.CreatePlayable(graph, owner);
         }
 
-        public bool TrySampleMarker(KimodoMarkerSampleRequest request, out KimodoMarkerSampleResult result, out string error)
+        public bool TrySampleMarker(
+            Animator animator,
+            Transform skeletonRoot,
+            TimelineClip sourceClip,
+            string modelName,
+            double globalTime,
+            int frameIndex,
+            string markerType,
+            out KimodoMarkerSampleResult result,
+            out string error)
         {
-            return KimodoMarkerSamplingUtility.TrySampleMarker(request, out result, out error);
+            return KimodoMarkerSamplingUtility.TrySampleMarker(
+                animator,
+                skeletonRoot,
+                sourceClip,
+                modelName,
+                globalTime,
+                frameIndex,
+                markerType,
+                out result,
+                out error);
         }
         
         public void ResetGeneration()

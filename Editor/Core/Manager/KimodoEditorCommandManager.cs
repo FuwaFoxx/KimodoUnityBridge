@@ -114,9 +114,6 @@ namespace KimodoUnityMotionTools.ProjectEditor.Manager
                     case BridgeControlCommand cmd:
                         await HandleBridgeControlAsync(state, cmd);
                         break;
-                    case ConstraintSnapshotRefreshCommand _:
-                        HandleConstraintSnapshotRefresh(command);
-                        break;
                     default:
                         throw new NotSupportedException($"Unsupported command type: {command.GetType().Name}");
                 }
@@ -319,12 +316,6 @@ namespace KimodoUnityMotionTools.ProjectEditor.Manager
                 Status = snapshot.Ready ? "Ready" : "Pending",
                 Error = string.Empty
             });
-        }
-
-        private static void HandleConstraintSnapshotRefresh(IKimodoEditorCommand command)
-        {
-            KimodoConstraintSnapshotVisualizer.RequestManualRefresh();
-            EmitCompleted(command, KimodoEditorNoopResult.Instance);
         }
 
         private static void CancelAllRunning()

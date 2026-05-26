@@ -31,8 +31,7 @@ namespace KimodoUnityMotionTools.ProjectEditor
                 return;
             }
 
-            KimodoEditorCommandManager.Dispatch(
-                new ConstraintSnapshotRefreshCommand());
+            KimodoConstraintMarkerEventHub.RaiseMarkerChanged(null, MarkerChangeReason.SelectionContextChanged);
             OpenWindowForTransition(transition);
         }
 
@@ -52,8 +51,7 @@ namespace KimodoUnityMotionTools.ProjectEditor
                 return;
             }
 
-            KimodoEditorCommandManager.Dispatch(
-                new ConstraintSnapshotRefreshCommand());
+            KimodoConstraintMarkerEventHub.RaiseMarkerChanged(null, MarkerChangeReason.SelectionContextChanged);
             OpenWindowForTransition(transition);
         }
 
