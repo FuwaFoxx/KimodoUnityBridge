@@ -25,6 +25,7 @@ namespace KimodoUnityMotionTools.ProjectEditor
         private SerializedProperty randomProp;
         private SerializedProperty seed;
         private SerializedProperty enableInbetweenInterpolation;
+        private SerializedProperty showConstraint;
         private SerializedProperty workflowJsonAsset;
 
         private SerializedProperty animationClipProp;
@@ -68,6 +69,7 @@ namespace KimodoUnityMotionTools.ProjectEditor
             randomProp = serializedObject.FindProperty("randomSeed");
             seed = serializedObject.FindProperty("seed");
             enableInbetweenInterpolation = serializedObject.FindProperty("enableInbetweenInterpolation");
+            showConstraint = serializedObject.FindProperty("showConstraint");
             workflowJsonAsset = serializedObject.FindProperty("workflowJsonAsset");
 
             animationClipProp = serializedObject.FindProperty("m_Clip");
@@ -99,6 +101,7 @@ namespace KimodoUnityMotionTools.ProjectEditor
         private void OnDisable()
         {
             UnsubscribeManagerEvents();
+            TryHideConstraintPreview();
             EditorUtility.ClearProgressBar();
         }
 
@@ -184,6 +187,13 @@ namespace KimodoUnityMotionTools.ProjectEditor
                     enableInbetweenInterpolation,
                     new GUIContent("In-between Interpolation", "Use neighboring clip boundary poses as constraints to generate in-between motion."));
             }
+            if (showConstraint != null)
+            {
+                EditorGUILayout.PropertyField(
+                    showConstraint,
+                    new GUIContent("Show Constraint", "Show constraint previews for this clip when selected."));
+            }
+            DrawConstraintPreviewIfNeeded();
 
             float seconds = generationFrames.intValue / TargetFps;
             EditorGUILayout.LabelField($"Duration: {seconds:F2}s", EditorStyles.miniLabel);
@@ -636,6 +646,125 @@ namespace KimodoUnityMotionTools.ProjectEditor
             float newDuration = frames / TargetFps;
             UndoExtensions.RegisterClip(timelineClip, L10n.Tr("Modify Clip Duration"));
             timelineClip.duration = newDuration;
+        }
+
+        private void DrawConstraintPreviewIfNeeded()
+        {
+            if (clip == null)
+            {
+                return;
+            }
+
+            if (!KimodoConstraintMarkerEditorUtility.TryBuildRenderContextForPlayableClip(clip, out PoseCacheRenderContext context, out TimelineClip timelineClip, out _))
+            {
+                return;
+            }
+
+            if (showConstraint == null || !showConstraint.boolValue)
+            {
+                KimodoConstraintPoseCache.SetGroupState(context, visible: false, selectable: false);
+                return;
+            }
+
+            TrackAsset track = timelineClip != null ? timelineClip.GetParentTrack() : null;
+            if (track == null)
+            {
+                KimodoConstraintPoseCache.SetGroupState(context, visible: false, selectable: false);
+                return;
+            }
+
+            var markers = new List<KimodoConstraintMarkerBase>();
+            foreach (IMarker m in track.GetMarkers())
+            {
+                if (m is not KimodoConstraintMarkerBase marker)
+                {
+                    continue;
+                }
+
+                if (marker.time < timelineClip.start || marker.time > timelineClip.end)
+                {
+                    continue;
+                }
+
+                markers.Add(marker);
+            }
+
+            var renderItems = new List<PoseCacheRenderItem>(markers.Count + 2);
+            for (int i = 0; i < markers.Count; i++)
+            {
+                KimodoConstraintMarkerBase marker = markers[i];
+                if (marker == null)
+                {
+                    continue;
+                }
+
+                if (!KimodoConstraintMarkerPoseMapper.TryNormalizeSample(marker, marker.SampleData, out KimodoMarkerSampleResult sample, out _))
+                {
+                    continue;
+                }
+
+                renderItems.Add(new PoseCacheRenderItem
+                {
+                    EntryId = marker.GetInstanceID().ToString(),
+                    SampleData = sample,
+                    ConstraintType = marker.ConstraintType,
+                    HighlightJoints = KimodoConstraintMarkerEditorUtility.BuildHighlightJointsForRendering(marker, context.ModelName),
+                    Visible = true
+                });
+            }
+
+            if (clip.enableInbetweenInterpolation &&
+                KimodoInbetweenConstraintUtility.TryBuildNeighborBoundarySamplesForPreview(
+                    timelineClip,
+                    Mathf.Max(1, clip.generationFrames),
+                    out KimodoMarkerSampleResult leftNeighborEndPose,
+                    out KimodoMarkerSampleResult rightNeighborStartPose,
+                    out _))
+            {
+                if (leftNeighborEndPose != null)
+                {
+                    renderItems.Add(new PoseCacheRenderItem
+                    {
+                        EntryId = "inbetween_left_neighbor_end",
+                        SampleData = leftNeighborEndPose,
+                        ConstraintType = "fullbody",
+                        HighlightJoints = null,
+                        Visible = true
+                    });
+                }
+
+                if (rightNeighborStartPose != null)
+                {
+                    renderItems.Add(new PoseCacheRenderItem
+                    {
+                        EntryId = "inbetween_right_neighbor_start",
+                        SampleData = rightNeighborStartPose,
+                        ConstraintType = "fullbody",
+                        HighlightJoints = null,
+                        Visible = true
+                    });
+                }
+            }
+
+            if (!KimodoConstraintPoseCache.RenderBatch(context, renderItems, out _))
+            {
+                KimodoConstraintPoseCache.SetGroupState(context, visible: false, selectable: false);
+            }
+        }
+
+        private void TryHideConstraintPreview()
+        {
+            if (clip == null)
+            {
+                return;
+            }
+
+            if (!KimodoConstraintMarkerEditorUtility.TryBuildRenderContextForPlayableClip(clip, out PoseCacheRenderContext context, out _, out _))
+            {
+                return;
+            }
+
+            KimodoConstraintPoseCache.SetGroupState(context, visible: false, selectable: false);
         }
 
     }

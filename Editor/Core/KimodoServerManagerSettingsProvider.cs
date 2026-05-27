@@ -34,6 +34,7 @@ namespace KimodoUnityMotionTools.ProjectEditor
         private List<InstalledModelInfoView> models = new List<InstalledModelInfoView>();
         private bool runtimeExists;
         private bool usingCustomModelsPath;
+        private string setupProfile = "unknown";
 
         private ServerState serverState = ServerState.Disabled;
         private double detectHintUntilTime;
@@ -238,6 +239,8 @@ namespace KimodoUnityMotionTools.ProjectEditor
             {
                 EditorGUILayout.HelpBox($"Model missing detected, update required, approximately {minutes} minutes.", MessageType.None);
             }
+
+            EditorGUILayout.LabelField("Setup Profile", setupProfile, EditorStyles.miniLabel);
 
             EditorGUILayout.EndVertical();
         }
@@ -469,6 +472,11 @@ namespace KimodoUnityMotionTools.ProjectEditor
         {
             runtimeRoot = KimodoBridgeController.GetRuntimeRootPath();
             runtimeExists = Directory.Exists(runtimeRoot);
+            setupProfile = "unknown";
+            if (runtimeExists && KimodoServerRuntimeUtil.TryReadSetupProfile(runtimeRoot, out string profile))
+            {
+                setupProfile = string.IsNullOrWhiteSpace(profile) ? "unknown" : profile;
+            }
             RefreshModelList();
 
             serverHost = "127.0.0.1";

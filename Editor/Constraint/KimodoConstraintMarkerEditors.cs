@@ -1,9 +1,11 @@
 using System;
+using System.Collections.Generic;
 using UnityEditor;
 using UnityEditor.Timeline;
 using UnityEngine;
 using UnityEngine.Playables;
 using UnityEngine.Timeline;
+using KimodoUnityMotionTools.ProjectEditor.GenerationPipeline;
 
 namespace KimodoUnityMotionTools.ProjectEditor
 {
@@ -48,17 +50,17 @@ namespace KimodoUnityMotionTools.ProjectEditor
                 }
             }
 
-            if (!windowOpen && markerTarget != null && !KimodoConstraintPoseCache.TryShowOrUpdateFromMarkerData(markerTarget, out string poseError) && !string.IsNullOrWhiteSpace(poseError))
-            {
-                EditorGUILayout.HelpBox($"Pose cache update failed: {poseError}", MessageType.Warning);
-            }
-
             DrawFields(!useOverride);
 
             bool changed = serializedObject.ApplyModifiedProperties();
             if (changed)
             {
                 KimodoConstraintMarkerEditorUtility.NotifyInspectorChanged(target as KimodoConstraintMarkerBase);
+            }
+
+            if (!windowOpen && markerTarget != null && !KimodoConstraintMarkerEditorUtility.TryRenderMarkerToPoseCache(markerTarget, out string poseError) && !string.IsNullOrWhiteSpace(poseError))
+            {
+                EditorGUILayout.HelpBox($"Pose cache update failed: {poseError}", MessageType.Warning);
             }
         }
 
@@ -178,11 +180,6 @@ namespace KimodoUnityMotionTools.ProjectEditor
                 }
             }
 
-            if (!windowOpen && markerTarget != null && !KimodoConstraintPoseCache.TryShowOrUpdateFromMarkerData(markerTarget, out string poseError) && !string.IsNullOrWhiteSpace(poseError))
-            {
-                EditorGUILayout.HelpBox($"Pose cache update failed: {poseError}", MessageType.Warning);
-            }
-
             if (isCustomEndEffector)
             {
                 EditorGUILayout.HelpBox("end-effector has no override mode; sampling from timeline pose.", MessageType.Info);
@@ -199,6 +196,11 @@ namespace KimodoUnityMotionTools.ProjectEditor
             if (changed)
             {
                 KimodoConstraintMarkerEditorUtility.NotifyInspectorChanged(target as KimodoConstraintMarkerBase);
+            }
+
+            if (!windowOpen && markerTarget != null && !KimodoConstraintMarkerEditorUtility.TryRenderMarkerToPoseCache(markerTarget, out string poseError) && !string.IsNullOrWhiteSpace(poseError))
+            {
+                EditorGUILayout.HelpBox($"Pose cache update failed: {poseError}", MessageType.Warning);
             }
         }
 
@@ -276,6 +278,33 @@ namespace KimodoUnityMotionTools.ProjectEditor
                 return false;
             }
 
+            // Prefer sampleData.sampleTime as stable ownership hint so marker can be pulled back
+            // even after user drags it across neighboring clips.
+            if (marker is KimodoConstraintMarkerBase kimodoMarker)
+            {
+                double hintedTime = kimodoMarker.SampleData != null ? kimodoMarker.SampleData.sampleTime : marker.time;
+                if (TryFindClipRangeByTime(marker, hintedTime, out clipRange))
+                {
+                    return true;
+                }
+            }
+
+            if (TryFindClipRangeByTime(marker, marker.time, out clipRange))
+            {
+                return true;
+            }
+
+            return false;
+        }
+
+        private static bool TryFindClipRangeByTime(IMarker marker, double time, out TimelineClip clipRange)
+        {
+            clipRange = null;
+            if (marker == null || marker.parent == null || TimelineEditor.inspectedAsset == null)
+            {
+                return false;
+            }
+
             foreach (TrackAsset track in TimelineEditor.inspectedAsset.GetOutputTracks())
             {
                 if (track != marker.parent)
@@ -285,7 +314,7 @@ namespace KimodoUnityMotionTools.ProjectEditor
 
                 foreach (TimelineClip clip in track.GetClips())
                 {
-                    if (clip.asset is AnimationPlayableAsset && marker.time >= clip.start && marker.time <= clip.end)
+                    if (clip.asset is AnimationPlayableAsset && time >= clip.start && time <= clip.end)
                     {
                         clipRange = clip;
                         return true;
@@ -390,9 +419,35 @@ namespace KimodoUnityMotionTools.ProjectEditor
                 return;
             }
 
-            Undo.RecordObject(marker as UnityEngine.Object, "Move Kimodo Constraint Marker");
+            UnityEngine.Object markerObject = marker as UnityEngine.Object;
+            UnityEngine.Object parentTrackObject = marker.parent as UnityEngine.Object;
+
+            if (markerObject != null)
+            {
+                Undo.RecordObject(markerObject, "Move Kimodo Constraint Marker");
+            }
+            if (parentTrackObject != null)
+            {
+                Undo.RecordObject(parentTrackObject, "Move Kimodo Constraint Marker");
+            }
+
             marker.time = globalTime;
-            EditorUtility.SetDirty(marker as UnityEngine.Object);
+            if (markerObject != null)
+            {
+                EditorUtility.SetDirty(markerObject);
+            }
+            if (parentTrackObject != null)
+            {
+                EditorUtility.SetDirty(parentTrackObject);
+            }
+
+            if (TimelineEditor.inspectedAsset != null)
+            {
+                EditorUtility.SetDirty(TimelineEditor.inspectedAsset);
+            }
+
+            TimelineEditor.Refresh(RefreshReason.ContentsModified);
+            SceneView.RepaintAll();
         }
 
         public static void DrawSampleTimeField(SerializedObject so, IMarker marker)
@@ -418,8 +473,15 @@ namespace KimodoUnityMotionTools.ProjectEditor
             double localSeconds = GetLocalSecondsInClip(clipRange, marker.time);
             double clipStart = clipRange.start;
             double clipEnd = clipRange.end;
-            double clampedCurrent = Math.Max(clipStart, Math.Min(clipEnd, marker.time));
-            timeProp.doubleValue = clampedCurrent;
+            double sourceTime = timeProp.doubleValue;
+            double clampedCurrent = Math.Max(clipStart, Math.Min(clipEnd, sourceTime));
+
+            // Keep sampleData.sampleTime aligned with marker.time, but do not overwrite user input every repaint.
+            if (Math.Abs(timeProp.doubleValue - clampedCurrent) > 1e-9)
+            {
+                timeProp.doubleValue = clampedCurrent;
+            }
+
             double displayCurrent = Math.Round(clampedCurrent, 4, MidpointRounding.AwayFromZero);
 
             double editedTime = EditorGUILayout.DoubleField(
@@ -429,8 +491,15 @@ namespace KimodoUnityMotionTools.ProjectEditor
             if (Math.Abs(editedTime - clampedCurrent) > 1e-9)
             {
                 double clamped = Math.Max(clipStart, Math.Min(clipEnd, editedTime));
-                timeProp.doubleValue = clamped;
                 MoveMarkerToTime(marker, clamped);
+
+                // Refresh SerializedObject cache after direct marker.time mutation to avoid stale writeback.
+                so.UpdateIfRequiredOrScript();
+                SerializedProperty refreshedTimeProp = so.FindProperty("sampleData.sampleTime");
+                if (refreshedTimeProp != null)
+                {
+                    refreshedTimeProp.doubleValue = clamped;
+                }
             }
         }
 
@@ -442,6 +511,249 @@ namespace KimodoUnityMotionTools.ProjectEditor
             }
 
             SceneView.RepaintAll();
+        }
+
+        public static bool TryBuildRenderContextForMarker(KimodoConstraintMarkerBase marker, out PoseCacheRenderContext context, out string error)
+        {
+            context = default;
+            error = string.Empty;
+            if (marker == null)
+            {
+                error = "marker is null";
+                return false;
+            }
+
+            if (!TryGetClipRangeForMarker(marker, out TimelineClip clipRange) || clipRange == null)
+            {
+                error = "clip range not found";
+                return false;
+            }
+
+            TrackAsset track = clipRange.GetParentTrack();
+            if (track == null)
+            {
+                error = "parent track not found";
+                return false;
+            }
+
+            PlayableDirector director = TimelineEditor.inspectedDirector;
+            if (director == null)
+            {
+                error = "Timeline inspected director is null";
+                return false;
+            }
+
+            Animator animator = director.GetGenericBinding(track) as Animator;
+            if (animator == null)
+            {
+                error = "animation track has no animator binding";
+                return false;
+            }
+
+            if (clipRange.asset is not KimodoPlayableClip playableClip)
+            {
+                error = "playable clip is null";
+                return false;
+            }
+
+            string modelName = string.IsNullOrWhiteSpace(playableClip.bridgeModelName)
+                ? "Kimodo-SOMA-RP-v1"
+                : playableClip.bridgeModelName.Trim();
+            KimodoConstraintRigType rigType = ResolveRigTypeFromModelName(modelName);
+            context = new PoseCacheRenderContext(playableClip.GetInstanceID(), animator.GetInstanceID(), modelName, rigType);
+            return true;
+        }
+
+        public static bool TryBuildRenderContextForPlayableClip(
+            KimodoPlayableClip playableClip,
+            out PoseCacheRenderContext context,
+            out TimelineClip timelineClip,
+            out string error)
+        {
+            context = default;
+            timelineClip = null;
+            error = string.Empty;
+            if (playableClip == null)
+            {
+                error = "playable clip is null";
+                return false;
+            }
+
+            timelineClip = KimodoTimelineClipResolver.FindTimelineClipForAsset(playableClip);
+            if (timelineClip == null)
+            {
+                error = "timeline clip not found for playable clip";
+                return false;
+            }
+
+            TrackAsset track = timelineClip.GetParentTrack();
+            if (track == null)
+            {
+                error = "parent track not found";
+                return false;
+            }
+
+            PlayableDirector director = TimelineEditor.inspectedDirector;
+            if (director == null)
+            {
+                error = "Timeline inspected director is null";
+                return false;
+            }
+
+            Animator animator = director.GetGenericBinding(track) as Animator;
+            if (animator == null)
+            {
+                error = "animation track has no animator binding";
+                return false;
+            }
+
+            string modelName = string.IsNullOrWhiteSpace(playableClip.bridgeModelName)
+                ? "Kimodo-SOMA-RP-v1"
+                : playableClip.bridgeModelName.Trim();
+            KimodoConstraintRigType rigType = ResolveRigTypeFromModelName(modelName);
+            context = new PoseCacheRenderContext(playableClip.GetInstanceID(), animator.GetInstanceID(), modelName, rigType);
+            return true;
+        }
+
+        public static bool TryRenderMarkerToPoseCache(KimodoConstraintMarkerBase marker, out string error)
+        {
+            error = string.Empty;
+            if (marker == null)
+            {
+                error = "marker is null";
+                return false;
+            }
+
+            if (!TryBuildRenderContextForMarker(marker, out PoseCacheRenderContext context, out error))
+            {
+                return false;
+            }
+
+            if (!KimodoConstraintMarkerPoseMapper.TryNormalizeSample(marker, marker.SampleData, out KimodoMarkerSampleResult sample, out error))
+            {
+                return false;
+            }
+
+            var item = new PoseCacheRenderItem
+            {
+                EntryId = marker.GetInstanceID().ToString(),
+                SampleData = sample,
+                ConstraintType = marker.ConstraintType,
+                HighlightJoints = BuildHighlightJointsForRendering(marker, context.ModelName),
+                Visible = true
+            };
+            var batch = new List<PoseCacheRenderItem>(1) { item };
+            return KimodoConstraintPoseCache.RenderBatch(context, batch, out error);
+        }
+
+        public static bool TryRenderMarkersBatchToPoseCache(
+            PoseCacheRenderContext context,
+            IReadOnlyList<KimodoConstraintMarkerBase> markers,
+            out string error)
+        {
+            error = string.Empty;
+            if (markers == null || markers.Count == 0)
+            {
+                KimodoConstraintPoseCache.SetGroupState(context, visible: false, selectable: false);
+                return true;
+            }
+
+            var items = new List<PoseCacheRenderItem>(markers.Count);
+            for (int i = 0; i < markers.Count; i++)
+            {
+                KimodoConstraintMarkerBase marker = markers[i];
+                if (marker == null)
+                {
+                    continue;
+                }
+
+                if (!KimodoConstraintMarkerPoseMapper.TryNormalizeSample(marker, marker.SampleData, out KimodoMarkerSampleResult sample, out string normalizeError))
+                {
+                    error = normalizeError;
+                    return false;
+                }
+
+                items.Add(new PoseCacheRenderItem
+                {
+                    EntryId = marker.GetInstanceID().ToString(),
+                    SampleData = sample,
+                    ConstraintType = marker.ConstraintType,
+                    HighlightJoints = BuildHighlightJointsForRendering(marker, context.ModelName),
+                    Visible = true
+                });
+            }
+
+            return KimodoConstraintPoseCache.RenderBatch(context, items, out error);
+        }
+
+        internal static List<string> BuildHighlightJointsForRendering(KimodoConstraintMarkerBase marker, string modelName)
+        {
+            var output = new List<string>();
+            if (marker == null)
+            {
+                return output;
+            }
+
+            string root = KimodoMarkerSamplingUtility.GetRootJointNameForModel(modelName);
+            if (!string.IsNullOrWhiteSpace(root))
+            {
+                output.Add(root);
+            }
+
+            if (marker is KimodoRoot2DConstraintMarker)
+            {
+                return output;
+            }
+
+            if (marker is KimodoFullBodyConstraintMarker)
+            {
+                string[] modelJointNames = KimodoMarkerSamplingUtility.GetJointNamesForModel(modelName);
+                if (modelJointNames != null)
+                {
+                    for (int i = 0; i < modelJointNames.Length; i++)
+                    {
+                        if (!string.IsNullOrWhiteSpace(modelJointNames[i]))
+                        {
+                            output.Add(modelJointNames[i]);
+                        }
+                    }
+                }
+
+                return output;
+            }
+
+            List<string> names = marker.SampleData != null ? marker.SampleData.jointNames : null;
+            if (names == null)
+            {
+                return output;
+            }
+
+            for (int i = 0; i < names.Count; i++)
+            {
+                string n = names[i];
+                if (!string.IsNullOrWhiteSpace(n))
+                {
+                    output.Add(n.Trim());
+                }
+            }
+
+            return output;
+        }
+
+        private static KimodoConstraintRigType ResolveRigTypeFromModelName(string modelName)
+        {
+            string m = (modelName ?? string.Empty).Trim().ToLowerInvariant();
+            if (m.Contains("smplx"))
+            {
+                return KimodoConstraintRigType.Smplx;
+            }
+
+            if (m.Contains("g1"))
+            {
+                return KimodoConstraintRigType.G1;
+            }
+
+            return KimodoConstraintRigType.Soma30;
         }
 
         public static void DrawOverrideEditButton(SerializedObject so, KimodoConstraintMarkerBase marker)

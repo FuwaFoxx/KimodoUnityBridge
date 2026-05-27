@@ -37,6 +37,52 @@ namespace KimodoUnityMotionTools.ProjectEditor.GenerationPipeline
             RefreshTimelinePreviewGraph(clip);
         }
 
+        public string CreateGeneratedClipFromMotionJson(string motionJson, string modelName, string outputFolderAssetPath, string clipNamePrefix)
+        {
+            if (string.IsNullOrWhiteSpace(motionJson))
+            {
+                throw new InvalidOperationException("motionJson is empty.");
+            }
+
+            string outputFolder = string.IsNullOrWhiteSpace(outputFolderAssetPath)
+                ? GeneratedClipFolder
+                : outputFolderAssetPath.Trim();
+            if (!outputFolder.StartsWith("Assets", StringComparison.Ordinal))
+            {
+                throw new InvalidOperationException("Output folder must be under Assets/.");
+            }
+
+            EnsureAssetFolder(outputFolder);
+
+            string safePrefix = string.IsNullOrWhiteSpace(clipNamePrefix)
+                ? GeneratedClipNamePrefix
+                : clipNamePrefix.Trim();
+            string stamp = DateTime.Now.ToString("yyyyMMdd_HHmmss_fff");
+            string clipName = $"{safePrefix}{stamp}";
+            var clip = new AnimationClip { name = clipName };
+            string clipPath = AssetDatabase.GenerateUniqueAssetPath($"{outputFolder}/{clipName}.anim");
+
+            AssetDatabase.CreateAsset(clip, clipPath);
+            bool baked = KimodoAnimationBaker.BakeIntoClip(
+                clip,
+                motionJson,
+                KimodoBakeSkeletonType.SOMA,
+                modelName,
+                null,
+                out string bakeError);
+
+            if (!baked)
+            {
+                AssetDatabase.DeleteAsset(clipPath);
+                throw new InvalidOperationException($"Failed to bake generated clip: {bakeError}");
+            }
+
+            EditorUtility.SetDirty(clip);
+            AssetDatabase.SaveAssets();
+            AssetDatabase.Refresh();
+            return clipPath;
+        }
+
         public void ApplyMotionJsonToClip(KimodoPlayableClip clip, string prompt, string motionJson)
         {
             JObject obj = JObject.Parse(motionJson);
@@ -343,6 +389,32 @@ namespace KimodoUnityMotionTools.ProjectEditor.GenerationPipeline
             }
 
             return false;
+        }
+
+        private static void EnsureAssetFolder(string assetFolderPath)
+        {
+            if (AssetDatabase.IsValidFolder(assetFolderPath))
+            {
+                return;
+            }
+
+            string[] parts = assetFolderPath.Split('/');
+            if (parts.Length == 0 || !string.Equals(parts[0], "Assets", StringComparison.Ordinal))
+            {
+                throw new InvalidOperationException("Invalid asset folder path.");
+            }
+
+            string current = "Assets";
+            for (int i = 1; i < parts.Length; i++)
+            {
+                string next = current + "/" + parts[i];
+                if (!AssetDatabase.IsValidFolder(next))
+                {
+                    AssetDatabase.CreateFolder(current, parts[i]);
+                }
+
+                current = next;
+            }
         }
     }
 }

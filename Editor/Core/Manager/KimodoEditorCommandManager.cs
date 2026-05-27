@@ -189,12 +189,10 @@ namespace KimodoUnityMotionTools.ProjectEditor.Manager
                 VramMode = command.VramMode,
                 OutputFolderAssetPath = string.IsNullOrWhiteSpace(command.OutputFolderAssetPath)
                     ? KimodoAnimatorTransitionSplitInsertTool.DefaultOutputFolder
-                    : command.OutputFolderAssetPath,
-                StartPose = command.StartPose,
-                EndPose = command.EndPose
+                    : command.OutputFolderAssetPath
             };
 
-            SplitInsertResult result = await KimodoAnimatorTransitionSplitInsertTool.ExecuteSplitInsertAsync(
+            SplitInsertResult result = await KimodoAnimatorTransitionSplitInsertTool.GeneratePreviewAsync(
                 command.Transition,
                 options,
                 msg => EmitProgress(command, msg ?? string.Empty),

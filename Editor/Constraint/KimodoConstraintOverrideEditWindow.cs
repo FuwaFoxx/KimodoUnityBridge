@@ -8,6 +8,7 @@ namespace KimodoUnityMotionTools.ProjectEditor
     {
         private static KimodoConstraintOverrideEditWindow currentWindow;
         private static KimodoConstraintMarkerBase lastKnownMarker;
+        private static UnityEngine.Object selectionBeforeOpen;
         private KimodoConstraintMarkerBase marker;
         private Vector2 scroll;
         private string lastError;
@@ -16,6 +17,11 @@ namespace KimodoUnityMotionTools.ProjectEditor
 
         internal static void ShowWindow(KimodoConstraintMarkerBase marker)
         {
+            if (selectionBeforeOpen == null)
+            {
+                selectionBeforeOpen = Selection.activeObject;
+            }
+
             var window = GetWindow<KimodoConstraintOverrideEditWindow>(true, "Kimodo Constraint Override Edit");
             window.minSize = new Vector2(420f, 260f);
             window.marker = marker;
@@ -26,6 +32,10 @@ namespace KimodoUnityMotionTools.ProjectEditor
             window.lastError = string.Empty;
             window.Show();
             window.Focus();
+            if (marker != null && KimodoConstraintMarkerEditorUtility.TryBuildRenderContextForMarker(marker, out PoseCacheRenderContext context, out _))
+            {
+                KimodoConstraintPoseCache.SetGroupState(context, visible: true, selectable: true);
+            }
         }
 
         internal static KimodoConstraintOverrideEditWindow GetOpenWindow()
@@ -78,6 +88,10 @@ namespace KimodoUnityMotionTools.ProjectEditor
             if (marker != null)
             {
                 lastKnownMarker = marker;
+                if (KimodoConstraintMarkerEditorUtility.TryBuildRenderContextForMarker(marker, out PoseCacheRenderContext context, out _))
+                {
+                    KimodoConstraintPoseCache.SetGroupState(context, visible: true, selectable: true);
+                }
             }
             EditorApplication.update += OnEditorUpdate;
         }
@@ -85,18 +99,12 @@ namespace KimodoUnityMotionTools.ProjectEditor
         private void OnDisable()
         {
             KimodoConstraintMarkerBase restoreMarker = marker != null ? marker : lastKnownMarker;
+            UnityEngine.Object restoreSelection = selectionBeforeOpen != null ? selectionBeforeOpen : restoreMarker as UnityEngine.Object;
 
             if (marker != null && marker.useOverride)
             {
-                if (!KimodoConstraintPoseCache.TryCaptureToMarkerData(marker, out string captureError) && !string.IsNullOrWhiteSpace(captureError))
-                {
-                    Debug.LogWarning($"[Kimodo][ConstraintOverride] capture on close failed: {captureError}");
-                }
-                else
-                {
-                    EditorUtility.SetDirty(marker);
-                    AssetDatabase.SaveAssets();
-                }
+                EditorUtility.SetDirty(marker);
+                AssetDatabase.SaveAssets();
             }
 
             if (currentWindow == this)
@@ -104,26 +112,31 @@ namespace KimodoUnityMotionTools.ProjectEditor
                 currentWindow = null;
             }
             EditorApplication.update -= OnEditorUpdate;
-            KimodoConstraintPoseCache.Hide();
+            if (restoreMarker != null && KimodoConstraintMarkerEditorUtility.TryBuildRenderContextForMarker(restoreMarker, out PoseCacheRenderContext restoreContext, out _))
+            {
+                KimodoConstraintPoseCache.SetGroupState(restoreContext, visible: false, selectable: false);
+            }
             SceneView.RepaintAll();
 
-            if (restoreMarker != null)
+            if (restoreSelection != null)
             {
                 EditorApplication.delayCall += () =>
                 {
-                    if (restoreMarker != null)
+                    if (restoreSelection != null)
                     {
-                        Selection.activeObject = restoreMarker;
+                        Selection.activeObject = restoreSelection;
                         EditorApplication.delayCall += () =>
                         {
-                            if (restoreMarker != null)
+                            if (restoreSelection != null)
                             {
-                                Selection.activeObject = restoreMarker;
+                                Selection.activeObject = restoreSelection;
                             }
                         };
                     }
                 };
             }
+
+            selectionBeforeOpen = null;
         }
 
         private void OnEditorUpdate()
@@ -196,7 +209,7 @@ namespace KimodoUnityMotionTools.ProjectEditor
             if (so.ApplyModifiedProperties())
             {
                 EditorUtility.SetDirty(marker);
-                if (KimodoConstraintPoseCache.TryShowOrUpdateFromMarkerData(marker, out string poseError))
+                if (KimodoConstraintMarkerEditorUtility.TryRenderMarkerToPoseCache(marker, out string poseError))
                 {
                     lastError = string.Empty;
                 }

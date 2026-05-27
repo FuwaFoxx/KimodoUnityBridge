@@ -75,6 +75,8 @@ namespace KimodoUnityMotionTools
         private Avatar customRetargetAvatar;
         [Tooltip("Enable inbetween interpolation by constraining start/end with neighboring clips on timeline.")]
         public bool enableInbetweenInterpolation = false;
+        [Tooltip("Show all constraint pose previews for this clip when selected in Timeline/Inspector.")]
+        public bool showConstraint = true;
         [Tooltip("If empty, use Resources/kimodo-unity-workflow.json")]
         public TextAsset workflowJsonAsset;
 

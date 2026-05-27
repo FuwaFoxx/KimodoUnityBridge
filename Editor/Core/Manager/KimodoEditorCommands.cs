@@ -58,9 +58,7 @@ namespace KimodoUnityMotionTools.ProjectEditor.Manager
             int seed,
             string modelName,
             KimodoBridgeVramMode vramMode,
-            string outputFolderAssetPath,
-            KimodoMarkerSampleResult startPose,
-            KimodoMarkerSampleResult endPose)
+            string outputFolderAssetPath)
             : base(transition == null ? "animator:null" : "animator:" + transition.GetInstanceID(), KimodoEditorCommandKind.AnimatorSplitInsert)
         {
             Transition = transition;
@@ -71,8 +69,6 @@ namespace KimodoUnityMotionTools.ProjectEditor.Manager
             ModelName = modelName ?? string.Empty;
             VramMode = vramMode;
             OutputFolderAssetPath = outputFolderAssetPath ?? string.Empty;
-            StartPose = startPose;
-            EndPose = endPose;
         }
 
         public AnimatorStateTransition Transition { get; }
@@ -90,10 +86,6 @@ namespace KimodoUnityMotionTools.ProjectEditor.Manager
         public KimodoBridgeVramMode VramMode { get; }
 
         public string OutputFolderAssetPath { get; }
-
-        public KimodoMarkerSampleResult StartPose { get; }
-
-        public KimodoMarkerSampleResult EndPose { get; }
     }
 
     public enum KimodoBridgeOperation

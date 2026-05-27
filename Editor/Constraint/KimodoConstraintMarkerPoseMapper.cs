@@ -93,5 +93,22 @@ namespace KimodoUnityMotionTools.ProjectEditor
             cloned.jointNames ??= new List<string>();
             return cloned;
         }
+
+        internal static bool TryNormalizeSample(
+            KimodoConstraintMarkerBase marker,
+            KimodoMarkerSampleResult sample,
+            out KimodoMarkerSampleResult normalized,
+            out string error)
+        {
+            error = string.Empty;
+            normalized = NormalizeSample(marker, sample);
+            if (normalized != null)
+            {
+                return true;
+            }
+
+            error = "failed to normalize sample";
+            return false;
+        }
     }
 }

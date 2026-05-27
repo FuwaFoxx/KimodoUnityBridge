@@ -183,6 +183,71 @@ namespace KimodoUnityMotionTools.ProjectEditor
             return points;
         }
 
+        internal static bool TryReadSetupProfile(string runtimeRoot, out string profile)
+        {
+            profile = string.Empty;
+            if (string.IsNullOrWhiteSpace(runtimeRoot))
+            {
+                return false;
+            }
+
+            string sentinel = Path.Combine(runtimeRoot, ".setup.complete");
+            if (!File.Exists(sentinel))
+            {
+                return false;
+            }
+
+            try
+            {
+                string setupDevice = string.Empty;
+                foreach (string raw in File.ReadAllLines(sentinel))
+                {
+                    string line = raw?.Trim() ?? string.Empty;
+                    if (line.Length == 0)
+                    {
+                        continue;
+                    }
+
+                    int idx = line.IndexOf('=');
+                    if (idx <= 0 || idx >= line.Length - 1)
+                    {
+                        continue;
+                    }
+
+                    string key = line.Substring(0, idx).Trim();
+                    string value = line.Substring(idx + 1).Trim();
+                    if (key.Equals("setup_profile", StringComparison.OrdinalIgnoreCase))
+                    {
+                        profile = value;
+                        return !string.IsNullOrWhiteSpace(profile);
+                    }
+
+                    if (key.Equals("setup_device", StringComparison.OrdinalIgnoreCase))
+                    {
+                        setupDevice = value;
+                    }
+                }
+
+                if (string.Equals(setupDevice, "cpu", StringComparison.OrdinalIgnoreCase))
+                {
+                    profile = "cpu";
+                    return true;
+                }
+
+                if (!string.IsNullOrWhiteSpace(setupDevice))
+                {
+                    profile = "gpu";
+                    return true;
+                }
+            }
+            catch
+            {
+                // ignore read failures
+            }
+
+            return false;
+        }
+
         private static bool IsUnityProjectRoot(string path)
         {
             if (string.IsNullOrWhiteSpace(path))

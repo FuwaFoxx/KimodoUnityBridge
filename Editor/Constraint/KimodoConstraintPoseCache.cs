@@ -2,7 +2,6 @@ using System;
 using System.Collections.Generic;
 using UnityEditor;
 using UnityEditor.PackageManager;
-using UnityEditor.Timeline;
 using UnityEngine;
 using UnityEngine.Rendering;
 using UnityEngine.Timeline;
@@ -10,207 +9,164 @@ using PackageInfo = UnityEditor.PackageManager.PackageInfo;
 
 namespace KimodoUnityMotionTools.ProjectEditor
 {
+    internal readonly struct PoseCacheRenderContext
+    {
+        public readonly int ClipId;
+        public readonly int AnimatorId;
+        public readonly string ModelName;
+        public readonly KimodoConstraintRigType RigType;
+
+        public PoseCacheRenderContext(int clipId, int animatorId, string modelName, KimodoConstraintRigType rigType)
+        {
+            ClipId = clipId;
+            AnimatorId = animatorId;
+            ModelName = string.IsNullOrWhiteSpace(modelName) ? "Kimodo-SOMA-RP-v1" : modelName.Trim();
+            RigType = rigType;
+        }
+    }
+
+    internal sealed class PoseCacheRenderItem
+    {
+        public string EntryId;
+        public KimodoMarkerSampleResult SampleData;
+        public string ConstraintType;
+        public List<string> HighlightJoints;
+        public bool Visible = true;
+    }
+
     [InitializeOnLoad]
     internal static class KimodoConstraintPoseCache
     {
-        private sealed class PoseRigEntry
+        private sealed class PoseCacheEntry
         {
+            public string Key;
+            public string ContextKey;
+            public int ClipId;
+            public int AnimatorId;
+            public KimodoConstraintRigType RigType;
             public Transform Root;
             public Dictionary<string, Transform> NameMap;
-            public KimodoConstraintRigType RigType;
             public List<Material> GeneratedMaterials;
+            public bool PickingEnabled;
         }
 
-        private static readonly Dictionary<KimodoConstraintRigType, PoseRigEntry> Rigs = new Dictionary<KimodoConstraintRigType, PoseRigEntry>();
-        private static PoseRigEntry activeRig;
+        private static readonly Dictionary<string, PoseCacheEntry> Entries = new Dictionary<string, PoseCacheEntry>(StringComparer.Ordinal);
+
+        private const float NonConstraintAlpha = 0.7f;
+        private const float HighlightAlpha = 1.0f;
+        private static readonly Color NonConstraintColor = new Color(1f, 1f, 1f, NonConstraintAlpha);
+        private static readonly Color HighlightColor = new Color(1f, 0f, 0f, HighlightAlpha);
 
         static KimodoConstraintPoseCache()
         {
-            Selection.selectionChanged += OnSelectionChanged;
             AssemblyReloadEvents.beforeAssemblyReload += DestroyAll;
             EditorApplication.playModeStateChanged += OnPlayModeStateChanged;
             EditorApplication.quitting += DestroyAll;
         }
 
-        public static bool TryShowOrUpdateFromMarkerData(KimodoConstraintMarkerBase marker, out string error)
+        internal static bool RenderBatch(PoseCacheRenderContext context, IReadOnlyList<PoseCacheRenderItem> items, out string error)
         {
             error = string.Empty;
-            if (marker == null)
+            if (context.ClipId == 0 || context.AnimatorId == 0)
             {
-                error = "marker is null";
+                error = "invalid clip/animator context";
                 return false;
             }
 
-            if (!TryResolveModelName(marker, out string modelName, out error))
+            if (items == null || items.Count == 0)
             {
-                return false;
+                SetGroupState(context, visible: false, selectable: false);
+                return true;
             }
 
-            KimodoMarkerSampleResult sample = KimodoConstraintMarkerPoseMapper.NormalizeSample(marker, marker.SampleData);
-            if (sample == null)
+            string contextKey = BuildContextKey(context.ClipId, context.AnimatorId);
+            bool hasVisible = false;
+            for (int i = 0; i < items.Count; i++)
             {
-                error = "marker sample is null";
-                return false;
+                PoseCacheRenderItem item = items[i];
+                if (item != null && item.Visible && item.SampleData != null)
+                {
+                    hasVisible = true;
+                    break;
+                }
             }
 
-            if (!TryGetOrCreateRig(modelName, sample.rigType, out PoseRigEntry rig, out error))
+            if (!hasVisible)
             {
-                return false;
+                SetGroupState(context, visible: false, selectable: false);
+                return true;
             }
 
-            if (!ApplySampleToRig(sample, modelName, rig, out error))
+            var desiredKeys = new HashSet<string>(StringComparer.Ordinal);
+            for (int i = 0; i < items.Count; i++)
             {
-                return false;
+                PoseCacheRenderItem item = items[i];
+                if (item == null || !item.Visible || item.SampleData == null)
+                {
+                    continue;
+                }
+
+                string entryId = string.IsNullOrWhiteSpace(item.EntryId) ? $"item_{i}" : item.EntryId.Trim();
+                string entryKey = BuildEntryKey(contextKey, entryId);
+                desiredKeys.Add(entryKey);
+
+                if (!TryGetOrCreateEntry(context, entryId, out PoseCacheEntry entry, out error))
+                {
+                    return false;
+                }
+
+                if (!ApplySampleToRig(item.SampleData, context.ModelName, entry, out error))
+                {
+                    return false;
+                }
+
+                var highlightedJoints = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+                CollectHighlightedJointsFromItem(item, context.ModelName, highlightedJoints);
+                ApplyConstraintColoring(entry, highlightedJoints);
+                SetEntryVisible(entry, true);
             }
 
-            ShowOnlyRig(rig);
+            foreach (KeyValuePair<string, PoseCacheEntry> kv in Entries)
+            {
+                if (!kv.Key.StartsWith(contextKey + ":", StringComparison.Ordinal))
+                {
+                    continue;
+                }
+
+                if (!desiredKeys.Contains(kv.Key))
+                {
+                    ApplyEntryState(kv.Value, visible: false, selectable: false);
+                }
+            }
             SceneView.RepaintAll();
             return true;
         }
 
-        public static bool TryCaptureToMarkerData(KimodoConstraintMarkerBase marker, out string error)
+        internal static void SetGroupState(PoseCacheRenderContext context, bool visible, bool selectable)
         {
-            error = string.Empty;
-            if (marker == null)
+            string contextKey = BuildContextKey(context.ClipId, context.AnimatorId);
+            foreach (KeyValuePair<string, PoseCacheEntry> kv in Entries)
             {
-                error = "marker is null";
-                return false;
-            }
-
-            if (!TryResolveModelName(marker, out string modelName, out error))
-            {
-                return false;
-            }
-
-            if (!TryGetOrCreateRig(modelName, marker.SampleData != null ? marker.SampleData.rigType : KimodoConstraintRigType.Soma30, out PoseRigEntry rig, out error))
-            {
-                return false;
-            }
-
-            if (rig == null || rig.Root == null || rig.NameMap == null)
-            {
-                error = "pose rig is invalid";
-                return false;
-            }
-
-            string[] modelJointNames = KimodoMarkerSamplingUtility.GetJointNamesForModel(modelName);
-            if (modelJointNames == null || modelJointNames.Length == 0)
-            {
-                error = $"model joint layout not found for '{modelName}'";
-                return false;
-            }
-
-            KimodoMarkerSampleResult target = marker.SampleData != null ? marker.SampleData.Clone() : new KimodoMarkerSampleResult();
-            target.constraintType = marker.ConstraintType;
-            target.sampleTime = marker.time;
-            target.rigType = ResolveRigTypeFromModelName(modelName);
-
-            string rootJoint = KimodoMarkerSamplingUtility.GetRootJointNameForModel(modelName);
-            if (string.IsNullOrWhiteSpace(rootJoint) || !rig.NameMap.TryGetValue(rootJoint, out Transform rootTransform) || rootTransform == null)
-            {
-                error = $"root joint '{rootJoint}' not found on pose rig";
-                return false;
-            }
-
-            target.rootPosition = rootTransform.position;
-            Vector3 forward = rootTransform.forward;
-            Vector2 heading = new Vector2(forward.x, forward.z);
-            if (heading.sqrMagnitude <= 1e-8f)
-            {
-                heading = Vector2.right;
-            }
-            else
-            {
-                heading.Normalize();
-            }
-            target.rootHeading = heading;
-
-            if (marker is KimodoRoot2DConstraintMarker)
-            {
-                target.localAxisAngles = new List<Vector3>();
-                target.sampledJointIndices = new List<int>();
-            }
-            else
-            {
-                var localAxisAngles = new List<Vector3>(modelJointNames.Length);
-                var sampledIndices = new List<int>(modelJointNames.Length);
-                for (int i = 0; i < modelJointNames.Length; i++)
+                if (!kv.Key.StartsWith(contextKey + ":", StringComparison.Ordinal))
                 {
-                    string jointName = modelJointNames[i];
-                    if (!rig.NameMap.TryGetValue(jointName, out Transform t) || t == null)
-                    {
-                        error = $"joint '{jointName}' missing on pose rig";
-                        return false;
-                    }
-
-                    localAxisAngles.Add(KimodoRuntimeUtility.QuaternionToAxisAngleVector(t.localRotation));
-                    sampledIndices.Add(i);
+                    continue;
                 }
 
-                target.localAxisAngles = localAxisAngles;
-                target.sampledJointIndices = sampledIndices;
+                ApplyEntryState(kv.Value, visible, selectable);
             }
 
-            if (!KimodoConstraintMarkerPoseMapper.TryWriteSample(marker, target, keepOverrideEnabled: marker.useOverride, out error))
-            {
-                return false;
-            }
-
-            return true;
-        }
-
-        public static void Hide()
-        {
-            foreach (KeyValuePair<KimodoConstraintRigType, PoseRigEntry> kv in Rigs)
-            {
-                PoseRigEntry entry = kv.Value;
-                if (entry?.Root != null && entry.Root.gameObject != null && entry.Root.gameObject.activeSelf)
-                {
-                    entry.Root.gameObject.SetActive(false);
-                }
-            }
-            activeRig = null;
             SceneView.RepaintAll();
         }
 
-        public static void DestroyAll()
+        internal static void DestroyAll()
         {
-            foreach (KeyValuePair<KimodoConstraintRigType, PoseRigEntry> kv in Rigs)
+            foreach (KeyValuePair<string, PoseCacheEntry> kv in Entries)
             {
-                PoseRigEntry entry = kv.Value;
-                if (entry?.Root != null && entry.Root.gameObject != null)
-                {
-                    UnityEngine.Object.DestroyImmediate(entry.Root.gameObject);
-                }
-                if (entry?.GeneratedMaterials != null)
-                {
-                    for (int i = 0; i < entry.GeneratedMaterials.Count; i++)
-                    {
-                        Material m = entry.GeneratedMaterials[i];
-                        if (m != null)
-                        {
-                            UnityEngine.Object.DestroyImmediate(m);
-                        }
-                    }
-                }
+                DestroyEntry(kv.Value);
             }
 
-            Rigs.Clear();
-            activeRig = null;
+            Entries.Clear();
             SceneView.RepaintAll();
-        }
-
-        private static void OnSelectionChanged()
-        {
-            if (Selection.activeObject is KimodoConstraintMarkerBase)
-            {
-                return;
-            }
-
-            if (!KimodoConstraintOverrideEditWindow.HasAnyOpenWindow())
-            {
-                Hide();
-            }
         }
 
         private static void OnPlayModeStateChanged(PlayModeStateChange _)
@@ -218,47 +174,36 @@ namespace KimodoUnityMotionTools.ProjectEditor
             DestroyAll();
         }
 
-        private static void ShowOnlyRig(PoseRigEntry entryToShow)
+        private static bool TryGetOrCreateEntry(PoseCacheRenderContext context, string entryId, out PoseCacheEntry entry, out string error)
         {
-            activeRig = entryToShow;
-            foreach (KeyValuePair<KimodoConstraintRigType, PoseRigEntry> kv in Rigs)
-            {
-                PoseRigEntry entry = kv.Value;
-                if (entry?.Root == null || entry.Root.gameObject == null)
-                {
-                    continue;
-                }
-
-                bool visible = ReferenceEquals(entry, activeRig);
-                if (entry.Root.gameObject.activeSelf != visible)
-                {
-                    entry.Root.gameObject.SetActive(visible);
-                }
-            }
-        }
-
-        private static bool TryGetOrCreateRig(string modelName, KimodoConstraintRigType sampleRigType, out PoseRigEntry rig, out string error)
-        {
+            entry = null;
             error = string.Empty;
-            KimodoConstraintRigType rigType = sampleRigType != KimodoConstraintRigType.Unknown ? sampleRigType : ResolveRigTypeFromModelName(modelName);
-            if (Rigs.TryGetValue(rigType, out rig) && rig != null && rig.Root != null && rig.Root.gameObject != null)
+            if (context.ClipId == 0 || context.AnimatorId == 0)
+            {
+                error = "invalid clip/animator id";
+                return false;
+            }
+
+            string contextKey = BuildContextKey(context.ClipId, context.AnimatorId);
+            string normalizedEntryId = string.IsNullOrWhiteSpace(entryId) ? "default" : entryId.Trim();
+            string key = BuildEntryKey(contextKey, normalizedEntryId);
+            if (Entries.TryGetValue(key, out entry) && entry != null && entry.Root != null && entry.Root.gameObject != null)
             {
                 return true;
             }
 
+            KimodoConstraintRigType rigType = context.RigType != KimodoConstraintRigType.Unknown ? context.RigType : ResolveRigTypeFromModelName(context.ModelName);
             GameObject prefab = LoadRigPrefab(rigType);
             if (prefab == null)
             {
                 error = $"pose rig prefab not found for rig type '{rigType}'";
-                rig = null;
                 return false;
             }
 
             GameObject instance = UnityEngine.Object.Instantiate(prefab);
-            instance.name = $"__KimodoPoseCache_{rigType}";
-            instance.hideFlags = HideFlags.DontSave;
+            instance.name = $"__KimodoPoseCache_{context.ClipId}_{context.AnimatorId}_{rigType}";
+            instance.hideFlags = HideFlags.HideInHierarchy | HideFlags.DontSave;
             instance.SetActive(false);
-            List<Material> generatedMaterials = ConfigurePreviewMeshAppearance(instance);
 
             Transform root = instance.transform;
             Transform[] transforms = root.GetComponentsInChildren<Transform>(true);
@@ -274,16 +219,106 @@ namespace KimodoUnityMotionTools.ProjectEditor
                 nameMap[t.name] = t;
             }
 
-            rig = new PoseRigEntry
+            List<Material> generatedMaterials = ConfigurePreviewMeshAppearance(instance);
+            entry = new PoseCacheEntry
             {
+                Key = key,
+                ContextKey = contextKey,
+                ClipId = context.ClipId,
+                AnimatorId = context.AnimatorId,
+                RigType = rigType,
                 Root = root,
                 NameMap = nameMap,
-                RigType = rigType,
-                GeneratedMaterials = generatedMaterials
+                GeneratedMaterials = generatedMaterials,
+                PickingEnabled = false
             };
 
-            Rigs[rigType] = rig;
+            Entries[key] = entry;
+            SetEntrySelectable(entry, false);
             return true;
+        }
+
+        private static void DestroyEntry(PoseCacheEntry entry)
+        {
+            if (entry == null)
+            {
+                return;
+            }
+
+            if (entry.Root != null && entry.Root.gameObject != null)
+            {
+                UnityEngine.Object.DestroyImmediate(entry.Root.gameObject);
+            }
+
+            if (entry.GeneratedMaterials != null)
+            {
+                for (int i = 0; i < entry.GeneratedMaterials.Count; i++)
+                {
+                    Material m = entry.GeneratedMaterials[i];
+                    if (m != null)
+                    {
+                        UnityEngine.Object.DestroyImmediate(m);
+                    }
+                }
+            }
+        }
+
+        private static void SetEntryVisible(PoseCacheEntry entry, bool visible)
+        {
+            if (entry?.Root == null || entry.Root.gameObject == null)
+            {
+                return;
+            }
+
+            if (entry.Root.gameObject.activeSelf != visible)
+            {
+                entry.Root.gameObject.SetActive(visible);
+            }
+        }
+
+        private static void SetEntrySelectable(PoseCacheEntry entry, bool selectable)
+        {
+            if (entry?.Root == null || entry.Root.gameObject == null)
+            {
+                return;
+            }
+
+            if (entry.PickingEnabled == selectable)
+            {
+                return;
+            }
+
+            entry.PickingEnabled = selectable;
+            try
+            {
+                if (selectable)
+                {
+                    SceneVisibilityManager.instance.EnablePicking(entry.Root.gameObject, true);
+                }
+                else
+                {
+                    SceneVisibilityManager.instance.DisablePicking(entry.Root.gameObject, true);
+                }
+            }
+            catch
+            {
+                // ignore scene visibility errors
+            }
+
+            entry.Root.gameObject.hideFlags = selectable
+                ? HideFlags.DontSave
+                : (HideFlags.HideInHierarchy | HideFlags.DontSave);
+        }
+
+        private static void ApplyEntryState(PoseCacheEntry entry, bool visible, bool selectable)
+        {
+            if (entry == null)
+            {
+                return;
+            }
+
+            SetEntryVisible(entry, visible);
+            SetEntrySelectable(entry, selectable);
         }
 
         private static List<Material> ConfigurePreviewMeshAppearance(GameObject instance)
@@ -314,6 +349,7 @@ namespace KimodoUnityMotionTools.ProjectEditor
                 {
                     continue;
                 }
+
                 Material[] mats = new Material[shared.Length];
                 for (int m = 0; m < mats.Length; m++)
                 {
@@ -329,76 +365,152 @@ namespace KimodoUnityMotionTools.ProjectEditor
                         hideFlags = HideFlags.HideAndDontSave,
                         name = $"{source.name}_PoseCache"
                     };
-                    // Force semi-transparent red preview for all pose cache meshes.
-                    SetMaterialTransparentRed(mat);
+                    SetMaterialColor(mat, NonConstraintColor, NonConstraintAlpha);
                     mats[m] = mat;
                     generated.Add(mat);
                 }
+
                 renderer.sharedMaterials = mats;
             }
 
             return generated;
         }
 
-        private static void SetMaterialTransparentRed(Material mat)
+        private static void ApplyConstraintColoring(PoseCacheEntry entry, HashSet<string> highlightedJoints)
         {
-            if (mat == null)
+            if (entry == null || entry.Root == null)
             {
                 return;
             }
 
-            const float alpha = 0.35f;
-            Color red = new Color(1f, 0f, 0f, alpha);
-            if (mat.HasProperty("_BaseColor"))
+            Renderer[] renderers = entry.Root.GetComponentsInChildren<Renderer>(true);
+            for (int i = 0; i < renderers.Length; i++)
             {
-                mat.SetColor("_BaseColor", red);
-            }
-            if (mat.HasProperty("_Color"))
-            {
-                mat.SetColor("_Color", red);
-            }
+                Renderer renderer = renderers[i];
+                if (renderer == null)
+                {
+                    continue;
+                }
 
-            if (mat.HasProperty("_Surface"))
-            {
-                mat.SetFloat("_Surface", 1f);
-            }
-            if (mat.HasProperty("_AlphaClip"))
-            {
-                mat.SetFloat("_AlphaClip", 0f);
-            }
-            if (mat.HasProperty("_SrcBlend"))
-            {
-                mat.SetInt("_SrcBlend", (int)BlendMode.SrcAlpha);
-            }
-            if (mat.HasProperty("_DstBlend"))
-            {
-                mat.SetInt("_DstBlend", (int)BlendMode.OneMinusSrcAlpha);
-            }
-            if (mat.HasProperty("_ZWrite"))
-            {
-                mat.SetInt("_ZWrite", 0);
-            }
-            if (mat.HasProperty("_Blend"))
-            {
-                mat.SetInt("_Blend", 0);
-            }
+                bool highlighted = IsTransformHighlighted(renderer.transform, highlightedJoints);
+                Material[] mats = renderer.sharedMaterials;
+                if (mats == null)
+                {
+                    continue;
+                }
 
-            mat.SetOverrideTag("RenderType", "Transparent");
-            mat.renderQueue = (int)RenderQueue.Transparent;
-            mat.EnableKeyword("_SURFACE_TYPE_TRANSPARENT");
-            mat.EnableKeyword("_ALPHABLEND_ON");
+                for (int m = 0; m < mats.Length; m++)
+                {
+                    Material mat = mats[m];
+                    if (mat == null)
+                    {
+                        continue;
+                    }
+
+                    if (highlighted)
+                    {
+                        SetMaterialColor(mat, HighlightColor, HighlightAlpha);
+                    }
+                    else
+                    {
+                        SetMaterialColor(mat, NonConstraintColor, NonConstraintAlpha);
+                    }
+                }
+            }
         }
 
-        private static bool ApplySampleToRig(
-            KimodoMarkerSampleResult sample,
-            string modelName,
-            PoseRigEntry rig,
-            out string error)
+        private static bool IsTransformHighlighted(Transform transform, HashSet<string> highlightedJoints)
+        {
+            if (transform == null || highlightedJoints == null || highlightedJoints.Count == 0)
+            {
+                return false;
+            }
+
+            Transform cur = transform;
+            while (cur != null)
+            {
+                if (highlightedJoints.Contains(cur.name))
+                {
+                    return true;
+                }
+
+                cur = cur.parent;
+            }
+
+            return false;
+        }
+
+        private static void CollectHighlightedJointsFromItem(PoseCacheRenderItem item, string modelName, HashSet<string> output)
+        {
+            if (item == null || output == null)
+            {
+                return;
+            }
+
+            string root = KimodoMarkerSamplingUtility.GetRootJointNameForModel(modelName);
+            if (!string.IsNullOrWhiteSpace(root))
+            {
+                output.Add(root);
+            }
+
+            if (item.HighlightJoints != null && item.HighlightJoints.Count > 0)
+            {
+                for (int i = 0; i < item.HighlightJoints.Count; i++)
+                {
+                    string n = item.HighlightJoints[i];
+                    if (!string.IsNullOrWhiteSpace(n))
+                    {
+                        output.Add(n.Trim());
+                    }
+                }
+
+                return;
+            }
+
+            if (string.Equals(item.ConstraintType, "root2d", StringComparison.OrdinalIgnoreCase))
+            {
+                return;
+            }
+
+            if (string.Equals(item.ConstraintType, "fullbody", StringComparison.OrdinalIgnoreCase))
+            {
+                string[] modelJointNames = KimodoMarkerSamplingUtility.GetJointNamesForModel(modelName);
+                if (modelJointNames != null)
+                {
+                    for (int i = 0; i < modelJointNames.Length; i++)
+                    {
+                        if (!string.IsNullOrWhiteSpace(modelJointNames[i]))
+                        {
+                            output.Add(modelJointNames[i]);
+                        }
+                    }
+                }
+
+                return;
+            }
+
+            List<string> names = item.SampleData != null ? item.SampleData.jointNames : null;
+            if (names == null)
+            {
+                return;
+            }
+
+            for (int i = 0; i < names.Count; i++)
+            {
+                string n = names[i];
+                if (!string.IsNullOrWhiteSpace(n))
+                {
+                    output.Add(n.Trim());
+                }
+            }
+        }
+
+        private static bool ApplySampleToRig(KimodoMarkerSampleResult sample, string modelName, PoseCacheEntry entry, out string error)
         {
             error = string.Empty;
-            if (sample == null || rig == null || rig.Root == null || rig.NameMap == null)
+            if (sample == null || entry == null || entry.Root == null || entry.NameMap == null)
             {
-                error = "invalid sample or rig";
+                error = "invalid sample or pose cache entry";
                 return false;
             }
 
@@ -414,7 +526,7 @@ namespace KimodoUnityMotionTools.ProjectEditor
             for (int i = 0; i < applyCount; i++)
             {
                 string jointName = modelJointNames[i];
-                if (!rig.NameMap.TryGetValue(jointName, out Transform t) || t == null)
+                if (!entry.NameMap.TryGetValue(jointName, out Transform t) || t == null)
                 {
                     error = $"joint '{jointName}' missing on pose rig";
                     return false;
@@ -424,13 +536,13 @@ namespace KimodoUnityMotionTools.ProjectEditor
             }
 
             string rootJointName = KimodoMarkerSamplingUtility.GetRootJointNameForModel(modelName);
-            if (!string.IsNullOrWhiteSpace(rootJointName) && rig.NameMap.TryGetValue(rootJointName, out Transform rootJoint) && rootJoint != null)
+            if (!string.IsNullOrWhiteSpace(rootJointName) && entry.NameMap.TryGetValue(rootJointName, out Transform rootJoint) && rootJoint != null)
             {
                 rootJoint.position = sample.rootPosition;
             }
             else
             {
-                rig.Root.position = sample.rootPosition;
+                entry.Root.position = sample.rootPosition;
             }
 
             return true;
@@ -448,28 +560,14 @@ namespace KimodoUnityMotionTools.ProjectEditor
             return Quaternion.AngleAxis(angleRad * Mathf.Rad2Deg, axis);
         }
 
-        private static bool TryResolveModelName(KimodoConstraintMarkerBase marker, out string modelName, out string error)
+        private static string BuildContextKey(int clipId, int animatorId)
         {
-            modelName = "Kimodo-SOMA-RP-v1";
-            error = string.Empty;
-            if (marker == null)
-            {
-                error = "marker is null";
-                return false;
-            }
+            return clipId.ToString() + ":" + animatorId.ToString();
+        }
 
-            if (!KimodoConstraintMarkerEditorUtility.TryGetClipRangeForMarker(marker, out TimelineClip clipRange) || clipRange == null)
-            {
-                error = "clip range not found";
-                return false;
-            }
-
-            if (clipRange.asset is KimodoPlayableClip playableClip && !string.IsNullOrWhiteSpace(playableClip.bridgeModelName))
-            {
-                modelName = playableClip.bridgeModelName.Trim();
-            }
-
-            return true;
+        private static string BuildEntryKey(string contextKey, string entryId)
+        {
+            return contextKey + ":" + entryId;
         }
 
         private static KimodoConstraintRigType ResolveRigTypeFromModelName(string modelName)
@@ -545,6 +643,72 @@ namespace KimodoUnityMotionTools.ProjectEditor
             }
 
             return path.Replace('\\', '/').TrimEnd('/');
+        }
+
+        private static void SetMaterialColor(Material mat, Color color, float alpha)
+        {
+            if (mat == null)
+            {
+                return;
+            }
+
+            Color c = new Color(color.r, color.g, color.b, alpha);
+            if (mat.HasProperty("_BaseColor"))
+            {
+                mat.SetColor("_BaseColor", c);
+            }
+
+            if (mat.HasProperty("_Color"))
+            {
+                mat.SetColor("_Color", c);
+            }
+
+            bool configuredTransparentMode = false;
+            if (mat.HasProperty("_Surface"))
+            {
+                mat.SetFloat("_Surface", 1f);
+                configuredTransparentMode = true;
+            }
+
+            if (mat.HasProperty("_Mode"))
+            {
+                // Built-in Standard shader transparent mode
+                mat.SetFloat("_Mode", 3f);
+                configuredTransparentMode = true;
+            }
+
+            if (mat.HasProperty("_AlphaClip"))
+            {
+                mat.SetFloat("_AlphaClip", 0f);
+            }
+
+            if (mat.HasProperty("_SrcBlend"))
+            {
+                mat.SetInt("_SrcBlend", (int)BlendMode.SrcAlpha);
+            }
+
+            if (mat.HasProperty("_DstBlend"))
+            {
+                mat.SetInt("_DstBlend", (int)BlendMode.OneMinusSrcAlpha);
+            }
+
+            if (mat.HasProperty("_ZWrite"))
+            {
+                mat.SetInt("_ZWrite", 0);
+            }
+
+            if (configuredTransparentMode)
+            {
+                mat.SetOverrideTag("RenderType", "Transparent");
+                mat.renderQueue = (int)RenderQueue.Transparent;
+                mat.EnableKeyword("_SURFACE_TYPE_TRANSPARENT");
+                mat.EnableKeyword("_ALPHABLEND_ON");
+            }
+            else
+            {
+                // Keep shader default queue to avoid "outside allowed range" warnings.
+                mat.renderQueue = -1;
+            }
         }
     }
 }

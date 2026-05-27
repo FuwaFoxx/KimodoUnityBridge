@@ -396,6 +396,93 @@ namespace KimodoUnityMotionTools.ProjectEditor
             }
         }
 
+        internal static bool TryBuildNeighborBoundarySamplesForPreview(
+            TimelineClip sourceClip,
+            int generationFrames,
+            out KimodoMarkerSampleResult leftNeighborEndPose,
+            out KimodoMarkerSampleResult rightNeighborStartPose,
+            out string warning)
+        {
+            leftNeighborEndPose = null;
+            rightNeighborStartPose = null;
+            warning = string.Empty;
+
+            if (sourceClip == null)
+            {
+                warning = "source clip is null, skip inbetween preview boundaries.";
+                return false;
+            }
+
+            TrackAsset track = sourceClip.GetParentTrack();
+            if (track == null)
+            {
+                warning = "cannot resolve parent track, skip inbetween preview boundaries.";
+                return false;
+            }
+
+            PlayableDirector director = TimelineEditor.inspectedDirector;
+            if (director == null)
+            {
+                warning = "Timeline inspected director is null, skip inbetween preview boundaries.";
+                return false;
+            }
+
+            Animator animator = director.GetGenericBinding(track) as Animator;
+            if (animator == null)
+            {
+                warning = "track has no Animator binding, skip inbetween preview boundaries.";
+                return false;
+            }
+
+            Transform skeletonRoot = animator.transform;
+            if (skeletonRoot == null)
+            {
+                warning = "Animator transform is null, skip inbetween preview boundaries.";
+                return false;
+            }
+
+            FindNeighborClips(sourceClip, out TimelineClip leftNeighbor, out TimelineClip rightNeighbor);
+            if (leftNeighbor == null && rightNeighbor == null)
+            {
+                warning = "no neighboring clips found, skip inbetween preview boundaries.";
+                return true;
+            }
+
+            double originalTime = director.time;
+            DirectorWrapMode originalWrapMode = director.extrapolationMode;
+            try
+            {
+                director.extrapolationMode = DirectorWrapMode.Hold;
+
+                if (leftNeighbor != null)
+                {
+                    double evalTime = Math.Max(leftNeighbor.start, leftNeighbor.end - NeighborSampleDeltaSeconds);
+                    if (!TryCapturePoseAtTime(leftNeighbor, director, skeletonRoot, animator, evalTime, "fullbody", out leftNeighborEndPose, out string leftError))
+                    {
+                        Debug.LogWarning($"{LogPrefix} Failed to sample left neighbor end pose for preview: {leftError}");
+                    }
+                }
+
+                if (rightNeighbor != null)
+                {
+                    _ = Math.Max(0, generationFrames - 1);
+                    double evalTime = rightNeighbor.start;
+                    if (!TryCapturePoseAtTime(rightNeighbor, director, skeletonRoot, animator, evalTime, "fullbody", out rightNeighborStartPose, out string rightError))
+                    {
+                        Debug.LogWarning($"{LogPrefix} Failed to sample right neighbor start pose for preview: {rightError}");
+                    }
+                }
+            }
+            finally
+            {
+                director.time = originalTime;
+                director.Evaluate();
+                director.extrapolationMode = originalWrapMode;
+            }
+
+            return true;
+        }
+
         private static bool TryCapturePoseAtTime(
             TimelineClip sourceClip,
             PlayableDirector director,
