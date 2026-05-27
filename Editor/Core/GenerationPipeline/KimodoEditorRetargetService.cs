@@ -13,6 +13,13 @@ namespace KimodoUnityMotionTools.ProjectEditor.GenerationPipeline
 
             if (clip.autoRetargetOnBinding)
             {
+                if (explicitAvatar == null || !explicitAvatar.isValid || !explicitAvatar.isHuman)
+                {
+                    details = "No valid explicit retarget avatar. Keep SOMA bake.";
+                    Debug.Log($"[Kimodo] {details}");
+                    return false;
+                }
+
                 bool retargetOk = KimodoRetargetPipeline.TryRetargetBakedClip(
                     clip,
                     timelineClip,
@@ -28,8 +35,8 @@ namespace KimodoUnityMotionTools.ProjectEditor.GenerationPipeline
                 }
                 else
                 {
-                    details = $"Retarget fallback to SOMA. {retargetDetails}";
-                    Debug.LogWarning($"[Kimodo] {details}");
+                    details = $"Retarget skipped. Keep SOMA bake. {retargetDetails}";
+                    Debug.Log($"[Kimodo] {details}");
                 }
             }
             else if (clip.CustomRetargetAvatar != null)

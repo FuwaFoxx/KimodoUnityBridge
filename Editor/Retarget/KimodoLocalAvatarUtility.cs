@@ -11,7 +11,7 @@ namespace KimodoUnityMotionTools.ProjectEditor
         private const string AvatarCacheFolder = "Assets/KimodoGenerated/Avatars";
 
         public static bool TryEnsureHumanoidAvatar(
-            Animator animator,
+            GameObject avatarRoot,
             out Avatar avatar,
             out string source,
             out string error)
@@ -20,20 +20,14 @@ namespace KimodoUnityMotionTools.ProjectEditor
             source = string.Empty;
             error = string.Empty;
 
-            if (animator == null)
-            {
-                error = "Animator is null.";
-                return false;
-            }
-
-            GameObject avatarRoot = animator.avatarRoot != null ? animator.avatarRoot.gameObject : animator.gameObject;
             if (avatarRoot == null)
             {
                 error = "Avatar root is null.";
                 return false;
             }
 
-            if (IsValidHumanoid(animator.avatar) && CheckAvatarValid(animator.avatar, avatarRoot))
+            Animator animator = avatarRoot.GetComponentInChildren<Animator>(true);
+            if (animator != null && IsValidHumanoid(animator.avatar) && CheckAvatarValid(animator.avatar, avatarRoot))
             {
                 avatar = animator.avatar;
                 source = "Animator";
@@ -104,6 +98,26 @@ namespace KimodoUnityMotionTools.ProjectEditor
             avatar = generated;
             source = "GeneratedTemp";
             return true;
+        }
+
+        public static bool TryEnsureHumanoidAvatar(
+            Animator animator,
+            out Avatar avatar,
+            out string source,
+            out string error)
+        {
+            avatar = null;
+            source = string.Empty;
+            error = string.Empty;
+
+            if (animator == null)
+            {
+                error = "Animator is null.";
+                return false;
+            }
+
+            GameObject avatarRoot = animator.avatarRoot != null ? animator.avatarRoot.gameObject : animator.gameObject;
+            return TryEnsureHumanoidAvatar(avatarRoot, out avatar, out source, out error);
         }
 
         public static bool CheckAvatarValid(Avatar avatar, GameObject gameObject)
