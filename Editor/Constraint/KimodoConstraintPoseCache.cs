@@ -30,12 +30,6 @@ namespace KimodoUnityMotionTools.ProjectEditor
             AssemblyReloadEvents.beforeAssemblyReload += DestroyAll;
             EditorApplication.playModeStateChanged += OnPlayModeStateChanged;
             EditorApplication.quitting += DestroyAll;
-            SceneView.duringSceneGui += OnSceneGui;
-        }
-
-        public static bool ShowOrUpdateFromMarkerData(KimodoConstraintMarkerBase marker)
-        {
-            return TryShowOrUpdateFromMarkerData(marker, out _);
         }
 
         public static bool TryShowOrUpdateFromMarkerData(KimodoConstraintMarkerBase marker, out string error)
@@ -52,11 +46,7 @@ namespace KimodoUnityMotionTools.ProjectEditor
                 return false;
             }
 
-            if (!KimodoConstraintMarkerPoseMapper.TryReadSample(marker, out KimodoMarkerSampleResult sample, out error))
-            {
-                return false;
-            }
-
+            KimodoMarkerSampleResult sample = KimodoConstraintMarkerPoseMapper.NormalizeSample(marker, marker.SampleData);
             if (sample == null)
             {
                 error = "marker sample is null";
@@ -226,16 +216,6 @@ namespace KimodoUnityMotionTools.ProjectEditor
         private static void OnPlayModeStateChanged(PlayModeStateChange _)
         {
             DestroyAll();
-        }
-
-        private static void OnSceneGui(SceneView sceneView)
-        {
-            KimodoConstraintOverrideEditWindow window = KimodoConstraintOverrideEditWindow.GetOpenWindow();
-            KimodoConstraintMarkerBase marker = window != null ? window.TargetMarker : null;
-            if (window == null || marker == null || !marker.useOverride)
-            {
-                return;
-            }
         }
 
         private static void ShowOnlyRig(PoseRigEntry entryToShow)

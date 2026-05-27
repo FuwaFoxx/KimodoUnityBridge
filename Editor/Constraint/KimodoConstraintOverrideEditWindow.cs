@@ -196,8 +196,14 @@ namespace KimodoUnityMotionTools.ProjectEditor
             if (so.ApplyModifiedProperties())
             {
                 EditorUtility.SetDirty(marker);
-                KimodoConstraintPoseCache.ShowOrUpdateFromMarkerData(marker);
-                lastError = string.Empty;
+                if (KimodoConstraintPoseCache.TryShowOrUpdateFromMarkerData(marker, out string poseError))
+                {
+                    lastError = string.Empty;
+                }
+                else
+                {
+                    lastError = string.IsNullOrWhiteSpace(poseError) ? "pose cache update failed." : poseError;
+                }
             }
 
             EditorGUILayout.HelpBox("Pose writes back continuously while this window is open.", MessageType.None);

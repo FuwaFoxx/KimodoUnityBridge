@@ -372,7 +372,8 @@ namespace KimodoUnityMotionTools.ProjectEditor
                 director.extrapolationMode = originalWrap;
             }
 
-            sampledData = KimodoConstraintMarkerPoseMapper.BuildSampleFromCapture(marker, sampleTime, sample);
+            sample.sampleTime = sampleTime;
+            sampledData = KimodoConstraintMarkerPoseMapper.NormalizeSample(marker, sample);
             if (sampledData == null)
             {
                 error = "failed to build marker sample";
@@ -392,7 +393,6 @@ namespace KimodoUnityMotionTools.ProjectEditor
             Undo.RecordObject(marker as UnityEngine.Object, "Move Kimodo Constraint Marker");
             marker.time = globalTime;
             EditorUtility.SetDirty(marker as UnityEngine.Object);
-            KimodoConstraintMarkerEventHub.RaiseMarkerChanged(marker as KimodoConstraintMarkerBase, MarkerChangeReason.TimeChanged);
         }
 
         public static void DrawSampleTimeField(SerializedObject so, IMarker marker)
@@ -420,10 +420,11 @@ namespace KimodoUnityMotionTools.ProjectEditor
             double clipEnd = clipRange.end;
             double clampedCurrent = Math.Max(clipStart, Math.Min(clipEnd, marker.time));
             timeProp.doubleValue = clampedCurrent;
+            double displayCurrent = Math.Round(clampedCurrent, 4, MidpointRounding.AwayFromZero);
 
             double editedTime = EditorGUILayout.DoubleField(
                 new GUIContent("Sample Time (seconds)", "Stored in marker data and used by preview/edit. Clamped to clip range."),
-                clampedCurrent);
+                displayCurrent);
             EditorGUILayout.LabelField($"Marker Local Time: {localSeconds:F3}s   Clip Start: {clipRange.start:F3}s", EditorStyles.miniLabel);
             if (Math.Abs(editedTime - clampedCurrent) > 1e-9)
             {
@@ -440,7 +441,6 @@ namespace KimodoUnityMotionTools.ProjectEditor
                 EditorUtility.SetDirty(marker);
             }
 
-            KimodoConstraintMarkerEventHub.RaiseMarkerChanged(marker, MarkerChangeReason.DataChanged);
             SceneView.RepaintAll();
         }
 

@@ -31,7 +31,6 @@ namespace KimodoUnityMotionTools.ProjectEditor
                 return;
             }
 
-            KimodoConstraintMarkerEventHub.RaiseMarkerChanged(null, MarkerChangeReason.SelectionContextChanged);
             OpenWindowForTransition(transition);
         }
 
@@ -51,7 +50,6 @@ namespace KimodoUnityMotionTools.ProjectEditor
                 return;
             }
 
-            KimodoConstraintMarkerEventHub.RaiseMarkerChanged(null, MarkerChangeReason.SelectionContextChanged);
             OpenWindowForTransition(transition);
         }
 

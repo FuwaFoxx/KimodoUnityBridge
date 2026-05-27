@@ -7,24 +7,6 @@ namespace KimodoUnityMotionTools.ProjectEditor
 {
     internal static class KimodoConstraintMarkerPoseMapper
     {
-        internal static bool TryReadSample(KimodoConstraintMarkerBase marker, out KimodoMarkerSampleResult sample, out string error)
-        {
-            sample = null;
-            error = string.Empty;
-
-            if (marker == null)
-            {
-                error = "marker is null";
-                return false;
-            }
-
-            sample = marker.SampleData != null ? marker.SampleData.Clone() : new KimodoMarkerSampleResult();
-            sample.constraintType = marker.ConstraintType;
-            sample.sampleTime = marker.time;
-            EnsureMarkerShape(marker, sample);
-            return true;
-        }
-
         internal static bool TryWriteSample(
             KimodoConstraintMarkerBase marker,
             KimodoMarkerSampleResult sample,
@@ -44,11 +26,14 @@ namespace KimodoUnityMotionTools.ProjectEditor
                 return false;
             }
 
-            KimodoMarkerSampleResult cloned = sample.Clone();
-            cloned.constraintType = marker.ConstraintType;
-            EnsureMarkerShape(marker, cloned);
-            marker.SampleData = cloned;
-            marker.time = cloned.sampleTime;
+            KimodoMarkerSampleResult normalized = NormalizeSample(marker, sample);
+            if (normalized == null)
+            {
+                error = "failed to normalize sample";
+                return false;
+            }
+            marker.SampleData = normalized;
+            marker.time = normalized.sampleTime;
 
             if (keepOverrideEnabled)
             {
@@ -59,35 +44,34 @@ namespace KimodoUnityMotionTools.ProjectEditor
             return true;
         }
 
-        internal static KimodoMarkerSampleResult BuildSampleFromCapture(
+        internal static KimodoMarkerSampleResult NormalizeSample(
             KimodoConstraintMarkerBase marker,
-            double sampleTime,
-            KimodoMarkerSampleResult captured)
+            KimodoMarkerSampleResult sample)
         {
-            if (marker == null || captured == null)
+            if (marker == null || sample == null)
             {
                 return null;
             }
 
-            KimodoMarkerSampleResult sample = captured.Clone();
-            sample.constraintType = marker.ConstraintType;
-            sample.sampleTime = sampleTime;
-            if (sample.jointNames == null)
+            KimodoMarkerSampleResult cloned = sample.Clone();
+            cloned.constraintType = marker.ConstraintType;
+            cloned.sampleTime = marker.time;
+            if (cloned.jointNames == null)
             {
-                sample.jointNames = new List<string>();
+                cloned.jointNames = new List<string>();
             }
 
             if (marker is KimodoRoot2DConstraintMarker)
             {
                 bool hasHeading = marker.SampleData != null && marker.SampleData.hasRootHeading;
-                sample.hasRootHeading = hasHeading;
+                cloned.hasRootHeading = hasHeading;
                 if (!hasHeading)
                 {
-                    sample.rootHeading = Vector2.right;
+                    cloned.rootHeading = Vector2.right;
                 }
 
-                sample.localAxisAngles = new List<Vector3>();
-                sample.sampledJointIndices = new List<int>();
+                cloned.localAxisAngles = new List<Vector3>();
+                cloned.sampledJointIndices = new List<int>();
             }
             else if (marker is KimodoEndEffectorConstraintMarker)
             {
@@ -99,46 +83,15 @@ namespace KimodoUnityMotionTools.ProjectEditor
                     configured = new List<string> { "LeftHand" };
                 }
 
-                sample.jointNames = new List<string>(configured);
+                cloned.jointNames = new List<string>(configured);
             }
 
-            EnsureMarkerShape(marker, sample);
-            return sample;
-        }
-
-        private static void EnsureMarkerShape(KimodoConstraintMarkerBase marker, KimodoMarkerSampleResult sample)
-        {
-            if (sample == null)
-            {
-                return;
-            }
-
-            sample.constraintType = marker != null ? marker.ConstraintType : sample.constraintType;
-            sample.hasRootHeading = marker is KimodoRoot2DConstraintMarker ? sample.hasRootHeading : false;
-
-            sample.localAxisAngles ??= new List<Vector3>();
-            sample.sampledJointIndices ??= new List<int>();
-            sample.jointNames ??= new List<string>();
-
-            if (marker is KimodoRoot2DConstraintMarker)
-            {
-                sample.localAxisAngles.Clear();
-                sample.sampledJointIndices.Clear();
-                sample.jointNames.Clear();
-            }
-            else if (marker is KimodoFullBodyConstraintMarker)
-            {
-                sample.hasRootHeading = false;
-                sample.jointNames.Clear();
-            }
-            else if (marker is KimodoEndEffectorConstraintMarker)
-            {
-                sample.hasRootHeading = false;
-                if (sample.jointNames.Count == 0)
-                {
-                    sample.jointNames.Add("LeftHand");
-                }
-            }
+            cloned.constraintType = marker.ConstraintType;
+            cloned.hasRootHeading = marker is KimodoRoot2DConstraintMarker ? cloned.hasRootHeading : false;
+            cloned.localAxisAngles ??= new List<Vector3>();
+            cloned.sampledJointIndices ??= new List<int>();
+            cloned.jointNames ??= new List<string>();
+            return cloned;
         }
     }
 }

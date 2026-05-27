@@ -162,41 +162,11 @@ namespace UnityEngine.Timeline
         protected virtual void OnEnable()
         {
             EnsureSampleData();
-            TryRaiseEditorMarkerEvent("RaiseMarkerEnabled");
         }
 
         protected virtual void OnDisable()
         {
-            TryRaiseEditorMarkerEvent("RaiseMarkerDisabled");
-        }
-
-        private void TryRaiseEditorMarkerEvent(string methodName)
-        {
-            if (string.IsNullOrWhiteSpace(methodName))
-            {
-                return;
-            }
-
-            var hubType = Type.GetType("KimodoUnityMotionTools.ProjectEditor.KimodoConstraintMarkerEventHub, KimodoTool.Editor");
-            if (hubType == null)
-            {
-                return;
-            }
-
-            var method = hubType.GetMethod(methodName, System.Reflection.BindingFlags.Static | System.Reflection.BindingFlags.NonPublic);
-            if (method == null)
-            {
-                return;
-            }
-
-            try
-            {
-                method.Invoke(null, new object[] { this });
-            }
-            catch
-            {
-                // Ignore editor-only event dispatch failures.
-            }
+            // no-op: marker lifecycle event hub has been removed.
         }
 #endif
     }

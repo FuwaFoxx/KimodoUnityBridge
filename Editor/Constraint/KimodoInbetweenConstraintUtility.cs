@@ -187,8 +187,10 @@ namespace KimodoUnityMotionTools.ProjectEditor
                                        string.Equals(ee.ConstraintType, "end-effector", StringComparison.OrdinalIgnoreCase);
             if (marker.useOverride && !isCustomEndEffector)
             {
-                if (!KimodoConstraintMarkerPoseMapper.TryReadSample(marker, out sample, out error))
+                sample = KimodoConstraintMarkerPoseMapper.NormalizeSample(marker, marker.SampleData);
+                if (sample == null)
                 {
+                    error = "failed to read override marker data";
                     return false;
                 }
 
@@ -211,7 +213,8 @@ namespace KimodoUnityMotionTools.ProjectEditor
                 return false;
             }
 
-            sample = KimodoConstraintMarkerPoseMapper.BuildSampleFromCapture(marker, sampleTime, captured);
+            captured.sampleTime = sampleTime;
+            sample = KimodoConstraintMarkerPoseMapper.NormalizeSample(marker, captured);
             if (sample == null)
             {
                 error = "failed to map sampled pose to marker sample data";
