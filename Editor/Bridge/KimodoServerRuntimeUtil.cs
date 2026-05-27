@@ -1,8 +1,5 @@
 ﻿using System;
 using System.IO;
-using KimodoUnityMotionTools.Bridge;
-using UnityEditor;
-using UnityEditor.PackageManager;
 using PackageInfo = UnityEditor.PackageManager.PackageInfo;
 
 namespace KimodoUnityMotionTools.ProjectEditor

@@ -1,12 +1,12 @@
+using KimodoUnityMotionTools.Generation;
+using KimodoUnityMotionTools.Generation.Pipeline;
 using System;
 using System.Collections.Generic;
 using System.Threading;
 using System.Threading.Tasks;
-using KimodoUnityMotionTools.Generation;
-using KimodoUnityMotionTools.Generation.Pipeline;
 using UnityEngine;
-using UnityEngine.Playables;
 using UnityEngine.Animations;
+using UnityEngine.Playables;
 
 namespace KimodoUnityMotionTools.Demo
 {

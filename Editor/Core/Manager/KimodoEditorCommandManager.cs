@@ -1,13 +1,11 @@
+using KimodoUnityMotionTools.Generation.Pipeline;
+using KimodoUnityMotionTools.ProjectEditor.GenerationPipeline;
 using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Threading;
 using System.Threading.Tasks;
 using UnityEditor;
-using UnityEditor.Animations;
-using UnityEngine;
-using KimodoUnityMotionTools.Generation.Pipeline;
-using KimodoUnityMotionTools.ProjectEditor.GenerationPipeline;
 
 namespace KimodoUnityMotionTools.ProjectEditor.Manager
 {
@@ -108,9 +106,6 @@ namespace KimodoUnityMotionTools.ProjectEditor.Manager
                     case GenerateFromPromptCommand cmd:
                         await HandleGenerateFromPromptAsync(state, cmd);
                         break;
-                    case AnimatorSplitInsertCommand cmd:
-                        await HandleAnimatorSplitInsertAsync(state, cmd);
-                        break;
                     case BridgeControlCommand cmd:
                         await HandleBridgeControlAsync(state, cmd);
                         break;
@@ -165,45 +160,10 @@ namespace KimodoUnityMotionTools.ProjectEditor.Manager
                 clip,
                 promptOverride,
                 (stage, message) => EmitProgress(eventCommand, message, stage),
+                KimodoTimelinePreviewRefreshUtility.RefreshIfPreviewing,
                 state.Token);
 
             EmitCompleted(eventCommand, result);
-        }
-
-        private static async Task HandleAnimatorSplitInsertAsync(RunningCommandState state, AnimatorSplitInsertCommand command)
-        {
-            if (command.Transition == null)
-            {
-                throw new InvalidOperationException("Animator transition is null.");
-            }
-
-            var options = new KimodoTransitionInsertOptions
-            {
-                Prompt = command.Prompt,
-                Steps = Mathf.Clamp(command.Steps, 1, 1000),
-                UseRandomSeed = command.UseRandomSeed,
-                Seed = command.Seed,
-                ModelName = string.IsNullOrWhiteSpace(command.ModelName)
-                    ? KimodoAnimatorTransitionSplitInsertTool.DefaultModelName
-                    : command.ModelName,
-                VramMode = command.VramMode,
-                OutputFolderAssetPath = string.IsNullOrWhiteSpace(command.OutputFolderAssetPath)
-                    ? KimodoAnimatorTransitionSplitInsertTool.DefaultOutputFolder
-                    : command.OutputFolderAssetPath
-            };
-
-            SplitInsertResult result = await KimodoAnimatorTransitionSplitInsertTool.GeneratePreviewAsync(
-                command.Transition,
-                options,
-                msg => EmitProgress(command, msg ?? string.Empty),
-                state.Token);
-
-            EmitCompleted(command, new KimodoEditorAnimatorSplitInsertResult
-            {
-                GeneratedClipAssetPath = result.GeneratedClipAssetPath,
-                GeneratedFrames = result.GeneratedFrames,
-                GeneratedDurationSeconds = result.GeneratedDurationSeconds
-            });
         }
 
         private static async Task HandleBridgeControlAsync(RunningCommandState state, BridgeControlCommand command)
@@ -229,20 +189,20 @@ namespace KimodoUnityMotionTools.ProjectEditor.Manager
             switch (command.Operation)
             {
                 case KimodoBridgeOperation.Start:
-                {
-                    EmitProgress(command, "Starting server...");
-                    string launcherPath = KimodoBridgeController.ResolveStartScriptOrThrow(runtimeRoot);
-                    await KimodoBridgeController.StartServerAsync(
-                        launcherPath,
-                        modelName,
-                        highVram,
-                        runtimeRoot,
-                        modelsRoot,
-                        forceSetup: false,
-                        progress => EmitProgress(command, progress),
-                        state.Token);
-                    break;
-                }
+                    {
+                        EmitProgress(command, "Starting server...");
+                        string launcherPath = KimodoBridgeController.ResolveStartScriptOrThrow(runtimeRoot);
+                        await KimodoBridgeController.StartServerAsync(
+                            launcherPath,
+                            modelName,
+                            highVram,
+                            runtimeRoot,
+                            modelsRoot,
+                            forceSetup: false,
+                            progress => EmitProgress(command, progress),
+                            state.Token);
+                        break;
+                    }
                 case KimodoBridgeOperation.Stop:
                     EmitProgress(command, "Stopping server...");
                     await KimodoBridgeController.CloseServerAsync();

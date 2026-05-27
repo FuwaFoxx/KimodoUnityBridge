@@ -87,7 +87,7 @@ namespace KimodoUnityMotionTools
         public bool autoRetargetOnBinding = true;
         [SerializeField]
         public KimodoCurveFilterOptions curveFilterOptions = new KimodoCurveFilterOptions();
-        
+
         public string motionData;
         public int frameCount;
         public int jointCount;
@@ -114,7 +114,7 @@ namespace KimodoUnityMotionTools
         public const int MIN_FRAMES = 1;
         public const int MAX_FRAMES = 300;
         public const int DEFAULT_FRAMES = 150;
-        
+
         public override Playable CreatePlayable(PlayableGraph graph, GameObject owner)
         {
             return base.CreatePlayable(graph, owner);
@@ -140,7 +140,7 @@ namespace KimodoUnityMotionTools
                 out result,
                 out error);
         }
-        
+
         public void ResetGeneration()
         {
             isGenerated = false;

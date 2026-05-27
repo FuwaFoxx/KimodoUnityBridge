@@ -1,3 +1,4 @@
+using KimodoUnityMotionTools.Generation.Pipeline;
 using System;
 using System.Collections.Generic;
 using UnityEditor;
@@ -5,7 +6,6 @@ using UnityEditor.Timeline;
 using UnityEngine;
 using UnityEngine.Playables;
 using UnityEngine.Timeline;
-using KimodoUnityMotionTools.Generation.Pipeline;
 
 namespace KimodoUnityMotionTools.ProjectEditor
 {

@@ -7,13 +7,12 @@ namespace KimodoUnityMotionTools.ProjectEditor.Manager
         Unknown = 0,
         GeneratePlayableClip = 1,
         CancelPlayableClipGeneration = 2,
-        AnimatorSplitInsert = 3,
-        BridgeStartServer = 4,
-        BridgeStopServer = 5,
-        BridgeTryFix = 6,
-        BridgeDeleteAllData = 7,
-        BridgeRefreshStatus = 8,
-        BridgeEnsureRuntimeRoot = 9
+        BridgeStartServer = 3,
+        BridgeStopServer = 4,
+        BridgeTryFix = 5,
+        BridgeDeleteAllData = 6,
+        BridgeRefreshStatus = 7,
+        BridgeEnsureRuntimeRoot = 8
     }
 
     public interface IKimodoEditorCommand

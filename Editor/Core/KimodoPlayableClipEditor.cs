@@ -1,11 +1,11 @@
+using KimodoUnityMotionTools.ProjectEditor.GenerationPipeline;
+using KimodoUnityMotionTools.ProjectEditor.Manager;
 using System;
 using System.Collections.Generic;
 using UnityEditor;
+using UnityEditor.Timeline;
 using UnityEngine;
 using UnityEngine.Timeline;
-using KimodoUnityMotionTools.ProjectEditor.GenerationPipeline;
-using KimodoUnityMotionTools.ProjectEditor.Manager;
-using UnityEditor.Timeline;
 
 namespace KimodoUnityMotionTools.ProjectEditor
 {
@@ -13,6 +13,7 @@ namespace KimodoUnityMotionTools.ProjectEditor
     public class KimodoPlayableClipEditor : UnityEditor.Editor
     {
         private const float TargetFps = 30f;
+        private const double RepaintIntervalSeconds = 0.2d;
 
         private SerializedProperty generationBackend;
         private SerializedProperty comfyuiIP;
@@ -46,6 +47,8 @@ namespace KimodoUnityMotionTools.ProjectEditor
         private bool bridgeStatusReady;
         private bool showAdvancedFoldout = true;
         private bool managerSubscribed;
+        private double lastRepaintTime;
+        private bool repaintQueued;
 
         private void OnEnable()
         {
@@ -103,6 +106,7 @@ namespace KimodoUnityMotionTools.ProjectEditor
             UnsubscribeManagerEvents();
             TryHideConstraintPreview();
             EditorUtility.ClearProgressBar();
+            repaintQueued = false;
         }
 
         public override void OnInspectorGUI()
@@ -429,7 +433,7 @@ namespace KimodoUnityMotionTools.ProjectEditor
             }
 
             lastStatus = evt.Message;
-            Repaint();
+            RequestThrottledRepaint();
         }
 
         private void OnManagerCommandCompleted(KimodoEditorCommandCompletedEvent evt)
@@ -437,7 +441,7 @@ namespace KimodoUnityMotionTools.ProjectEditor
             if (evt.Command.Kind == KimodoEditorCommandKind.BridgeStopServer)
             {
                 PullBridgeStatusSnapshot(forceRefresh: true);
-                Repaint();
+                RequestThrottledRepaint();
                 return;
             }
 
@@ -472,7 +476,7 @@ namespace KimodoUnityMotionTools.ProjectEditor
                 }
             }
 
-            Repaint();
+            RequestThrottledRepaint();
         }
 
         private void OnManagerCommandFailed(KimodoEditorCommandFailedEvent evt)
@@ -493,7 +497,7 @@ namespace KimodoUnityMotionTools.ProjectEditor
                 lastError = evt.Message;
             }
 
-            Repaint();
+            RequestThrottledRepaint();
         }
 
         private void OnManagerCommandCanceled(KimodoEditorCommandCanceledEvent evt)
@@ -510,6 +514,53 @@ namespace KimodoUnityMotionTools.ProjectEditor
                 lastStatus = "Generation canceled.";
             }
 
+            RequestThrottledRepaint();
+        }
+
+        private void RequestThrottledRepaint()
+        {
+            if (this == null)
+            {
+                return;
+            }
+
+            double now = EditorApplication.timeSinceStartup;
+            if (now - lastRepaintTime >= RepaintIntervalSeconds)
+            {
+                lastRepaintTime = now;
+                Repaint();
+                return;
+            }
+
+            if (repaintQueued)
+            {
+                return;
+            }
+
+            repaintQueued = true;
+            EditorApplication.delayCall += FlushQueuedRepaint;
+        }
+
+        private void FlushQueuedRepaint()
+        {
+            repaintQueued = false;
+            if (this == null)
+            {
+                return;
+            }
+
+            double now = EditorApplication.timeSinceStartup;
+            if (now - lastRepaintTime < RepaintIntervalSeconds)
+            {
+                if (!repaintQueued)
+                {
+                    repaintQueued = true;
+                    EditorApplication.delayCall += FlushQueuedRepaint;
+                }
+                return;
+            }
+
+            lastRepaintTime = now;
             Repaint();
         }
 

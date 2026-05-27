@@ -1,5 +1,5 @@
-using System;
 using KimodoUnityMotionTools.Generation.Pipeline;
+using System;
 
 namespace KimodoUnityMotionTools.ProjectEditor.Manager
 {

@@ -1,11 +1,11 @@
 #if UNITY_EDITOR
+using KimodoUnityMotionTools.Generation.Pipeline;
 using Newtonsoft.Json.Linq;
 using System;
 using System.Collections.Generic;
 using UnityEditor;
 using UnityEditor.Animations;
 using UnityEngine;
-using KimodoUnityMotionTools.Generation.Pipeline;
 
 namespace KimodoUnityMotionTools
 {

@@ -1,11 +1,11 @@
+using KimodoUnityMotionTools.Bridge;
+using KimodoUnityMotionTools.Generation;
 using System;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
 using System.Threading;
 using System.Threading.Tasks;
-using KimodoUnityMotionTools.Bridge;
-using KimodoUnityMotionTools.Generation;
 
 namespace KimodoUnityMotionTools.ProjectEditor
 {

@@ -1,11 +1,8 @@
+using Newtonsoft.Json.Linq;
 using System;
 using System.IO;
-using Newtonsoft.Json.Linq;
 using UnityEditor;
-using UnityEditor.Animations;
-using UnityEditor.Timeline;
 using UnityEngine;
-using UnityEngine.Timeline;
 
 namespace KimodoUnityMotionTools.ProjectEditor.GenerationPipeline
 {
@@ -34,7 +31,6 @@ namespace KimodoUnityMotionTools.ProjectEditor.GenerationPipeline
             EditorUtility.SetDirty(clip);
             EditorUtility.SetDirty(clip.clip);
             AssetDatabase.SaveAssets();
-            RefreshTimelinePreviewGraph(clip);
         }
 
         public string CreateGeneratedClipFromMotionJson(string motionJson, string modelName, string outputFolderAssetPath, string clipNamePrefix)
@@ -238,105 +234,6 @@ namespace KimodoUnityMotionTools.ProjectEditor.GenerationPipeline
             EditorUtility.SetDirty(clip.clip);
             AssetDatabase.SaveAssets();
             return true;
-        }
-
-        public void RefreshTimelinePreviewGraph(KimodoPlayableClip clip)
-        {
-            if (clip == null || TimelineEditor.inspectedAsset == null)
-            {
-                return;
-            }
-
-            if (!TryGetTimelinePreviewMode(out bool isPreviewMode) || !isPreviewMode)
-            {
-                return;
-            }
-
-            if (KimodoTimelineClipResolver.FindTimelineClipForAsset(clip) == null)
-            {
-                return;
-            }
-
-            if (!TrySetTimelinePreviewMode(false))
-            {
-                return;
-            }
-
-            TrySetTimelinePreviewMode(true);
-            TimelineEditor.Refresh(RefreshReason.ContentsModified | RefreshReason.SceneNeedsUpdate | RefreshReason.WindowNeedsRedraw);
-        }
-
-        private static bool TryGetTimelinePreviewMode(out bool previewMode)
-        {
-            previewMode = false;
-            object timelineState = GetTimelineEditorState();
-            if (timelineState == null)
-            {
-                return false;
-            }
-
-            Type stateType = timelineState.GetType();
-            var previewModeProperty = stateType.GetProperty("previewMode", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.NonPublic);
-            if (previewModeProperty != null && previewModeProperty.PropertyType == typeof(bool))
-            {
-                previewMode = (bool)previewModeProperty.GetValue(timelineState, null);
-                return true;
-            }
-
-            var previewModeField = stateType.GetField("previewMode", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.NonPublic);
-            if (previewModeField != null && previewModeField.FieldType == typeof(bool))
-            {
-                previewMode = (bool)previewModeField.GetValue(timelineState);
-                return true;
-            }
-
-            return false;
-        }
-
-        private static bool TrySetTimelinePreviewMode(bool value)
-        {
-            object timelineState = GetTimelineEditorState();
-            if (timelineState == null)
-            {
-                return false;
-            }
-
-            Type stateType = timelineState.GetType();
-            var previewModeProperty = stateType.GetProperty("previewMode", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.NonPublic);
-            if (previewModeProperty != null && previewModeProperty.PropertyType == typeof(bool) && previewModeProperty.CanWrite)
-            {
-                previewModeProperty.SetValue(timelineState, value, null);
-                return true;
-            }
-
-            var previewModeField = stateType.GetField("previewMode", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.NonPublic);
-            if (previewModeField != null && previewModeField.FieldType == typeof(bool))
-            {
-                previewModeField.SetValue(timelineState, value);
-                return true;
-            }
-
-            return false;
-        }
-
-        private static object GetTimelineEditorState()
-        {
-            Type timelineEditorType = typeof(TimelineEditor);
-            const System.Reflection.BindingFlags StaticMemberFlags = System.Reflection.BindingFlags.Static | System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.NonPublic;
-
-            var stateProperty = timelineEditorType.GetProperty("state", StaticMemberFlags);
-            if (stateProperty != null)
-            {
-                return stateProperty.GetValue(null, null);
-            }
-
-            var stateField = timelineEditorType.GetField("state", StaticMemberFlags);
-            if (stateField != null)
-            {
-                return stateField.GetValue(null);
-            }
-
-            return null;
         }
 
         private static int CompareGeneratedClipPathsByAgeOldestFirst(string leftPath, string rightPath)

@@ -1,8 +1,4 @@
-﻿using UnityEditor.Animations;
-using UnityEngine;
-using UnityEngine.Timeline;
-
-namespace KimodoUnityMotionTools.ProjectEditor.Manager
+﻿namespace KimodoUnityMotionTools.ProjectEditor.Manager
 {
     public sealed class GeneratePlayableClipCommand : KimodoEditorCommandBase
     {
@@ -46,46 +42,6 @@ namespace KimodoUnityMotionTools.ProjectEditor.Manager
         }
 
         public KimodoPlayableClip Clip { get; }
-    }
-
-    public sealed class AnimatorSplitInsertCommand : KimodoEditorCommandBase
-    {
-        public AnimatorSplitInsertCommand(
-            AnimatorStateTransition transition,
-            string prompt,
-            int steps,
-            bool useRandomSeed,
-            int seed,
-            string modelName,
-            KimodoBridgeVramMode vramMode,
-            string outputFolderAssetPath)
-            : base(transition == null ? "animator:null" : "animator:" + transition.GetInstanceID(), KimodoEditorCommandKind.AnimatorSplitInsert)
-        {
-            Transition = transition;
-            Prompt = prompt ?? string.Empty;
-            Steps = steps;
-            UseRandomSeed = useRandomSeed;
-            Seed = seed;
-            ModelName = modelName ?? string.Empty;
-            VramMode = vramMode;
-            OutputFolderAssetPath = outputFolderAssetPath ?? string.Empty;
-        }
-
-        public AnimatorStateTransition Transition { get; }
-
-        public string Prompt { get; }
-
-        public int Steps { get; }
-
-        public bool UseRandomSeed { get; }
-
-        public int Seed { get; }
-
-        public string ModelName { get; }
-
-        public KimodoBridgeVramMode VramMode { get; }
-
-        public string OutputFolderAssetPath { get; }
     }
 
     public enum KimodoBridgeOperation
@@ -163,5 +119,4 @@ namespace KimodoUnityMotionTools.ProjectEditor.Manager
             }
         }
     }
-
 }

@@ -1,7 +1,7 @@
+using KimodoUnityMotionTools.Bridge;
 using System;
 using System.Threading;
 using System.Threading.Tasks;
-using KimodoUnityMotionTools.Bridge;
 
 namespace KimodoUnityMotionTools.Generation
 {

@@ -1,21 +1,19 @@
+using KimodoUnityMotionTools.Generation;
+using KimodoUnityMotionTools.ProjectEditor;
+using NUnit.Framework;
 using System;
-using System.Diagnostics;
 using System.IO;
 using System.Reflection;
 using System.Threading;
 using System.Threading.Tasks;
-using KimodoUnityMotionTools.Generation;
-using KimodoUnityMotionTools.ProjectEditor;
-using NUnit.Framework;
 using UnityEditor;
-using UnityEngine;
 
 namespace KimodoUnityMotionTools.Tests
 {
     [TestFixture]
     [Category("KimodoBridge")]
     [Category("UserChaos")]
-    
+
     internal sealed class KimodoBridgeUserChaosTests
     {
         private KimodoRuntimeScope scope;

@@ -1,12 +1,9 @@
+using KimodoUnityMotionTools.Generation;
 using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Threading;
 using System.Threading.Tasks;
-using KimodoUnityMotionTools.Bridge;
-using KimodoUnityMotionTools.Generation;
-using Newtonsoft.Json;
-using UnityEditor;
 using UnityEngine;
 using UnityEngine.Timeline;
 

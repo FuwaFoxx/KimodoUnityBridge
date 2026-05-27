@@ -1,12 +1,12 @@
+using KimodoUnityMotionTools.Bridge;
+using KimodoUnityMotionTools.Generation;
+using KimodoUnityMotionTools.Generation.Pipeline;
+using KimodoUnityMotionTools.ProjectEditor.Manager;
 using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Threading;
 using System.Threading.Tasks;
-using KimodoUnityMotionTools.Bridge;
-using KimodoUnityMotionTools.Generation;
-using KimodoUnityMotionTools.Generation.Pipeline;
-using KimodoUnityMotionTools.ProjectEditor.Manager;
 using UnityEditor;
 using UnityEngine;
 using UnityEngine.Timeline;
@@ -25,6 +25,7 @@ namespace KimodoUnityMotionTools.ProjectEditor.GenerationPipeline
             KimodoPlayableClip clip,
             string promptOverride,
             Action<KimodoGeneratePipelineStage, string> progress,
+            Action onWritebackCompleted,
             CancellationToken token)
         {
             if (clip == null)
@@ -73,7 +74,7 @@ namespace KimodoUnityMotionTools.ProjectEditor.GenerationPipeline
 
             progress?.Invoke(KimodoGeneratePipelineStage.Finalize, "Finalizing generated assets...");
             clipWritebackService.TrimGeneratedClipsToLimit(clip);
-            clipWritebackService.RefreshTimelinePreviewGraph(clip);
+            onWritebackCompleted?.Invoke();
 
             progress?.Invoke(KimodoGeneratePipelineStage.Completed, "Generation complete.");
 

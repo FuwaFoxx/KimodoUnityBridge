@@ -269,7 +269,8 @@ namespace KimodoUnityMotionTools
                 case "Hips": return animator.GetBoneTransform(HumanBodyBones.Hips);
                 case "Spine1": return animator.GetBoneTransform(HumanBodyBones.Spine);
                 case "Spine2": return animator.GetBoneTransform(HumanBodyBones.Chest);
-                case "Chest": return hasUpperChest
+                case "Chest":
+                    return hasUpperChest
                     ? animator.GetBoneTransform(HumanBodyBones.UpperChest)
                     : animator.GetBoneTransform(HumanBodyBones.Chest);
                 case "Neck1": return animator.GetBoneTransform(HumanBodyBones.Neck);
@@ -303,7 +304,8 @@ namespace KimodoUnityMotionTools
                 case "pelvis": return animator.GetBoneTransform(HumanBodyBones.Hips);
                 case "spine1": return animator.GetBoneTransform(HumanBodyBones.Spine);
                 case "spine2": return animator.GetBoneTransform(HumanBodyBones.Chest);
-                case "spine3": return hasUpperChest
+                case "spine3":
+                    return hasUpperChest
                     ? animator.GetBoneTransform(HumanBodyBones.UpperChest)
                     : animator.GetBoneTransform(HumanBodyBones.Chest);
                 case "neck": return animator.GetBoneTransform(HumanBodyBones.Neck);

@@ -1,3 +1,4 @@
+using KimodoUnityMotionTools.ProjectEditor.GenerationPipeline;
 using System;
 using System.Collections.Generic;
 using UnityEditor;
@@ -5,7 +6,6 @@ using UnityEditor.Timeline;
 using UnityEngine;
 using UnityEngine.Playables;
 using UnityEngine.Timeline;
-using KimodoUnityMotionTools.ProjectEditor.GenerationPipeline;
 
 namespace KimodoUnityMotionTools.ProjectEditor
 {
@@ -463,42 +463,29 @@ namespace KimodoUnityMotionTools.ProjectEditor
                 return;
             }
 
-            if (!TryGetClipRangeForMarker(marker, out TimelineClip clipRange))
+            double sourceTime = Math.Max(0.0, timeProp.doubleValue);
+            if (Math.Abs(timeProp.doubleValue - sourceTime) > 1e-9)
             {
-                EditorGUILayout.HelpBox("Owning AnimationPlayableAsset not found. time keeps current value.", MessageType.Warning);
-                EditorGUILayout.PropertyField(timeProp);
-                return;
+                timeProp.doubleValue = sourceTime;
             }
 
-            double localSeconds = GetLocalSecondsInClip(clipRange, marker.time);
-            double clipStart = clipRange.start;
-            double clipEnd = clipRange.end;
-            double sourceTime = timeProp.doubleValue;
-            double clampedCurrent = Math.Max(clipStart, Math.Min(clipEnd, sourceTime));
-
-            // Keep sampleData.sampleTime aligned with marker.time, but do not overwrite user input every repaint.
-            if (Math.Abs(timeProp.doubleValue - clampedCurrent) > 1e-9)
-            {
-                timeProp.doubleValue = clampedCurrent;
-            }
-
-            double displayCurrent = Math.Round(clampedCurrent, 4, MidpointRounding.AwayFromZero);
+            double displayCurrent = Math.Round(sourceTime, 4, MidpointRounding.AwayFromZero);
 
             double editedTime = EditorGUILayout.DoubleField(
-                new GUIContent("Sample Time (seconds)", "Stored in marker data and used by preview/edit. Clamped to clip range."),
+                new GUIContent("Sample Time (seconds)", "Stored in marker data and used by preview/edit. Allowed range: [0, +inf)."),
                 displayCurrent);
-            EditorGUILayout.LabelField($"Marker Local Time: {localSeconds:F3}s   Clip Start: {clipRange.start:F3}s", EditorStyles.miniLabel);
-            if (Math.Abs(editedTime - clampedCurrent) > 1e-9)
+            double normalizedEdited = Math.Max(0.0, editedTime);
+            EditorGUILayout.LabelField($"Marker Time: {marker.time:F4}s", EditorStyles.miniLabel);
+            if (Math.Abs(normalizedEdited - sourceTime) > 1e-9)
             {
-                double clamped = Math.Max(clipStart, Math.Min(clipEnd, editedTime));
-                MoveMarkerToTime(marker, clamped);
+                MoveMarkerToTime(marker, normalizedEdited);
 
                 // Refresh SerializedObject cache after direct marker.time mutation to avoid stale writeback.
                 so.UpdateIfRequiredOrScript();
                 SerializedProperty refreshedTimeProp = so.FindProperty("sampleData.sampleTime");
                 if (refreshedTimeProp != null)
                 {
-                    refreshedTimeProp.doubleValue = clamped;
+                    refreshedTimeProp.doubleValue = normalizedEdited;
                 }
             }
         }

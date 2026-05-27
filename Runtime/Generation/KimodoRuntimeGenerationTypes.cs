@@ -1,5 +1,5 @@
-using System;
 using KimodoUnityMotionTools.Bridge;
+using System;
 using UnityEngine;
 
 namespace KimodoUnityMotionTools.Generation

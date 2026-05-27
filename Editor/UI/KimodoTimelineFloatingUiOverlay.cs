@@ -1,5 +1,5 @@
-﻿using System;
-using KimodoUnityMotionTools.ProjectEditor.Manager;
+﻿using KimodoUnityMotionTools.ProjectEditor.Manager;
+using System;
 using UnityEditor;
 using UnityEngine;
 

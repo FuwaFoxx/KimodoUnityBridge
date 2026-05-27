@@ -1,5 +1,3 @@
-using KimodoUnityMotionTools.Generation;
-
 namespace KimodoUnityMotionTools.Generation.Pipeline
 {
     public sealed class KimodoGeneratePipelineRequest

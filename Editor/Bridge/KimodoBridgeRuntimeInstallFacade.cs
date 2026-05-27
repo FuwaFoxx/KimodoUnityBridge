@@ -1,6 +1,6 @@
+using KimodoUnityMotionTools.Bridge;
 using System;
 using System.IO;
-using KimodoUnityMotionTools.Bridge;
 
 namespace KimodoUnityMotionTools.ProjectEditor
 {

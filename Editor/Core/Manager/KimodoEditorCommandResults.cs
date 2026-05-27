@@ -23,13 +23,6 @@ namespace KimodoUnityMotionTools.ProjectEditor.Manager
         public string Error;
     }
 
-    public sealed class KimodoEditorAnimatorSplitInsertResult : IKimodoEditorCommandResult
-    {
-        public string GeneratedClipAssetPath;
-        public int GeneratedFrames;
-        public float GeneratedDurationSeconds;
-    }
-
     public sealed class KimodoEditorGenerateResult : IKimodoEditorCommandResult
     {
         public string ConstraintsPath;

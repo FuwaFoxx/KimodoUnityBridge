@@ -1,8 +1,8 @@
-﻿using System;
+﻿using KimodoUnityMotionTools.ProjectEditor.Manager;
+using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Threading.Tasks;
-using KimodoUnityMotionTools.ProjectEditor.Manager;
 using UnityEditor;
 using UnityEngine;
 using UnityEngine.UIElements;

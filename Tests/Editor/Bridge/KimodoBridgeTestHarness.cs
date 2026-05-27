@@ -1,3 +1,8 @@
+using KimodoUnityMotionTools.Bridge;
+using KimodoUnityMotionTools.Generation;
+using KimodoUnityMotionTools.ProjectEditor;
+using Newtonsoft.Json.Linq;
+using NUnit.Framework;
 using System;
 using System.Collections.Generic;
 using System.Diagnostics;
@@ -8,11 +13,6 @@ using System.Net.Sockets;
 using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
-using KimodoUnityMotionTools.Bridge;
-using KimodoUnityMotionTools.Generation;
-using KimodoUnityMotionTools.ProjectEditor;
-using Newtonsoft.Json.Linq;
-using NUnit.Framework;
 using UnityEditor;
 using PackageInfo = UnityEditor.PackageManager.PackageInfo;
 

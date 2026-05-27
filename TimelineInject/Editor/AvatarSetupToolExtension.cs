@@ -6,6 +6,7 @@ public static class AvatarSetupToolExtension
 
     public static Avatar AutoGenerateHumanoidAvatarFromModelOrThrow(GameObject avatarRoot, bool forceReimport)
     {
+        
         if (avatarRoot == null)
         {
             throw new InvalidOperationException("Avatar root object is null.");

@@ -1,6 +1,6 @@
-using System.Reflection;
 using KimodoUnityMotionTools.ProjectEditor;
 using NUnit.Framework;
+using System.Reflection;
 
 namespace KimodoUnityMotionTools.Tests
 {

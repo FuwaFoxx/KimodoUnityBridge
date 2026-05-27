@@ -1,6 +1,6 @@
-using System.Diagnostics;
 using KimodoUnityMotionTools.Bridge;
 using NUnit.Framework;
+using System.Diagnostics;
 
 namespace KimodoUnityMotionTools.Tests
 {
