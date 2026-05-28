@@ -498,6 +498,7 @@ public class KimodoPreviewTimeControl
 
     public class KimodoAvatarPreview
     {
+        private static readonly HashSet<KimodoAvatarPreview> ActivePreviews = new HashSet<KimodoAvatarPreview>();
         const string kIkPref = "AvatarpreviewShowIK";
         const string k2DPref = "Avatarpreview2D";
         const string kReferencePref = "AvatarpreviewShowReference";
@@ -952,6 +953,7 @@ public class KimodoPreviewTimeControl
 
         public void OnDestroy()
         {
+            ActivePreviews.Remove(this);
             if (m_PreviewUtility != null)
             {
                 m_PreviewUtility.Cleanup();
@@ -975,7 +977,36 @@ public class KimodoPreviewTimeControl
 
         public KimodoAvatarPreview(Animator previewObjectInScene, Motion objectOnSameAsset)
         {
+            ActivePreviews.Add(this);
             InitInstance(previewObjectInScene, objectOnSameAsset);
+        }
+
+        public static void CleanupAllActivePreviews()
+        {
+            if (ActivePreviews.Count == 0)
+            {
+                return;
+            }
+
+            var snapshot = new List<KimodoAvatarPreview>(ActivePreviews);
+            for (int i = 0; i < snapshot.Count; i++)
+            {
+                KimodoAvatarPreview preview = snapshot[i];
+                if (preview == null)
+                {
+                    continue;
+                }
+
+                try
+                {
+                    preview.OnDestroy();
+                }
+                catch
+                {
+                }
+            }
+
+            ActivePreviews.Clear();
         }
 
         float PreviewSlider(Rect rect, float val, float snapThreshold)

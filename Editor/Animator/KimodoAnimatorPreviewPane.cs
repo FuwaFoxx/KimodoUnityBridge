@@ -86,12 +86,12 @@ namespace KimodoUnityMotionTools.ProjectEditor.AnimatorTooling
                 GUILayout.FlexibleSpace();
                 bool wantOriginal = GUILayout.Toggle(previewMode == PreviewMode.Original, "Show Original", EditorStyles.toolbarButton);
                 bool wantGenerated = GUILayout.Toggle(previewMode == PreviewMode.Generated, "Show Generated", EditorStyles.toolbarButton);
-                if (wantOriginal)
+                if (wantOriginal && previewMode != PreviewMode.Original)
                 {
                     previewMode = PreviewMode.Original;
                     avatarPreviewCore?.RestartFromZeroAndPlay();
                 }
-                else if (wantGenerated)
+                else if (wantGenerated && previewMode != PreviewMode.Generated)
                 {
                     previewMode = PreviewMode.Generated;
                     avatarPreviewCore?.RestartFromZeroAndPlay();
@@ -192,6 +192,8 @@ namespace KimodoUnityMotionTools.ProjectEditor.AnimatorTooling
             ResetGeneratedOnly();
             ClearSelectionLatch();
             DestroyPreviewInstances();
+            avatarPreviewCore?.Dispose();
+            avatarPreviewCore = new KimodoAvatarPreviewCore();
             originalClipForPreview = null;
             retargetAvatarForPreview = null;
         }
