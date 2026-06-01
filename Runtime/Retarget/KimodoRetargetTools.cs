@@ -1406,7 +1406,10 @@ namespace KimodoUnityMotionTools
                 }
 
                 var animator = skeletonRoot.AddComponent<Animator>();
-                //animator.avatar = avatar;
+                if (clip != null && clip.isHumanMotion)
+                {
+                    animator.avatar = avatar;
+                }
                 animator.applyRootMotion = false;
                 animator.enabled = true;
                 animator.cullingMode = AnimatorCullingMode.AlwaysAnimate;
