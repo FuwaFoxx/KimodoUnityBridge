@@ -4,7 +4,6 @@ using UnityEditor;
 using UnityEngine;
 using UnityEngine.Rendering;
 using UnityEngine.Timeline;
-using PackageInfo = UnityEditor.PackageManager.PackageInfo;
 
 namespace KimodoUnityMotionTools.ProjectEditor
 {
@@ -191,34 +190,14 @@ namespace KimodoUnityMotionTools.ProjectEditor
                 return true;
             }
 
-            KimodoConstraintRigType rigType = context.RigType != KimodoConstraintRigType.Unknown ? context.RigType : ResolveRigTypeFromModelName(context.ModelName);
-            GameObject prefab = LoadRigPrefab(rigType);
-            if (prefab == null)
+            KimodoConstraintRigType rigType = context.RigType != KimodoConstraintRigType.Unknown
+                ? context.RigType
+                : KimodoRigProfileDatabase.ResolveRigTypeFromModelName(context.ModelName);
+            if (!KimodoConstraintPoseRigFactory.TryCreatePoseRig(context.ModelName, context.ClipId, context.AnimatorId, out KimodoConstraintPoseRigFactory.PoseRigInstance rigInstance, out error))
             {
-                error = $"pose rig prefab not found for rig type '{rigType}'";
                 return false;
             }
 
-            GameObject instance = UnityEngine.Object.Instantiate(prefab);
-            instance.name = $"__KimodoPoseCache_{context.ClipId}_{context.AnimatorId}_{rigType}";
-            instance.hideFlags = HideFlags.HideInHierarchy | HideFlags.DontSave;
-            instance.SetActive(false);
-
-            Transform root = instance.transform;
-            Transform[] transforms = root.GetComponentsInChildren<Transform>(true);
-            var nameMap = new Dictionary<string, Transform>(StringComparer.OrdinalIgnoreCase);
-            for (int i = 0; i < transforms.Length; i++)
-            {
-                Transform t = transforms[i];
-                if (t == null || string.IsNullOrWhiteSpace(t.name) || nameMap.ContainsKey(t.name))
-                {
-                    continue;
-                }
-
-                nameMap[t.name] = t;
-            }
-
-            List<Material> generatedMaterials = ConfigurePreviewMeshAppearance(instance);
             entry = new PoseCacheEntry
             {
                 Key = key,
@@ -226,9 +205,9 @@ namespace KimodoUnityMotionTools.ProjectEditor
                 ClipId = context.ClipId,
                 AnimatorId = context.AnimatorId,
                 RigType = rigType,
-                Root = root,
-                NameMap = nameMap,
-                GeneratedMaterials = generatedMaterials,
+                Root = rigInstance.Root != null ? rigInstance.Root.transform : null,
+                NameMap = rigInstance.NameMap,
+                GeneratedMaterials = rigInstance.GeneratedMaterials,
                 PickingEnabled = false
             };
 
@@ -320,61 +299,6 @@ namespace KimodoUnityMotionTools.ProjectEditor
             SetEntrySelectable(entry, selectable);
         }
 
-        private static List<Material> ConfigurePreviewMeshAppearance(GameObject instance)
-        {
-            var generated = new List<Material>();
-            if (instance == null)
-            {
-                return generated;
-            }
-
-            Renderer[] renderers = instance.GetComponentsInChildren<Renderer>(true);
-            for (int i = 0; i < renderers.Length; i++)
-            {
-                Renderer renderer = renderers[i];
-                if (renderer == null)
-                {
-                    continue;
-                }
-
-                Transform tr = renderer.transform;
-                if (tr != null)
-                {
-                    tr.localScale *= 1.1f;
-                }
-
-                Material[] shared = renderer.sharedMaterials;
-                if (shared == null || shared.Length == 0)
-                {
-                    continue;
-                }
-
-                Material[] mats = new Material[shared.Length];
-                for (int m = 0; m < mats.Length; m++)
-                {
-                    Material source = shared[m];
-                    if (source == null)
-                    {
-                        mats[m] = null;
-                        continue;
-                    }
-
-                    Material mat = new Material(source)
-                    {
-                        hideFlags = HideFlags.HideAndDontSave,
-                        name = $"{source.name}_PoseCache"
-                    };
-                    SetMaterialColor(mat, NonConstraintColor, NonConstraintAlpha);
-                    mats[m] = mat;
-                    generated.Add(mat);
-                }
-
-                renderer.sharedMaterials = mats;
-            }
-
-            return generated;
-        }
-
         private static void ApplyConstraintColoring(PoseCacheEntry entry, HashSet<string> highlightedJoints)
         {
             if (entry == null || entry.Root == null)
@@ -446,60 +370,16 @@ namespace KimodoUnityMotionTools.ProjectEditor
                 return;
             }
 
-            string root = KimodoMarkerSamplingUtility.GetRootJointNameForModel(modelName);
-            if (!string.IsNullOrWhiteSpace(root))
+            List<string> names = item.HighlightJoints != null && item.HighlightJoints.Count > 0
+                ? item.HighlightJoints
+                : (item.SampleData != null ? item.SampleData.jointNames : null);
+            List<string> highlighted = KimodoMarkerSamplingUtility.BuildHighlightJointsForConstraint(item.ConstraintType, names, modelName);
+            for (int i = 0; i < highlighted.Count; i++)
             {
-                output.Add(root);
-            }
-
-            if (item.HighlightJoints != null && item.HighlightJoints.Count > 0)
-            {
-                for (int i = 0; i < item.HighlightJoints.Count; i++)
+                string name = highlighted[i];
+                if (!string.IsNullOrWhiteSpace(name))
                 {
-                    string n = item.HighlightJoints[i];
-                    if (!string.IsNullOrWhiteSpace(n))
-                    {
-                        output.Add(n.Trim());
-                    }
-                }
-
-                return;
-            }
-
-            if (string.Equals(item.ConstraintType, "root2d", StringComparison.OrdinalIgnoreCase))
-            {
-                return;
-            }
-
-            if (string.Equals(item.ConstraintType, "fullbody", StringComparison.OrdinalIgnoreCase))
-            {
-                string[] modelJointNames = KimodoMarkerSamplingUtility.GetJointNamesForModel(modelName);
-                if (modelJointNames != null)
-                {
-                    for (int i = 0; i < modelJointNames.Length; i++)
-                    {
-                        if (!string.IsNullOrWhiteSpace(modelJointNames[i]))
-                        {
-                            output.Add(modelJointNames[i]);
-                        }
-                    }
-                }
-
-                return;
-            }
-
-            List<string> names = item.SampleData != null ? item.SampleData.jointNames : null;
-            if (names == null)
-            {
-                return;
-            }
-
-            for (int i = 0; i < names.Count; i++)
-            {
-                string n = names[i];
-                if (!string.IsNullOrWhiteSpace(n))
-                {
-                    output.Add(n.Trim());
+                    output.Add(name.Trim());
                 }
             }
         }
@@ -513,7 +393,7 @@ namespace KimodoUnityMotionTools.ProjectEditor
                 return false;
             }
 
-            string[] modelJointNames = KimodoMarkerSamplingUtility.GetJointNamesForModel(modelName);
+            string[] modelJointNames = KimodoRigProfileDatabase.GetJointNamesForModel(modelName);
             if (modelJointNames == null || modelJointNames.Length == 0)
             {
                 error = $"model joint layout not found for '{modelName}'";
@@ -534,7 +414,7 @@ namespace KimodoUnityMotionTools.ProjectEditor
                 t.localRotation = AxisAngleToQuaternion(sample.localAxisAngles[i]);
             }
 
-            string rootJointName = KimodoMarkerSamplingUtility.GetRootJointNameForModel(modelName);
+            string rootJointName = KimodoRigProfileDatabase.GetRootJointNameForModel(modelName);
             if (!string.IsNullOrWhiteSpace(rootJointName) && entry.NameMap.TryGetValue(rootJointName, out Transform rootJoint) && rootJoint != null)
             {
                 rootJoint.position = sample.rootPosition;
@@ -569,81 +449,6 @@ namespace KimodoUnityMotionTools.ProjectEditor
             return contextKey + ":" + entryId;
         }
 
-        private static KimodoConstraintRigType ResolveRigTypeFromModelName(string modelName)
-        {
-            string m = (modelName ?? string.Empty).Trim().ToLowerInvariant();
-            if (m.Contains("smplx"))
-            {
-                return KimodoConstraintRigType.Smplx;
-            }
-
-            if (m.Contains("g1"))
-            {
-                return KimodoConstraintRigType.G1;
-            }
-
-            return KimodoConstraintRigType.Soma30;
-        }
-
-        private static GameObject LoadRigPrefab(KimodoConstraintRigType rigType)
-        {
-            string path = ResolveRigModelPath(rigType);
-            return AssetDatabase.LoadAssetAtPath<GameObject>(path);
-        }
-
-        private static string ResolveRigModelPath(KimodoConstraintRigType rigType)
-        {
-            string fileName;
-            switch (rigType)
-            {
-                case KimodoConstraintRigType.Smplx:
-                    fileName = "SMPLX.fbx";
-                    break;
-                case KimodoConstraintRigType.G1:
-                    fileName = "G1.fbx";
-                    break;
-                case KimodoConstraintRigType.Soma30:
-                default:
-                    fileName = "SOMA30.fbx";
-                    break;
-            }
-
-            PackageInfo packageInfo = PackageInfo.FindForAssembly(typeof(KimodoConstraintPoseCache).Assembly);
-            if (packageInfo != null)
-            {
-                string byAssemblyPackage = $"{NormalizeAssetPath(packageInfo.assetPath)}/Editor/Model/{fileName}";
-                if (AssetDatabase.LoadAssetAtPath<GameObject>(byAssemblyPackage) != null)
-                {
-                    return byAssemblyPackage;
-                }
-            }
-
-            const string packageName = "com.unity.kimodo_unity_motion_tools";
-            string byPackageName = $"Packages/{packageName}/Editor/Model/{fileName}";
-            if (AssetDatabase.LoadAssetAtPath<GameObject>(byPackageName) != null)
-            {
-                return byPackageName;
-            }
-
-            string byAssetsFolder = $"Assets/Editor/Model/{fileName}";
-            if (AssetDatabase.LoadAssetAtPath<GameObject>(byAssetsFolder) != null)
-            {
-                return byAssetsFolder;
-            }
-
-            return $"Editor/Model/{fileName}";
-        }
-
-        private static string NormalizeAssetPath(string path)
-        {
-            if (string.IsNullOrWhiteSpace(path))
-            {
-                return string.Empty;
-            }
-
-            return path.Replace('\\', '/').TrimEnd('/');
-        }
-
         private static void SetMaterialColor(Material mat, Color color, float alpha)
         {
             if (mat == null)
@@ -671,7 +476,6 @@ namespace KimodoUnityMotionTools.ProjectEditor
 
             if (mat.HasProperty("_Mode"))
             {
-                // Built-in Standard shader transparent mode
                 mat.SetFloat("_Mode", 3f);
                 configuredTransparentMode = true;
             }
@@ -705,9 +509,9 @@ namespace KimodoUnityMotionTools.ProjectEditor
             }
             else
             {
-                // Keep shader default queue to avoid "outside allowed range" warnings.
                 mat.renderQueue = -1;
             }
         }
+
     }
 }

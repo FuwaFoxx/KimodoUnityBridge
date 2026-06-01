@@ -1,5 +1,5 @@
-using KimodoUnityMotionTools.ProjectEditor.GenerationPipeline;
 using KimodoUnityMotionTools.Generation.Pipeline;
+using KimodoUnityMotionTools.ProjectEditor.GenerationPipeline;
 using System;
 using System.Collections.Generic;
 using UnityEditor;
@@ -47,7 +47,7 @@ namespace KimodoUnityMotionTools.ProjectEditor
                 }
                 else
                 {
-                    KimodoConstraintMarkerPoseMapper.TryWriteSample(markerTarget, preview, keepOverrideEnabled: false, out _);
+                    KimodoMarkerSamplingEditorUtility.TryWriteConstraintMarkerSample(markerTarget, preview, keepOverrideEnabled: false, out _);
                 }
             }
 
@@ -177,7 +177,7 @@ namespace KimodoUnityMotionTools.ProjectEditor
                 }
                 else
                 {
-                    KimodoConstraintMarkerPoseMapper.TryWriteSample(markerTarget, preview, keepOverrideEnabled: false, out _);
+                    KimodoMarkerSamplingEditorUtility.TryWriteConstraintMarkerSample(markerTarget, preview, keepOverrideEnabled: false, out _);
                 }
             }
 
@@ -381,17 +381,17 @@ namespace KimodoUnityMotionTools.ProjectEditor
                 string modelName = clipRange.asset is KimodoPlayableClip playableClip
                     ? playableClip.bridgeModelName
                     : "Kimodo-SOMA-RP-v1";
-                if (!KimodoRuntimeAvatarSkeletonBuilder.TryLoadAvatarByModelName(modelName, out Avatar originAvatar, out string originError))
+                KimodoLocalAvatarUtility.AvatarResolveResult sourceAvatarResult = KimodoLocalAvatarUtility.ResolveAvatarFromGameObject(animator.gameObject);
+                Avatar sourceAvatar = sourceAvatarResult.Avatar;
+                if (sourceAvatar == null || !sourceAvatar.isValid || !sourceAvatar.isHuman)
                 {
-                    error = $"Resolve origin avatar failed: {originError}";
+                    error = $"Resolve source avatar failed: {sourceAvatarResult.Error}";
                     return false;
                 }
 
-                KimodoLocalAvatarUtility.AvatarResolveResult targetAvatarResult = KimodoLocalAvatarUtility.ResolveAvatarFromGameObject(animator.gameObject);
-                Avatar targetAvatar = targetAvatarResult.Avatar;
-                if (targetAvatar == null || !targetAvatar.isValid || !targetAvatar.isHuman)
+                if (!KimodoRuntimeAvatarSkeletonBuilder.TryLoadAvatarByModelName(modelName, out Avatar targetAvatar, out string targetError))
                 {
-                    error = $"Resolve target avatar failed: {targetAvatarResult.Error}";
+                    error = $"Resolve target avatar failed: {targetError}";
                     return false;
                 }
 
@@ -402,7 +402,7 @@ namespace KimodoUnityMotionTools.ProjectEditor
                         modelName,
                         sampleTime,
                         marker.ConstraintType,
-                        originAvatar,
+                        sourceAvatar,
                         targetAvatar,
                         out sample,
                         out error))
@@ -418,7 +418,7 @@ namespace KimodoUnityMotionTools.ProjectEditor
             }
 
             sample.sampleTime = sampleTime;
-            sampledData = KimodoConstraintMarkerPoseMapper.NormalizeSample(marker, sample);
+            sampledData = KimodoMarkerSamplingUtility.NormalizeConstraintMarkerSample(marker, sample);
             if (sampledData == null)
             {
                 error = "failed to build marker sample";
@@ -477,6 +477,13 @@ namespace KimodoUnityMotionTools.ProjectEditor
             if (timeProp == null)
             {
                 return;
+            }
+
+            // Keep stored sample time aligned with marker timeline position.
+            double markerTime = Math.Max(0.0, marker.time);
+            if (Math.Abs(timeProp.doubleValue - markerTime) > 1e-9)
+            {
+                timeProp.doubleValue = markerTime;
             }
 
             double sourceTime = Math.Max(0.0, timeProp.doubleValue);
@@ -557,7 +564,7 @@ namespace KimodoUnityMotionTools.ProjectEditor
             string modelName = playableClip != null && !string.IsNullOrWhiteSpace(playableClip.bridgeModelName)
                 ? playableClip.bridgeModelName.Trim()
                 : "Kimodo-SOMA-RP-v1";
-            KimodoConstraintRigType rigType = ResolveRigTypeFromModelName(modelName);
+            KimodoConstraintRigType rigType = KimodoRigProfileDatabase.ResolveRigTypeFromModelName(modelName);
             int clipContextId = playableClip != null
                 ? playableClip.GetInstanceID()
                 : ((clipRange.asset as UnityEngine.Object) != null
@@ -613,7 +620,7 @@ namespace KimodoUnityMotionTools.ProjectEditor
             string modelName = string.IsNullOrWhiteSpace(playableClip.bridgeModelName)
                 ? "Kimodo-SOMA-RP-v1"
                 : playableClip.bridgeModelName.Trim();
-            KimodoConstraintRigType rigType = ResolveRigTypeFromModelName(modelName);
+            KimodoConstraintRigType rigType = KimodoRigProfileDatabase.ResolveRigTypeFromModelName(modelName);
             context = new PoseCacheRenderContext(playableClip.GetInstanceID(), animator.GetInstanceID(), modelName, rigType);
             return true;
         }
@@ -632,7 +639,7 @@ namespace KimodoUnityMotionTools.ProjectEditor
                 return false;
             }
 
-            if (!KimodoConstraintMarkerPoseMapper.TryNormalizeSample(marker, marker.SampleData, out KimodoMarkerSampleResult sample, out error))
+            if (!KimodoMarkerSamplingUtility.TryNormalizeConstraintMarkerSample(marker, marker.SampleData, out KimodoMarkerSampleResult sample, out error))
             {
                 return false;
             }
@@ -642,7 +649,7 @@ namespace KimodoUnityMotionTools.ProjectEditor
                 EntryId = marker.GetInstanceID().ToString(),
                 SampleData = sample,
                 ConstraintType = marker.ConstraintType,
-                HighlightJoints = BuildHighlightJointsForRendering(marker, context.ModelName),
+                HighlightJoints = KimodoMarkerSamplingUtility.BuildHighlightJointsForMarker(marker, context.ModelName),
                 Visible = true
             };
             var batch = new List<PoseCacheRenderItem>(1) { item };
@@ -670,7 +677,7 @@ namespace KimodoUnityMotionTools.ProjectEditor
                     continue;
                 }
 
-                if (!KimodoConstraintMarkerPoseMapper.TryNormalizeSample(marker, marker.SampleData, out KimodoMarkerSampleResult sample, out string normalizeError))
+                if (!KimodoMarkerSamplingUtility.TryNormalizeConstraintMarkerSample(marker, marker.SampleData, out KimodoMarkerSampleResult sample, out string normalizeError))
                 {
                     error = normalizeError;
                     return false;
@@ -681,82 +688,12 @@ namespace KimodoUnityMotionTools.ProjectEditor
                     EntryId = marker.GetInstanceID().ToString(),
                     SampleData = sample,
                     ConstraintType = marker.ConstraintType,
-                    HighlightJoints = BuildHighlightJointsForRendering(marker, context.ModelName),
+                    HighlightJoints = KimodoMarkerSamplingUtility.BuildHighlightJointsForMarker(marker, context.ModelName),
                     Visible = true
                 });
             }
 
             return KimodoConstraintPoseCache.RenderBatch(context, items, out error);
-        }
-
-        internal static List<string> BuildHighlightJointsForRendering(KimodoConstraintMarkerBase marker, string modelName)
-        {
-            var output = new List<string>();
-            if (marker == null)
-            {
-                return output;
-            }
-
-            string root = KimodoMarkerSamplingUtility.GetRootJointNameForModel(modelName);
-            if (!string.IsNullOrWhiteSpace(root))
-            {
-                output.Add(root);
-            }
-
-            if (marker is KimodoRoot2DConstraintMarker)
-            {
-                return output;
-            }
-
-            if (marker is KimodoFullBodyConstraintMarker)
-            {
-                string[] modelJointNames = KimodoMarkerSamplingUtility.GetJointNamesForModel(modelName);
-                if (modelJointNames != null)
-                {
-                    for (int i = 0; i < modelJointNames.Length; i++)
-                    {
-                        if (!string.IsNullOrWhiteSpace(modelJointNames[i]))
-                        {
-                            output.Add(modelJointNames[i]);
-                        }
-                    }
-                }
-
-                return output;
-            }
-
-            List<string> names = marker.SampleData != null ? marker.SampleData.jointNames : null;
-            if (names == null)
-            {
-                return output;
-            }
-
-            for (int i = 0; i < names.Count; i++)
-            {
-                string n = names[i];
-                if (!string.IsNullOrWhiteSpace(n))
-                {
-                    output.Add(n.Trim());
-                }
-            }
-
-            return output;
-        }
-
-        private static KimodoConstraintRigType ResolveRigTypeFromModelName(string modelName)
-        {
-            string m = (modelName ?? string.Empty).Trim().ToLowerInvariant();
-            if (m.Contains("smplx"))
-            {
-                return KimodoConstraintRigType.Smplx;
-            }
-
-            if (m.Contains("g1"))
-            {
-                return KimodoConstraintRigType.G1;
-            }
-
-            return KimodoConstraintRigType.Soma30;
         }
 
         public static void DrawOverrideEditButton(SerializedObject so, KimodoConstraintMarkerBase marker)

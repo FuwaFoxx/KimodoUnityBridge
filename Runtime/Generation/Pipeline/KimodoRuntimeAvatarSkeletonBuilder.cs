@@ -60,11 +60,32 @@ namespace KimodoUnityMotionTools.Generation.Pipeline
                 return false;
             }
 
-            var nodes = new List<SkeletonBuildNode>(skeleton.Length);
+            int rootBoneIndex = FindRootBoneIndex(skeleton);
+            if (rootBoneIndex < 0 || rootBoneIndex >= skeleton.Length)
+            {
+                error = "Avatar skeleton root bone could not be resolved.";
+                return false;
+            }
+
+            SkeletonBone rootBone = skeleton[rootBoneIndex];
+            string rootBoneName = string.IsNullOrWhiteSpace(rootBone.name) ? $"Bone_{rootBoneIndex}" : rootBone.name;
+            string originalRootName = string.IsNullOrWhiteSpace(root.name) ? "SkeletonRoot" : root.name;
+            root.name = $"{originalRootName}_{rootBoneName}";
+            root.localPosition = rootBone.position;
+            root.localRotation = rootBone.rotation;
+            root.localScale = rootBone.scale;
+
+            var nodes = new List<SkeletonBuildNode>(Mathf.Max(0, skeleton.Length - 1));
             var firstByName = new Dictionary<string, Transform>(StringComparer.Ordinal);
+            firstByName[rootBoneName] = root;
 
             for (int i = 0; i < skeleton.Length; i++)
             {
+                if (i == rootBoneIndex)
+                {
+                    continue;
+                }
+
                 SkeletonBone bone = skeleton[i];
                 string name = string.IsNullOrWhiteSpace(bone.name) ? $"Bone_{i}" : bone.name;
                 string parentName = AvatarRuntimeAccess.GetSkeletonBoneParentNameOrEmpty(bone);
@@ -108,30 +129,23 @@ namespace KimodoUnityMotionTools.Generation.Pipeline
             return true;
         }
 
-        public static string ResolveSkeletonRootName(Avatar avatar)
+        private static int FindRootBoneIndex(SkeletonBone[] skeleton)
         {
-            if (avatar == null || avatar.humanDescription.skeleton == null)
+            if (skeleton == null || skeleton.Length == 0)
             {
-                return string.Empty;
+                return -1;
             }
 
-            SkeletonBone[] skeleton = avatar.humanDescription.skeleton;
             for (int i = 0; i < skeleton.Length; i++)
             {
-                string name = skeleton[i].name;
                 string parentName = AvatarRuntimeAccess.GetSkeletonBoneParentNameOrEmpty(skeleton[i]);
-                if (string.IsNullOrWhiteSpace(name))
-                {
-                    continue;
-                }
-
                 if (string.IsNullOrWhiteSpace(parentName))
                 {
-                    return name;
+                    return i;
                 }
             }
 
-            return string.Empty;
+            return 0;
         }
 
         private sealed class SkeletonBuildNode

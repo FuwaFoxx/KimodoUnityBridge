@@ -1,5 +1,4 @@
 ﻿using KimodoUnityMotionTools.Generation.Pipeline;
-using KimodoUnityMotionTools.ProjectEditor.GenerationPipeline;
 using System;
 using System.Collections.Generic;
 using UnityEditor;
@@ -409,9 +408,21 @@ namespace KimodoUnityMotionTools.ProjectEditor.AnimatorTooling
             }
 
             clip.SampleAnimation(tempAnimator.gameObject, (float)globalTime);
-            if (!KimodoRuntimeAvatarSkeletonBuilder.TryLoadAvatarByModelName(modelName, out Avatar originAvatar, out string originError))
+            KimodoLocalAvatarUtility.AvatarResolveResult sourceAvatarResult = KimodoLocalAvatarUtility.ResolveAvatarFromGameObject(tempAnimator.gameObject);
+            Avatar sourceAvatar = sourceAvatarResult.Avatar;
+            if (sourceAvatar == null || !sourceAvatar.isValid || !sourceAvatar.isHuman)
             {
-                error = $"Resolve origin avatar failed: {originError}";
+                error = $"Resolve source avatar failed: {sourceAvatarResult.Error}";
+                if (tempRoot != null)
+                {
+                    UnityEngine.Object.DestroyImmediate(tempRoot);
+                }
+                return false;
+            }
+
+            if (!KimodoRuntimeAvatarSkeletonBuilder.TryLoadAvatarByModelName(modelName, out Avatar targetAvatar, out string targetError))
+            {
+                error = $"Resolve target avatar failed: {targetError}";
                 if (tempRoot != null)
                 {
                     UnityEngine.Object.DestroyImmediate(tempRoot);
@@ -426,8 +437,8 @@ namespace KimodoUnityMotionTools.ProjectEditor.AnimatorTooling
                 modelName,
                 globalTime,
                 "fullbody",
-                originAvatar,
-                avatar,
+                sourceAvatar,
+                targetAvatar,
                 out sample,
                 out error);
             if (tempRoot != null)

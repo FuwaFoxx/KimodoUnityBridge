@@ -1,7 +1,6 @@
 using UnityEditor;
 using UnityEditor.Timeline;
 using UnityEngine;
-using UnityEngine.Timeline;
 
 public static class KimodoTimelinePreviewRefreshUtility
 
@@ -25,7 +24,7 @@ public static class KimodoTimelinePreviewRefreshUtility
     }
     public static GameObject InstantiateForAnimatorPreview(Object original)
     {
-        return  EditorUtility.InstantiateForAnimatorPreview(original) as GameObject;    
+        return EditorUtility.InstantiateForAnimatorPreview(original) as GameObject;
     }
 
     public static Vector3 InstantiateForAnimatorPreview(Animator animator)

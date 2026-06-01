@@ -1,6 +1,4 @@
-﻿using KimodoUnityMotionTools.Generation.Pipeline;
-using KimodoUnityMotionTools.ProjectEditor.GenerationPipeline;
-using KimodoUnityMotionTools.ProjectEditor.Manager;
+﻿using KimodoUnityMotionTools.ProjectEditor.Manager;
 using System;
 using UnityEditor;
 using UnityEditor.Animations;

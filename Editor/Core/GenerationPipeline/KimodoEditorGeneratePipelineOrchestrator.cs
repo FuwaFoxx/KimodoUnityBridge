@@ -20,7 +20,6 @@ namespace KimodoUnityMotionTools.ProjectEditor.GenerationPipeline
 
         private readonly KimodoEditorConstraintProvider constraintProvider = new KimodoEditorConstraintProvider();
         private readonly KimodoEditorClipWritebackService clipWritebackService = new KimodoEditorClipWritebackService();
-        private readonly KimodoEditorRetargetService retargetService = new KimodoEditorRetargetService();
         public async Task<KimodoEditorGenerateResult> ExecuteGenerateAndBakeAsync(
             KimodoPlayableClip clip,
             string promptOverride,
@@ -83,15 +82,21 @@ namespace KimodoUnityMotionTools.ProjectEditor.GenerationPipeline
             }
 
             progress?.Invoke(KimodoGeneratePipelineStage.Retarget, "Retargeting...");
-            bool retargetOk = retargetService.TryRetarget(
-                clip.clip,
-                originRetargetAvatar,
-                targetRetargetAvatar,
-                out _);
-            if (!retargetOk)
+            bool isExportMuscle = TryResolveBindingAnimatorAvatar(clip, out _);
+            if (!KimodoRetargetTools.TryRetarget(clip.clip, originRetargetAvatar, targetRetargetAvatar, isExportMuscle, out KimodoRetargetTools.RetargetResult retargetResult, out string retargetError))
             {
-                throw new InvalidOperationException("Retarget failed.");
+                throw new InvalidOperationException(string.IsNullOrWhiteSpace(retargetError) ? "Retarget failed." : retargetError);
             }
+
+            if (!KimodoRetargetTools.TryWriteRetargetResultToClip(retargetResult, clip.clip, isExportMuscle, out retargetError))
+            {
+                throw new InvalidOperationException(string.IsNullOrWhiteSpace(retargetError) ? "Retarget writeback failed." : retargetError);
+            }
+
+            //if (!KimodoRetargetToolsEditor.TryFilterClipInPlace(clip.clip, targetRetargetAvatar, clip.curveFilterOptions, out retargetError))
+            //{
+            //    throw new InvalidOperationException(string.IsNullOrWhiteSpace(retargetError) ? "Final curve filter failed." : retargetError);
+            //}
 
             progress?.Invoke(KimodoGeneratePipelineStage.Finalize, "Finalizing generated assets...");
             clipWritebackService.TrimGeneratedClipsToLimit(clip);
@@ -147,6 +152,30 @@ namespace KimodoUnityMotionTools.ProjectEditor.GenerationPipeline
             }
 
             return null;
+        }
+
+        private bool TryResolveBindingAnimatorAvatar(KimodoPlayableClip clip, out Avatar avatar)
+        {
+            avatar = null;
+            GameObject bindingObject = constraintProvider.FindTimelineBindingObjectForAsset(clip);
+            if (bindingObject == null)
+            {
+                return false;
+            }
+
+            KimodoLocalAvatarUtility.AvatarResolveResult result = KimodoLocalAvatarUtility.ResolveAvatarFromGameObject(bindingObject);
+            if (!result.IsHumanoid || result.Avatar == null)
+            {
+                return false;
+            }
+
+            if (!string.Equals(result.Source, "Animator", StringComparison.Ordinal))
+            {
+                return false;
+            }
+
+            avatar = result.Avatar;
+            return true;
         }
 
         private static int ResolveEffectiveSeed(KimodoPlayableClip clip)

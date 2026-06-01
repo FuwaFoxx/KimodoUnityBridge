@@ -157,7 +157,6 @@ namespace UnityEngine.Timeline
             set => SampleData.localAxisAngles = value ?? new List<Vector3>();
         }
 
-#if UNITY_EDITOR
         protected virtual void OnEnable()
         {
             EnsureSampleData();
@@ -167,7 +166,6 @@ namespace UnityEngine.Timeline
         {
             // no-op: marker lifecycle event hub has been removed.
         }
-#endif
     }
 
     [Serializable]

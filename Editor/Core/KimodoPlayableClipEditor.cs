@@ -749,7 +749,7 @@ namespace KimodoUnityMotionTools.ProjectEditor
                     continue;
                 }
 
-                if (!KimodoConstraintMarkerPoseMapper.TryNormalizeSample(marker, marker.SampleData, out KimodoMarkerSampleResult sample, out _))
+                if (!KimodoMarkerSamplingUtility.TryNormalizeConstraintMarkerSample(marker, marker.SampleData, out KimodoMarkerSampleResult sample, out _))
                 {
                     continue;
                 }
@@ -759,7 +759,7 @@ namespace KimodoUnityMotionTools.ProjectEditor
                     EntryId = marker.GetInstanceID().ToString(),
                     SampleData = sample,
                     ConstraintType = marker.ConstraintType,
-                    HighlightJoints = KimodoConstraintMarkerEditorUtility.BuildHighlightJointsForRendering(marker, context.ModelName),
+                    HighlightJoints = KimodoMarkerSamplingUtility.BuildHighlightJointsForMarker(marker, context.ModelName),
                     Visible = true
                 });
             }

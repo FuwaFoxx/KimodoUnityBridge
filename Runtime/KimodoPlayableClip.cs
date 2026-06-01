@@ -1,3 +1,4 @@
+using KimodoUnityMotionTools.Generation.Pipeline;
 using UnityEngine;
 using UnityEngine.Playables;
 using UnityEngine.Timeline;
@@ -19,7 +20,9 @@ namespace KimodoUnityMotionTools
 
     public enum KimodoBakeSkeletonType
     {
-        SOMA = 0
+        SOMA = 0,
+        G1 = 1,
+        SMPLX = 2
     }
 
     [System.Serializable]
@@ -99,10 +102,24 @@ namespace KimodoUnityMotionTools
         {
             get
             {
-                string model = bridgeModelName ?? string.Empty;
-                string _ = model.Trim().ToLowerInvariant();
-                return KimodoBakeSkeletonType.SOMA;
+                return ResolveBakeSkeletonTypeFromModelName(bridgeModelName);
             }
+        }
+
+        public static KimodoBakeSkeletonType ResolveBakeSkeletonTypeFromModelName(string modelName)
+        {
+            string normalized = (modelName ?? string.Empty).Trim().ToLowerInvariant();
+            if (normalized.Contains("smplx"))
+            {
+                return KimodoBakeSkeletonType.SMPLX;
+            }
+
+            if (normalized.Contains("g1"))
+            {
+                return KimodoBakeSkeletonType.G1;
+            }
+
+            return KimodoBakeSkeletonType.SOMA;
         }
 
         public Avatar CustomRetargetAvatar
@@ -130,6 +147,14 @@ namespace KimodoUnityMotionTools
             out KimodoMarkerSampleResult result,
             out string error)
         {
+            Avatar sourceAvatar = animator != null ? animator.avatar : null;
+            if (!KimodoRuntimeAvatarSkeletonBuilder.TryLoadAvatarByModelName(modelName, out Avatar targetAvatar, out string avatarError))
+            {
+                result = null;
+                error = string.IsNullOrWhiteSpace(avatarError) ? "Failed to resolve target avatar." : avatarError;
+                return false;
+            }
+
             return KimodoMarkerSamplingUtility.TrySampleMarker(
                 animator,
                 skeletonRoot,
@@ -137,8 +162,8 @@ namespace KimodoUnityMotionTools
                 modelName,
                 globalTime,
                 markerType,
-                null,
-                null,
+                sourceAvatar,
+                targetAvatar,
                 out result,
                 out error);
         }

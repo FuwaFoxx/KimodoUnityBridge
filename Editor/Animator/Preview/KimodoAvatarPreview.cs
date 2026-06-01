@@ -1,9 +1,6 @@
 ﻿using System;
-using System.Collections;
 using System.Collections.Generic;
-using System.Globalization;
 using UnityEditor;
-using UnityEditor.Animations;
 using UnityEditorInternal;
 using UnityEngine;
 using UnityEngine.Assertions;
@@ -33,7 +30,7 @@ namespace KimodoUnityMotionTools.ProjectEditor.AnimatorTooling
             return obj;
         }
     }
-public class KimodoPreviewTimeControl
+    public class KimodoPreviewTimeControl
     {
         // currentTime will be clamped to preview range.
         // Make sure it's initially at the beginning, even if the clip start is negative.
@@ -50,7 +47,7 @@ public class KimodoPreviewTimeControl
         public float playbackSpeed = 1.0f;
         private float m_DeltaTime = 0.0f;
         private bool m_DeltaTimeSet = false;
-        
+
         class Styles2
         {
             public GUIStyle timelineTick = "AnimationTimelineTick";
@@ -71,7 +68,7 @@ public class KimodoPreviewTimeControl
             get;
             set;
         }
-        
+
         public float deltaTime
         {
             get { return m_DeltaTime; }
@@ -105,7 +102,7 @@ public class KimodoPreviewTimeControl
                     else
                     {
                     }
-                    
+
                     PlayStatusChanged?.Invoke(value);
                 }
 
@@ -285,14 +282,14 @@ public class KimodoPreviewTimeControl
             m_DeltaTimeSet = false;
             m_NextCurrentTimeSet = false;
         }
-        
+
         public static void DrawPlayhead(float x, float yMin, float yMax, float thickness, float alpha)
         {
             if (Event.current.type != EventType.Repaint)
                 return;
             InitStyles();
             float halfThickness = thickness * 0.5f;
-            Color lineColor = AlphaMultiplied(timeAreaStyles.playhead.normal.textColor,alpha);
+            Color lineColor = AlphaMultiplied(timeAreaStyles.playhead.normal.textColor, alpha);
             if (thickness > 1f)
             {
                 Rect labelRect = Rect.MinMaxRect(x - halfThickness, yMin, x + halfThickness, yMax);
@@ -303,15 +300,15 @@ public class KimodoPreviewTimeControl
                 DrawVerticalLine(x, yMin, yMax, lineColor);
             }
         }
-        
+
         private static void InitStyles()
         {
             if (timeAreaStyles == null)
                 timeAreaStyles = new Styles2();
         }
-        
-        private static Color AlphaMultiplied(Color color,float multiplier) { return new Color(color.r, color.g, color.b, color.a * multiplier); }
-        
+
+        private static Color AlphaMultiplied(Color color, float multiplier) { return new Color(color.r, color.g, color.b, color.a * multiplier); }
+
         public static void DrawVerticalLine(float x, float minY, float maxY, Color color)
         {
             if (Event.current.type != EventType.Repaint)

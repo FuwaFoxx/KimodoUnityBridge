@@ -1,6 +1,6 @@
+using KimodoUnityMotionTools.Generation.Pipeline;
 using System;
 using System.Collections.Generic;
-using KimodoUnityMotionTools.Generation.Pipeline;
 using UnityEditor.Timeline;
 using UnityEngine;
 using UnityEngine.Playables;
@@ -141,17 +141,17 @@ namespace KimodoUnityMotionTools.ProjectEditor
             string modelName = sourceClip.asset is KimodoPlayableClip playableClip
                 ? playableClip.bridgeModelName
                 : "Kimodo-SOMA-RP-v1";
-            if (!KimodoRuntimeAvatarSkeletonBuilder.TryLoadAvatarByModelName(modelName, out Avatar originAvatar, out string originError))
+            KimodoLocalAvatarUtility.AvatarResolveResult sourceAvatarResult = KimodoLocalAvatarUtility.ResolveAvatarFromGameObject(animator.gameObject);
+            Avatar sourceAvatar = sourceAvatarResult.Avatar;
+            if (sourceAvatar == null || !sourceAvatar.isValid || !sourceAvatar.isHuman)
             {
-                error = $"Resolve origin avatar failed: {originError}";
+                error = $"Resolve source avatar failed: {sourceAvatarResult.Error}";
                 return false;
             }
 
-            KimodoLocalAvatarUtility.AvatarResolveResult targetAvatarResult = KimodoLocalAvatarUtility.ResolveAvatarFromGameObject(animator.gameObject);
-            Avatar targetAvatar = targetAvatarResult.Avatar;
-            if (targetAvatar == null || !targetAvatar.isValid || !targetAvatar.isHuman)
+            if (!KimodoRuntimeAvatarSkeletonBuilder.TryLoadAvatarByModelName(modelName, out Avatar targetAvatar, out string targetError))
             {
-                error = $"Resolve target avatar failed: {targetAvatarResult.Error}";
+                error = $"Resolve target avatar failed: {targetError}";
                 return false;
             }
 
@@ -162,7 +162,7 @@ namespace KimodoUnityMotionTools.ProjectEditor
                     modelName,
                     sampleTime,
                     markerType,
-                    originAvatar,
+                    sourceAvatar,
                     targetAvatar,
                     out sample,
                     out error))
@@ -202,7 +202,7 @@ namespace KimodoUnityMotionTools.ProjectEditor
                                        string.Equals(ee.ConstraintType, "end-effector", StringComparison.OrdinalIgnoreCase);
             if (marker.useOverride && !isCustomEndEffector)
             {
-                sample = KimodoConstraintMarkerPoseMapper.NormalizeSample(marker, marker.SampleData);
+                sample = KimodoMarkerSamplingUtility.NormalizeConstraintMarkerSample(marker, marker.SampleData);
                 if (sample == null)
                 {
                     error = "failed to read override marker data";
@@ -229,7 +229,7 @@ namespace KimodoUnityMotionTools.ProjectEditor
             }
 
             captured.sampleTime = sampleTime;
-            sample = KimodoConstraintMarkerPoseMapper.NormalizeSample(marker, captured);
+            sample = KimodoMarkerSamplingUtility.NormalizeConstraintMarkerSample(marker, captured);
             if (sample == null)
             {
                 error = "failed to map sampled pose to marker sample data";

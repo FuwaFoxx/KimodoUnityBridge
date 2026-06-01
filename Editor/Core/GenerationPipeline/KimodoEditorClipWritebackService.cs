@@ -1,3 +1,4 @@
+using KimodoUnityMotionTools.Generation.Pipeline;
 using Newtonsoft.Json.Linq;
 using System;
 using System.IO;
@@ -59,10 +60,10 @@ namespace KimodoUnityMotionTools.ProjectEditor.GenerationPipeline
             string clipPath = AssetDatabase.GenerateUniqueAssetPath($"{outputFolder}/{clipName}.anim");
 
             AssetDatabase.CreateAsset(clip, clipPath);
-            bool baked = KimodoAnimationBaker.BakeIntoClip(
+            bool baked = KimodoRetargetToolsEditor.BakeIntoClip(
                 clip,
                 motionJson,
-                KimodoBakeSkeletonType.SOMA,
+                KimodoPlayableClip.ResolveBakeSkeletonTypeFromModelName(modelName),
                 modelName,
                 null,
                 out string bakeError);
@@ -71,6 +72,18 @@ namespace KimodoUnityMotionTools.ProjectEditor.GenerationPipeline
             {
                 AssetDatabase.DeleteAsset(clipPath);
                 throw new InvalidOperationException($"Failed to bake generated clip: {bakeError}");
+            }
+
+            if (!KimodoRuntimeAvatarSkeletonBuilder.TryLoadAvatarByModelName(modelName, out Avatar samplerAvatar, out string avatarError))
+            {
+                AssetDatabase.DeleteAsset(clipPath);
+                throw new InvalidOperationException(string.IsNullOrWhiteSpace(avatarError) ? "Failed to resolve sampler avatar." : avatarError);
+            }
+
+            if (!KimodoUnityMotionTools.KimodoRetargetToolsEditor.TryFilterClipInPlace(clip, samplerAvatar, null, out bakeError))
+            {
+                AssetDatabase.DeleteAsset(clipPath);
+                throw new InvalidOperationException($"Failed to filter generated clip: {bakeError}");
             }
 
             EditorUtility.SetDirty(clip);
@@ -192,6 +205,50 @@ namespace KimodoUnityMotionTools.ProjectEditor.GenerationPipeline
             }
         }
 
+        // NOTE: Legacy implementation kept for cleanup reference:
+        // public bool BakeCurrentMotionData(KimodoPlayableClip clip, bool hasValidRetargetAvatar, out string error)
+        // {
+        //     error = string.Empty;
+        //     if (clip == null || clip.clip == null || string.IsNullOrWhiteSpace(clip.motionData))
+        //     {
+        //         error = "Clip / motionData is missing.";
+        //         return false;
+        //     }
+        //
+        //     bool willRetargetPipeline = hasValidRetargetAvatar;
+        //     KimodoCurveFilterOptions bakeFilterOptions = clip.curveFilterOptions;
+        //     if (willRetargetPipeline && clip.curveFilterOptions != null)
+        //     {
+        //         bakeFilterOptions = new KimodoCurveFilterOptions
+        //         {
+        //             enabled = clip.curveFilterOptions.enabled,
+        //             positionError = 0f,
+        //             rotationError = 0f,
+        //             floatError = 0f,
+        //             ensureQuaternionContinuity = false
+        //         };
+        //     }
+        //
+        //     bool ok = KimodoRetargetToolsEditor.BakeIntoClip(
+        //         targetClip: clip.clip,
+        //         motionJson: clip.motionData,
+        //         skeletonType: clip.InferredSkeletonType,
+        //         modelName: clip.bridgeModelName,
+        //         curveFilterOptions: bakeFilterOptions,
+        //         out error);
+        //
+        //     if (!ok)
+        //     {
+        //         Debug.LogWarning($"[Kimodo] Bake failed: {error}");
+        //         return false;
+        //     }
+        //
+        //     clip.isGenerated = true;
+        //     EditorUtility.SetDirty(clip);
+        //     EditorUtility.SetDirty(clip.clip);
+        //     AssetDatabase.SaveAssets();
+        //     return true;
+        // }
         public bool BakeCurrentMotionData(KimodoPlayableClip clip, bool hasValidRetargetAvatar, out string error)
         {
             error = string.Empty;
@@ -201,26 +258,13 @@ namespace KimodoUnityMotionTools.ProjectEditor.GenerationPipeline
                 return false;
             }
 
-            bool willRetargetPipeline = hasValidRetargetAvatar;
-            KimodoCurveFilterOptions bakeFilterOptions = clip.curveFilterOptions;
-            if (willRetargetPipeline && clip.curveFilterOptions != null)
-            {
-                bakeFilterOptions = new KimodoCurveFilterOptions
-                {
-                    enabled = clip.curveFilterOptions.enabled,
-                    positionError = 0f,
-                    rotationError = 0f,
-                    floatError = 0f,
-                    ensureQuaternionContinuity = false
-                };
-            }
-
-            bool ok = KimodoAnimationBaker.BakeIntoClip(
+            _ = hasValidRetargetAvatar;
+            bool ok = KimodoRetargetToolsEditor.BakeIntoClip(
                 targetClip: clip.clip,
                 motionJson: clip.motionData,
                 skeletonType: clip.InferredSkeletonType,
                 modelName: clip.bridgeModelName,
-                curveFilterOptions: bakeFilterOptions,
+                curveFilterOptions: null,
                 out error);
 
             if (!ok)

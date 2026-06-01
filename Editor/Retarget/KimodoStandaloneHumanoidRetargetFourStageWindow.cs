@@ -1,6 +1,6 @@
 using UnityEditor;
 using UnityEngine;
-using KimodoUnityMotionTools.ProjectEditor;
+using KimodoRetargetStageCache = KimodoUnityMotionTools.KimodoRetargetTools.KimodoRetargetStageCache;
 
 namespace KimodoUnityMotionTools.ProjectEditor.Retarget
 {
@@ -15,7 +15,8 @@ namespace KimodoUnityMotionTools.ProjectEditor.Retarget
         [SerializeField] private float playbackSpeed = 1f;
         [SerializeField] private bool playing;
 
-        private KimodoRetargetDebugContext debugContext;
+        private KimodoUnityMotionTools.KimodoRetargetTools.RetargetFrameContext debugContext;
+        private KimodoUnityMotionTools.KimodoRetargetTools.SourceClipSampleContext sourceSampleContext;
         private string status;
         private string error;
 
@@ -122,9 +123,23 @@ namespace KimodoUnityMotionTools.ProjectEditor.Retarget
             }
 
             ClearPreview();
-            if (!KimodoRetargetPipeline.TryCreateRetargetDebugContext(sourceClip, sourceAvatar, targetAvatar, out debugContext, out string buildError))
+            if (!KimodoUnityMotionTools.KimodoRetargetTools.TryCreateRetargetFrameContext(
+                    sourceAvatar,
+                    targetAvatar,
+                    sourceClip.isHumanMotion,
+                    false,
+                    out debugContext,
+                    out string buildError))
             {
                 error = buildError;
+                return;
+            }
+
+            if (!KimodoUnityMotionTools.KimodoRetargetTools.TryCreateSourceClipSampleContext(sourceClip, sourceAvatar, out sourceSampleContext, out string sampleError))
+            {
+                KimodoUnityMotionTools.KimodoRetargetTools.TryDestroyRetargetFrameContext(debugContext);
+                debugContext = null;
+                error = sampleError;
                 return;
             }
 
@@ -139,10 +154,54 @@ namespace KimodoUnityMotionTools.ProjectEditor.Retarget
                 return;
             }
 
-            if (!KimodoRetargetPipeline.TryUpdateRetargetDebugFrame(debugContext, sourceClip, targetAvatar, previewTime, out KimodoRetargetDebugFrame frame, out string refreshError))
+            if (sourceSampleContext == null)
             {
-                error = refreshError;
+                error = "Source sample context is null.";
                 return;
+            }
+
+            bool isMuscleClip = sourceClip != null && sourceClip.isHumanMotion;
+            bool ok;
+            if (isMuscleClip)
+            {
+                HumanPose sourcePose = new HumanPose();
+                if (!sourceSampleContext.TryGetHumanPose(previewTime, ref sourcePose, out string poseError))
+                {
+                    error = poseError;
+                    return;
+                }
+
+                ok = KimodoUnityMotionTools.KimodoRetargetTools.TryRetargetFrame(
+                    sourcePose,
+                    debugContext,
+                    previewTime,
+                    out _,
+                    out string refreshError);
+                if (!ok)
+                {
+                    error = refreshError;
+                    return;
+                }
+            }
+            else
+            {
+                if (!sourceSampleContext.TryGetBoneFrame(previewTime, out KimodoUnityMotionTools.KimodoRetargetTools.BoneFrame sourceBoneFrame, out string frameError))
+                {
+                    error = frameError;
+                    return;
+                }
+
+                ok = KimodoUnityMotionTools.KimodoRetargetTools.TryRetargetFrame(
+                    sourceBoneFrame,
+                    debugContext,
+                    previewTime,
+                    out _,
+                    out string refreshError);
+                if (!ok)
+                {
+                    error = refreshError;
+                    return;
+                }
             }
 
             status = $"Preview time {previewTime:0.###}";
@@ -152,7 +211,13 @@ namespace KimodoUnityMotionTools.ProjectEditor.Retarget
         {
             if (debugContext != null)
             {
-                KimodoRetargetPipeline.DestroyRetargetDebugContext(debugContext);
+                if (sourceSampleContext != null)
+                {
+                    sourceSampleContext.Dispose();
+                    sourceSampleContext = null;
+                }
+
+                KimodoUnityMotionTools.KimodoRetargetTools.TryDestroyRetargetFrameContext(debugContext);
                 debugContext = null;
             }
 
