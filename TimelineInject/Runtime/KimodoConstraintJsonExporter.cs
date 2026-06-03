@@ -1,8 +1,9 @@
 using Newtonsoft.Json;
 using System;
 using System.Collections.Generic;
+using UnityEngine;
 
-namespace UnityEngine.Timeline
+namespace TimelineInject
 {
     public static class KimodoConstraintJsonExporter
     {

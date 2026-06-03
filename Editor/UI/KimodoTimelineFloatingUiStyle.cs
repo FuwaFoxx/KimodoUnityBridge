@@ -1,6 +1,6 @@
-﻿using UnityEngine;
+using UnityEngine;
 
-namespace KimodoUnityMotionTools.ProjectEditor.UI
+namespace KimodoBridge.Editor
 {
     [System.Serializable]
     internal sealed class KimodoTimelineFloatingUiStyle

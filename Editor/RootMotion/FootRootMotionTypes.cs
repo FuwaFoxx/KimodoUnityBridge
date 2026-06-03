@@ -1,7 +1,7 @@
 using System;
 using UnityEngine;
 
-namespace KimodoUnityMotionTools.ProjectEditor.RootMotionTooling
+namespace KimodoBridge.Editor
 {
     internal enum FootContactState
     {

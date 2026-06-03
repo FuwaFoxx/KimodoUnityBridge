@@ -2,7 +2,7 @@ using System.Collections.Generic;
 using UnityEditor;
 using UnityEngine;
 
-namespace KimodoUnityMotionTools.ProjectEditor.Retarget
+namespace KimodoBridge.Editor
 {
     internal static class KimodoStandaloneSkeletonVisualizerUtility
     {

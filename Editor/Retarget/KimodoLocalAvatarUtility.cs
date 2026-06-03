@@ -4,7 +4,7 @@ using System.Linq;
 using UnityEditor;
 using UnityEngine;
 
-namespace KimodoUnityMotionTools.ProjectEditor
+namespace KimodoBridge.Editor
 {
     internal static class KimodoLocalAvatarUtility
     {

@@ -1,5 +1,4 @@
-using KimodoUnityMotionTools.Bridge;
-using KimodoUnityMotionTools.Generation;
+using KimodoBridge;
 using System;
 using System.Collections.Generic;
 using System.Diagnostics;
@@ -7,7 +6,7 @@ using System.IO;
 using System.Threading;
 using System.Threading.Tasks;
 
-namespace KimodoUnityMotionTools.ProjectEditor
+namespace KimodoBridge.Editor
 {
     internal sealed class KimodoBridgeGenerationFacade : IDisposable
     {

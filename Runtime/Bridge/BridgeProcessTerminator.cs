@@ -1,6 +1,6 @@
 using System.Diagnostics;
 
-namespace KimodoUnityMotionTools.Bridge
+namespace KimodoBridge
 {
     internal sealed class BridgeProcessTerminator
     {

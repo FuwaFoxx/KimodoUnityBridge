@@ -2,7 +2,7 @@ using System;
 using UnityEditor;
 using UnityEditor.Compilation;
 
-namespace KimodoUnityMotionTools.ProjectEditor
+namespace KimodoBridge.Editor
 {
     [InitializeOnLoad]
     internal static class EditorCompilationStateGate

@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using UnityEditor;
 using UnityEditorInternal;
@@ -6,8 +6,9 @@ using UnityEngine;
 using UnityEngine.Assertions;
 using UnityEngine.Rendering;
 using Object = UnityEngine.Object;
+using TimelineInject;
 
-namespace KimodoUnityMotionTools.ProjectEditor.AnimatorTooling
+namespace KimodoBridge.Editor
 {
     public static class KimodoPreviewConstants
     {

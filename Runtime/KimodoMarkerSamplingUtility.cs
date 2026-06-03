@@ -2,8 +2,9 @@ using System;
 using System.Collections.Generic;
 using UnityEngine;
 using UnityEngine.Timeline;
+using TimelineInject;
 
-namespace KimodoUnityMotionTools
+namespace KimodoBridge
 {
     public static class KimodoMarkerSamplingUtility
     {
@@ -163,7 +164,7 @@ namespace KimodoUnityMotionTools
             AnimationClip animationClip = ExtractAnimationClip(sourceClip);
             if (animationClip != null && KimodoRetargetTools.IsValidHumanoid(originAvatar) && KimodoRetargetTools.IsValidHumanoid(targetAvatar))
             {
-                return TrySampleMarkerViaNewRetargetCore(
+                return TrySampleMarkerFromClipWithRetargetCore(
                     animationClip,
                     markerType,
                     globalTime,
@@ -199,7 +200,7 @@ namespace KimodoUnityMotionTools
             return TrySampleMarkerRaw(animator, root, modelName, globalTime, markerType, out result, out error);
         }
 
-        private static bool TrySampleMarkerViaNewRetargetCore(
+        public static bool TrySampleMarkerFromClipWithRetargetCore(
             AnimationClip sourceClip,
             string markerType,
             double sampleTime,

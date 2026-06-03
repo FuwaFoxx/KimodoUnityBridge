@@ -1,6 +1,6 @@
 {
     "name": "KimodoTool.Editor.Tests",
-    "rootNamespace": "KimodoUnityMotionTools.Tests",
+    "rootNamespace": "KimodoBridge.Editor",
     "references": [
         "KimodoTool",
         "KimodoTool.Editor",

@@ -2,7 +2,7 @@ using System;
 using System.Threading;
 using System.Threading.Tasks;
 
-namespace KimodoUnityMotionTools.Generation
+namespace KimodoBridge
 {
     public sealed class KimodoRuntimeGenerationService : IDisposable
     {

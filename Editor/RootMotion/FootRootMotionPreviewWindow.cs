@@ -1,9 +1,9 @@
-using KimodoUnityMotionTools.ProjectEditor.AnimatorTooling;
+using KimodoBridge.Editor;
 using System;
 using UnityEditor;
 using UnityEngine;
 
-namespace KimodoUnityMotionTools.ProjectEditor.RootMotionTooling
+namespace KimodoBridge.Editor
 {
     public sealed class FootRootMotionPreviewWindow : EditorWindow
     {

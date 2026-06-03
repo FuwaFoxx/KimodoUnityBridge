@@ -1,12 +1,13 @@
-using KimodoUnityMotionTools.Generation.Pipeline;
+using KimodoBridge;
 using System;
 using System.Collections.Generic;
 using UnityEditor.Timeline;
 using UnityEngine;
 using UnityEngine.Playables;
 using UnityEngine.Timeline;
+using TimelineInject;
 
-namespace KimodoUnityMotionTools.ProjectEditor
+namespace KimodoBridge.Editor
 {
     internal static class KimodoInbetweenConstraintUtility
     {

@@ -1,7 +1,7 @@
 using System.Threading;
 using System.Threading.Tasks;
 
-namespace KimodoUnityMotionTools.Bridge
+namespace KimodoBridge
 {
     public static class BridgeRuntimeControl
     {

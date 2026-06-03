@@ -1,6 +1,7 @@
 using UnityEngine.Timeline;
+using TimelineInject;
 
-namespace KimodoUnityMotionTools
+namespace KimodoBridge
 {
     public static class KimodoRigProfileDatabase
     {

@@ -1,7 +1,7 @@
 using UnityEditor;
 using UnityEngine;
 
-namespace KimodoUnityMotionTools
+namespace KimodoBridge.Editor
 {
     internal static class KimodoTransformGizmoVisualizerEditor
     {

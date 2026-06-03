@@ -1,8 +1,8 @@
-﻿using UnityEditor;
+using UnityEditor;
 using UnityEditor.Timeline;
 using UnityEngine.Timeline;
 
-namespace KimodoUnityMotionTools.ProjectEditor.Manager
+namespace KimodoBridge.Editor
 {
     public readonly struct KimodoSelectedPlayableClipInfo
     {

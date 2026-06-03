@@ -2,7 +2,7 @@ using UnityEditor.Timeline;
 using UnityEngine.Playables;
 using UnityEngine.Timeline;
 
-namespace KimodoUnityMotionTools.ProjectEditor.GenerationPipeline
+namespace KimodoBridge.Editor
 {
     internal static class KimodoTimelineClipResolver
     {

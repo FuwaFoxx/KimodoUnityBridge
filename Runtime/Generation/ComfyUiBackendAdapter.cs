@@ -8,7 +8,7 @@ using System.Threading.Tasks;
 using UnityEngine;
 using UnityEngine.Networking;
 
-namespace KimodoUnityMotionTools.Generation
+namespace KimodoBridge
 {
     internal sealed class ComfyUiBackendAdapter : IGenerationBackendAdapter
     {

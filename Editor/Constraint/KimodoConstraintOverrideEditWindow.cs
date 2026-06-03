@@ -1,8 +1,9 @@
 using UnityEditor;
 using UnityEngine;
 using UnityEngine.Timeline;
+using TimelineInject;
 
-namespace KimodoUnityMotionTools.ProjectEditor
+namespace KimodoBridge.Editor
 {
     internal sealed class KimodoConstraintOverrideEditWindow : EditorWindow
     {

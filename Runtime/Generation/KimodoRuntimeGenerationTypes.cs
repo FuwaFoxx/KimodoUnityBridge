@@ -1,8 +1,8 @@
-using KimodoUnityMotionTools.Bridge;
+using KimodoBridge;
 using System;
 using UnityEngine;
 
-namespace KimodoUnityMotionTools.Generation
+namespace KimodoBridge
 {
     public enum KimodoBackendType
     {

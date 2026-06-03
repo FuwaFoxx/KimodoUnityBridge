@@ -1,8 +1,8 @@
-using KimodoUnityMotionTools.Bridge;
+using KimodoBridge;
 using System;
 using System.IO;
 
-namespace KimodoUnityMotionTools.ProjectEditor
+namespace KimodoBridge.Editor
 {
     internal static class KimodoBridgeRuntimeInstallFacade
     {

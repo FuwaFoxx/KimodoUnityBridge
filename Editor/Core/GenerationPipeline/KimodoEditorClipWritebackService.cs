@@ -1,11 +1,11 @@
-using KimodoUnityMotionTools.Generation.Pipeline;
+using KimodoBridge;
 using Newtonsoft.Json.Linq;
 using System;
 using System.IO;
 using UnityEditor;
 using UnityEngine;
 
-namespace KimodoUnityMotionTools.ProjectEditor.GenerationPipeline
+namespace KimodoBridge.Editor
 {
     internal sealed class KimodoEditorClipWritebackService
     {
@@ -80,7 +80,7 @@ namespace KimodoUnityMotionTools.ProjectEditor.GenerationPipeline
                 throw new InvalidOperationException(string.IsNullOrWhiteSpace(avatarError) ? "Failed to resolve sampler avatar." : avatarError);
             }
 
-            if (!KimodoUnityMotionTools.KimodoRetargetToolsEditor.TryFilterClipInPlace(clip, samplerAvatar, null, out bakeError))
+            if (!KimodoBridge.Editor.KimodoRetargetToolsEditor.TryFilterClipInPlace(clip, samplerAvatar, null, out bakeError))
             {
                 AssetDatabase.DeleteAsset(clipPath);
                 throw new InvalidOperationException($"Failed to filter generated clip: {bakeError}");

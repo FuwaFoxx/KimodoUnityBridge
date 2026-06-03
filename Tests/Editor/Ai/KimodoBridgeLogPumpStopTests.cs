@@ -1,8 +1,8 @@
-using KimodoUnityMotionTools.Bridge;
+using KimodoBridge;
 using NUnit.Framework;
 using System.Diagnostics;
 
-namespace KimodoUnityMotionTools.Tests
+namespace KimodoBridge.Editor
 {
     [TestFixture]
     public sealed class KimodoBridgeLogPumpStopTests

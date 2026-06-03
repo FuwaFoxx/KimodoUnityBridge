@@ -2,7 +2,7 @@ using System;
 using System.Diagnostics;
 using System.IO;
 
-namespace KimodoUnityMotionTools.Bridge
+namespace KimodoBridge
 {
     internal sealed class BridgeProcessLauncher
     {

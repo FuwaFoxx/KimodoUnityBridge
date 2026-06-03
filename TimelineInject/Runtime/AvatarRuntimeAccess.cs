@@ -1,29 +1,32 @@
 using UnityEngine;
 
-public static class AvatarRuntimeAccess
+namespace TimelineInject
 {
-    public static Quaternion GetAvatarPostRotationOrIdentity(Avatar avatar, int humanId)
+    public static class AvatarRuntimeAccess
     {
-        if (avatar == null)
+        public static Quaternion GetAvatarPostRotationOrIdentity(Avatar avatar, int humanId)
         {
-            return Quaternion.identity;
+            if (avatar == null)
+            {
+                return Quaternion.identity;
+            }
+
+            return avatar.GetPostRotation(humanId);
         }
 
-        return avatar.GetPostRotation(humanId);
-    }
-
-    public static float GetAvatarAxisLengthOrZero(Avatar avatar, int humanId)
-    {
-        if (avatar == null)
+        public static float GetAvatarAxisLengthOrZero(Avatar avatar, int humanId)
         {
-            return 0f;
+            if (avatar == null)
+            {
+                return 0f;
+            }
+
+            return avatar.GetAxisLength(humanId);
         }
 
-        return avatar.GetAxisLength(humanId);
-    }
-
-    public static string GetSkeletonBoneParentNameOrEmpty(SkeletonBone bone)
-    {
-        return string.IsNullOrWhiteSpace(bone.parentName) ? string.Empty : bone.parentName;
+        public static string GetSkeletonBoneParentNameOrEmpty(SkeletonBone bone)
+        {
+            return string.IsNullOrWhiteSpace(bone.parentName) ? string.Empty : bone.parentName;
+        }
     }
 }

@@ -1,9 +1,9 @@
-﻿using KimodoUnityMotionTools.ProjectEditor.Manager;
+using KimodoBridge.Editor;
 using System;
 using UnityEditor;
 using UnityEngine;
 
-namespace KimodoUnityMotionTools.ProjectEditor.UI
+namespace KimodoBridge.Editor
 {
     [InitializeOnLoad]
     internal sealed class KimodoTimelineFloatingUiOverlay : EditorWindow

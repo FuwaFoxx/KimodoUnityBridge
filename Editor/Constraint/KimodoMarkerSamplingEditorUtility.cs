@@ -1,7 +1,8 @@
 using UnityEditor;
 using UnityEngine.Timeline;
+using TimelineInject;
 
-namespace KimodoUnityMotionTools.ProjectEditor
+namespace KimodoBridge.Editor
 {
     internal static class KimodoMarkerSamplingEditorUtility
     {

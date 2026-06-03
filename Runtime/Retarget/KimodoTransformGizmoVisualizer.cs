@@ -1,6 +1,6 @@
 using UnityEngine;
 
-namespace KimodoUnityMotionTools
+namespace KimodoBridge
 {
     public sealed class KimodoTransformGizmoVisualizer : MonoBehaviour
     {

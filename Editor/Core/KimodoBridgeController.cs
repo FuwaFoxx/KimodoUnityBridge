@@ -1,5 +1,4 @@
-using KimodoUnityMotionTools.Bridge;
-using KimodoUnityMotionTools.Generation;
+using KimodoBridge;
 using System;
 using System.Collections.Generic;
 using System.IO;
@@ -7,7 +6,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using UnityEditor;
 
-namespace KimodoUnityMotionTools.ProjectEditor
+namespace KimodoBridge.Editor
 {
     [InitializeOnLoad]
     internal static class KimodoBridgeController

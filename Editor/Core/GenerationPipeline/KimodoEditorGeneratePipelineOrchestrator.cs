@@ -1,7 +1,5 @@
-using KimodoUnityMotionTools.Bridge;
-using KimodoUnityMotionTools.Generation;
-using KimodoUnityMotionTools.Generation.Pipeline;
-using KimodoUnityMotionTools.ProjectEditor.Manager;
+using KimodoBridge;
+using KimodoBridge.Editor;
 using System;
 using System.Collections.Generic;
 using System.IO;
@@ -10,8 +8,9 @@ using System.Threading.Tasks;
 using UnityEditor;
 using UnityEngine;
 using UnityEngine.Timeline;
+using TimelineInject;
 
-namespace KimodoUnityMotionTools.ProjectEditor.GenerationPipeline
+namespace KimodoBridge.Editor
 {
     internal sealed class KimodoEditorGeneratePipelineOrchestrator
     {

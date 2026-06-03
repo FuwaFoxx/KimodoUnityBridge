@@ -1,7 +1,7 @@
-using KimodoUnityMotionTools.Generation.Pipeline;
+using KimodoBridge;
 using System;
 
-namespace KimodoUnityMotionTools.ProjectEditor.Manager
+namespace KimodoBridge.Editor
 {
     public readonly struct KimodoEditorCommandProgressEvent
     {

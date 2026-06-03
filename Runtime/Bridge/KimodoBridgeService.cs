@@ -6,7 +6,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using UnityEngine;
 
-namespace KimodoUnityMotionTools.Bridge
+namespace KimodoBridge
 {
     public sealed class KimodoBridgeService : IDisposable
     {

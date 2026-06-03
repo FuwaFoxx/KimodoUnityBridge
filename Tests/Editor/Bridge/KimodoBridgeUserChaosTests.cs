@@ -1,5 +1,5 @@
-using KimodoUnityMotionTools.Generation;
-using KimodoUnityMotionTools.ProjectEditor;
+using KimodoBridge;
+using KimodoBridge.Editor;
 using NUnit.Framework;
 using System;
 using System.IO;
@@ -8,7 +8,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using UnityEditor;
 
-namespace KimodoUnityMotionTools.Tests
+namespace KimodoBridge.Editor
 {
     [TestFixture]
     [Category("KimodoBridge")]

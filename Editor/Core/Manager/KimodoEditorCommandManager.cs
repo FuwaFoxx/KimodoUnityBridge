@@ -1,13 +1,14 @@
-using KimodoUnityMotionTools.Generation.Pipeline;
-using KimodoUnityMotionTools.ProjectEditor.GenerationPipeline;
+using KimodoBridge;
+using KimodoBridge.Editor;
 using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Threading;
 using System.Threading.Tasks;
 using UnityEditor;
+using TimelineInject;
 
-namespace KimodoUnityMotionTools.ProjectEditor.Manager
+namespace KimodoBridge.Editor
 {
     [InitializeOnLoad]
     public static class KimodoEditorCommandManager

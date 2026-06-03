@@ -1,9 +1,9 @@
-using KimodoUnityMotionTools.Bridge;
+using KimodoBridge;
 using System;
 using System.Threading;
 using System.Threading.Tasks;
 
-namespace KimodoUnityMotionTools.Generation
+namespace KimodoBridge
 {
     internal sealed class BridgeBackendAdapter : IGenerationBackendAdapter
     {

@@ -1,10 +1,10 @@
-using KimodoUnityMotionTools.Bridge;
+using KimodoBridge;
 using System.IO;
 using System.Threading;
 using System.Threading.Tasks;
 using UnityEditor;
 
-namespace KimodoUnityMotionTools.ProjectEditor
+namespace KimodoBridge.Editor
 {
     internal sealed class KimodoBridgeServerStateCache
     {

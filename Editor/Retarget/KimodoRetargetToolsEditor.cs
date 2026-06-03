@@ -1,5 +1,5 @@
 #if UNITY_EDITOR
-using KimodoUnityMotionTools.Generation.Pipeline;
+using KimodoBridge;
 using Newtonsoft.Json.Linq;
 using System;
 using System.Collections.Generic;
@@ -7,7 +7,7 @@ using UnityEditor;
 using UnityEditor.Animations;
 using UnityEngine;
 
-namespace KimodoUnityMotionTools
+namespace KimodoBridge.Editor
 {
     public static class KimodoRetargetToolsEditor
     {

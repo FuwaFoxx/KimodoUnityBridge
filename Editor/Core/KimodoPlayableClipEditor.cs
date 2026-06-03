@@ -1,13 +1,13 @@
-using KimodoUnityMotionTools.ProjectEditor.GenerationPipeline;
-using KimodoUnityMotionTools.ProjectEditor.Manager;
+using KimodoBridge.Editor;
 using System;
 using System.Collections.Generic;
 using UnityEditor;
 using UnityEditor.Timeline;
 using UnityEngine;
 using UnityEngine.Timeline;
+using TimelineInject;
 
-namespace KimodoUnityMotionTools.ProjectEditor
+namespace KimodoBridge.Editor
 {
     [CustomEditor(typeof(KimodoPlayableClip))]
     public class KimodoPlayableClipEditor : UnityEditor.Editor

@@ -1,8 +1,10 @@
-﻿using System;
+
+using KimodoBridge;
+using System;
 using UnityEditor;
 using UnityEngine;
 
-namespace KimodoUnityMotionTools.ProjectEditor.AnimatorTooling
+namespace KimodoBridge.Editor
 {
     internal sealed class KimodoAnimatorEditorPane
     {
@@ -10,8 +12,15 @@ namespace KimodoUnityMotionTools.ProjectEditor.AnimatorTooling
 
         public void Draw(
             float windowWidth,
-            SerializedObject clipSo,
             KimodoAnimatorPreviewPane previewPane,
+            ref KimodoGenerationBackend generationBackend,
+            ref string bridgeModelName,
+            ref KimodoBridgeVramMode bridgeVramMode,
+            ref string motionPrompt,
+            ref int generationFrames,
+            ref int diffusionSteps,
+            ref bool randomSeed,
+            ref int seed,
             bool isGenerating,
             Action startGenerate,
             Action cancelGenerate,
@@ -24,34 +33,86 @@ namespace KimodoUnityMotionTools.ProjectEditor.AnimatorTooling
             using (var scroll = new EditorGUILayout.ScrollViewScope(rightScroll, GUILayout.Width(width)))
             {
                 rightScroll = scroll.scrollPosition;
-                clipSo.UpdateIfRequiredOrScript();
 
-                previewPane.DrawSelectionInfo();
-                DrawGeneratePanel(clipSo, isGenerating, previewPane.HasSelection, startGenerate, cancelGenerate);
-                DrawBakePanel(clipSo);
-                DrawGeneratedPanel(generatedClipForPreview, resetGenerated);
-                DrawAnimationClipPanel(clipSo);
-                DrawApplyPanel(isGenerating, previewPane.HasSelection, lastSuccessfulGeneratedClipForApply, applyGeneratedResult);
+                if (previewPane != null)
+                {
+                    previewPane.DrawSelectionInfo();
+                }
 
-                clipSo.ApplyModifiedProperties();
+                DrawGeneratePanel(
+                    previewPane != null && previewPane.HasSelection,
+                    ref generationBackend,
+                    ref bridgeModelName,
+                    ref bridgeVramMode,
+                    ref motionPrompt,
+                    ref generationFrames,
+                    ref diffusionSteps,
+                    ref randomSeed,
+                    ref seed,
+                    isGenerating,
+                    startGenerate,
+                    cancelGenerate);
+                DrawResultPanel(generatedClipForPreview, resetGenerated);
+                DrawApplyPanel(
+                    previewPane != null && previewPane.HasSelection,
+                    isGenerating,
+                    lastSuccessfulGeneratedClipForApply,
+                    applyGeneratedResult);
             }
         }
 
-        private static void DrawGeneratePanel(SerializedObject clipSo, bool isGenerating, bool hasSelection, Action startGenerate, Action cancelGenerate)
+        private static void DrawGeneratePanel(
+            bool hasSelection,
+            ref KimodoGenerationBackend generationBackend,
+            ref string bridgeModelName,
+            ref KimodoBridgeVramMode bridgeVramMode,
+            ref string motionPrompt,
+            ref int generationFrames,
+            ref int diffusionSteps,
+            ref bool randomSeed,
+            ref int seed,
+            bool isGenerating,
+            Action startGenerate,
+            Action cancelGenerate)
         {
-            EditorGUILayout.LabelField("Generate Motion", EditorStyles.boldLabel);
+            EditorGUILayout.LabelField("Generate", EditorStyles.boldLabel);
             EditorGUILayout.BeginVertical("box");
-            DrawProp(clipSo, "generationBackend", "Backend");
-            DrawKimodoBridgePanel(clipSo);
-            DrawComfyUiPanel(clipSo);
-            DrawProp(clipSo, "motionPrompt", "Prompt", true, 60f);
-            DrawProp(clipSo, "generationFrames", "Duration (frames)");
-            DrawProp(clipSo, "diffusionSteps", "Diffusion Steps");
-            DrawProp(clipSo, "randomSeed", "Random");
-            DrawProp(clipSo, "seed", "Seed");
-            DrawProp(clipSo, "enableInbetweenInterpolation", "In-between Interpolation");
-            DrawProp(clipSo, "showConstraint", "Show Constraint");
 
+            generationBackend = (KimodoGenerationBackend)EditorGUILayout.EnumPopup(new GUIContent("Backend"), generationBackend);
+
+            if (generationBackend == KimodoGenerationBackend.KimodoBridge)
+            {
+                DrawBridgePanel(ref bridgeModelName, ref bridgeVramMode);
+            }
+            else
+            {
+                EditorGUILayout.HelpBox("ComfyUI backend uses existing clip defaults for host, port, and workflow.", MessageType.Info);
+            }
+
+            EditorGUILayout.Space(4f);
+            EditorGUILayout.LabelField("Prompt", EditorStyles.miniBoldLabel);
+            motionPrompt = EditorGUILayout.TextArea(motionPrompt ?? string.Empty, GUILayout.Height(60f));
+
+            generationFrames = EditorGUILayout.IntSlider(
+                new GUIContent("Duration (frames)"),
+                Mathf.Clamp(generationFrames, KimodoPlayableClip.MIN_FRAMES, KimodoPlayableClip.MAX_FRAMES),
+                KimodoPlayableClip.MIN_FRAMES,
+                KimodoPlayableClip.MAX_FRAMES);
+
+            diffusionSteps = Mathf.Clamp(
+                EditorGUILayout.IntField(new GUIContent("Diffusion Steps"), diffusionSteps),
+                1,
+                1000);
+
+            EditorGUILayout.BeginHorizontal();
+            randomSeed = EditorGUILayout.ToggleLeft(new GUIContent("Random"), randomSeed, GUILayout.Width(90f));
+            using (new EditorGUI.DisabledScope(randomSeed))
+            {
+                seed = EditorGUILayout.IntField(new GUIContent("Seed"), seed);
+            }
+            EditorGUILayout.EndHorizontal();
+
+            EditorGUILayout.Space(6f);
             bool canGenerate = !isGenerating && hasSelection;
             EditorGUI.BeginDisabledGroup(!canGenerate);
             if (GUILayout.Button("Generate & Bake", GUILayout.Height(30f)))
@@ -66,70 +127,75 @@ namespace KimodoUnityMotionTools.ProjectEditor.AnimatorTooling
                 cancelGenerate?.Invoke();
             }
             EditorGUI.EndDisabledGroup();
+
             EditorGUILayout.EndVertical();
         }
 
-        private static void DrawKimodoBridgePanel(SerializedObject clipSo)
+        private static void DrawBridgePanel(ref string bridgeModelName, ref KimodoBridgeVramMode bridgeVramMode)
         {
             EditorGUILayout.Space(4f);
-            EditorGUILayout.LabelField("Kimodo Bridge", EditorStyles.boldLabel);
+            EditorGUILayout.LabelField("Kimodo Bridge", EditorStyles.miniBoldLabel);
             EditorGUILayout.BeginVertical("box");
-            DrawProp(clipSo, "bridgeModelName", "Bridge Model");
-            DrawProp(clipSo, "bridgeVramMode", "VRAM Mode");
+
+            string[] options = KimodoBridgeController.SupportedModelNames;
+            if (options != null && options.Length > 0)
+            {
+                string current = string.IsNullOrWhiteSpace(bridgeModelName) ? options[0] : bridgeModelName.Trim();
+                int currentIndex = Array.IndexOf(options, current);
+                if (currentIndex < 0)
+                {
+                    currentIndex = 0;
+                }
+
+                int newIndex = EditorGUILayout.Popup(new GUIContent("Bridge Model"), currentIndex, options);
+                bridgeModelName = options[Mathf.Clamp(newIndex, 0, options.Length - 1)];
+            }
+            else
+            {
+                bridgeModelName = EditorGUILayout.TextField(new GUIContent("Bridge Model"), bridgeModelName ?? string.Empty);
+            }
+
+            bridgeVramMode = (KimodoBridgeVramMode)EditorGUILayout.EnumPopup(new GUIContent("VRAM Mode"), bridgeVramMode);
+
             EditorGUILayout.EndVertical();
         }
 
-        private static void DrawComfyUiPanel(SerializedObject clipSo)
+        private static void DrawResultPanel(AnimationClip generatedClipForPreview, Action resetGenerated)
         {
             EditorGUILayout.Space(4f);
-            EditorGUILayout.LabelField("ComfyUI", EditorStyles.boldLabel);
+            EditorGUILayout.LabelField("Result", EditorStyles.boldLabel);
             EditorGUILayout.BeginVertical("box");
-            DrawProp(clipSo, "workflowJsonAsset", "Workflow JSON Asset");
-            DrawProp(clipSo, "comfyUiHost", "ComfyUI Host");
-            DrawProp(clipSo, "comfyUiPort", "ComfyUI Port");
-            EditorGUILayout.EndVertical();
-        }
 
-        private static void DrawBakePanel(SerializedObject clipSo)
-        {
-            EditorGUILayout.LabelField("Animation Bake", EditorStyles.boldLabel);
-            EditorGUILayout.BeginVertical("box");
-            DrawProp(clipSo, "autoRetargetOnBinding", "Auto Retarget On Binding");
-            DrawProp(clipSo, "customRetargetAvatar", "Custom Avatar");
-            DrawProp(clipSo, "curveFilterOptions", "Curve Filter Options", true);
-            EditorGUILayout.EndVertical();
-        }
-
-        private static void DrawGeneratedPanel(AnimationClip generatedClipForPreview, Action resetGenerated)
-        {
-            EditorGUILayout.LabelField("Generated", EditorStyles.boldLabel);
-            EditorGUILayout.BeginVertical("box");
             using (new EditorGUI.DisabledScope(true))
             {
-                EditorGUILayout.ObjectField("Generated Clip Preview", generatedClipForPreview, typeof(AnimationClip), false);
+                EditorGUILayout.ObjectField(
+                    new GUIContent("Generated Clip Preview"),
+                    generatedClipForPreview,
+                    typeof(AnimationClip),
+                    false);
             }
-            if (GUILayout.Button("Reset", GUILayout.Width(100)))
+
+            bool canReset = generatedClipForPreview != null;
+            EditorGUI.BeginDisabledGroup(!canReset);
+            if (GUILayout.Button("Reset", GUILayout.Width(100f)))
             {
                 resetGenerated?.Invoke();
             }
+            EditorGUI.EndDisabledGroup();
+
             EditorGUILayout.EndVertical();
         }
 
-        private static void DrawAnimationClipPanel(SerializedObject clipSo)
-        {
-            EditorGUILayout.LabelField("Animation Clip", EditorStyles.boldLabel);
-            EditorGUILayout.BeginVertical("box");
-            DrawProp(clipSo, "m_Clip", "Clip");
-            DrawProp(clipSo, "m_ApplyFootIK", "Foot IK");
-            DrawProp(clipSo, "m_Loop", "Loop");
-            EditorGUILayout.EndVertical();
-        }
-
-        private static void DrawApplyPanel(bool isGenerating, bool hasSelection, AnimationClip lastSuccessfulGeneratedClipForApply, Action applyGeneratedResult)
+        private static void DrawApplyPanel(
+            bool hasSelection,
+            bool isGenerating,
+            AnimationClip lastSuccessfulGeneratedClipForApply,
+            Action applyGeneratedResult)
         {
             EditorGUILayout.Space(4f);
             EditorGUILayout.LabelField("Apply", EditorStyles.boldLabel);
             EditorGUILayout.BeginVertical("box");
+
             bool canApply = lastSuccessfulGeneratedClipForApply != null && !isGenerating && hasSelection;
             EditorGUI.BeginDisabledGroup(!canApply);
             if (GUILayout.Button("Apply", GUILayout.Height(28f)))
@@ -137,23 +203,8 @@ namespace KimodoUnityMotionTools.ProjectEditor.AnimatorTooling
                 applyGeneratedResult?.Invoke();
             }
             EditorGUI.EndDisabledGroup();
-            EditorGUILayout.EndVertical();
-        }
 
-        private static void DrawProp(SerializedObject clipSo, string propertyName, string label, bool multiLine = false, float height = 18f)
-        {
-            SerializedProperty p = clipSo.FindProperty(propertyName);
-            if (p == null)
-            {
-                return;
-            }
-            if (multiLine && p.propertyType == SerializedPropertyType.String)
-            {
-                EditorGUILayout.LabelField(label);
-                p.stringValue = EditorGUILayout.TextArea(p.stringValue ?? string.Empty, GUILayout.Height(height));
-                return;
-            }
-            EditorGUILayout.PropertyField(p, new GUIContent(label), multiLine);
+            EditorGUILayout.EndVertical();
         }
     }
 }

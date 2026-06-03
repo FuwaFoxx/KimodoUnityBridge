@@ -3,7 +3,7 @@ using System.Diagnostics;
 using System.IO;
 using UnityEngine;
 
-namespace KimodoUnityMotionTools.Bridge
+namespace KimodoBridge
 {
     internal sealed class LinuxBridgePlatformProcess : IBridgePlatformProcess
     {

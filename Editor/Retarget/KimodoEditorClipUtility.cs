@@ -2,7 +2,7 @@ using System;
 using UnityEditor;
 using UnityEngine;
 
-namespace KimodoUnityMotionTools
+namespace KimodoBridge.Editor
 {
     internal static class KimodoEditorClipUtility
     {

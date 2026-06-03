@@ -1,16 +1,18 @@
-﻿using KimodoUnityMotionTools.Generation.Pipeline;
+﻿
 using System;
 using System.Collections.Generic;
+using TimelineInject;
 using UnityEditor;
 using UnityEditor.Animations;
 using UnityEngine;
 using UnityEngine.Timeline;
 
-namespace KimodoUnityMotionTools.ProjectEditor.AnimatorTooling
+namespace KimodoBridge.Editor
 {
     internal sealed class KimodoAnimatorPreviewPane : IDisposable
     {
         private const float MinLeftWidth = 360f;
+        private const string DefaultBridgeModelName = "Kimodo-SOMA-RP-v1";
 
         private enum PreviewMode
         {
@@ -248,17 +250,17 @@ namespace KimodoUnityMotionTools.ProjectEditor.AnimatorTooling
             EditorGUILayout.EndVertical();
         }
 
-        public bool TryBuildExternalConstraints(KimodoPlayableClip workingClip, out string constraintsJson, out string error)
+        public bool TryBuildExternalConstraints(string bridgeModelName, int generationFrames, out string constraintsJson, out string error)
         {
             constraintsJson = string.Empty;
             error = string.Empty;
 
-            if (!TryResolveAvatarAndMotionForSampling(workingClip, out Avatar avatar, out AnimationClip sourceClip, out error))
+            if (!TryResolveAvatarAndMotionForSampling(bridgeModelName, out Avatar avatar, out AnimationClip sourceClip, out error))
             {
                 return false;
             }
 
-            string modelName = workingClip != null ? workingClip.bridgeModelName : "Kimodo-SOMA-RP-v1";
+            string modelName = string.IsNullOrWhiteSpace(bridgeModelName) ? "Kimodo-SOMA-RP-v1" : bridgeModelName.Trim();
             var samples = new List<KimodoMarkerSampleResult>(2);
             if (!TrySampleAtNormalizedTime(avatar, sourceClip, modelName, 0.0, out KimodoMarkerSampleResult begin, out error))
             {
@@ -272,7 +274,7 @@ namespace KimodoUnityMotionTools.ProjectEditor.AnimatorTooling
             begin.constraintType = "fullbody";
             end.constraintType = "fullbody";
             begin.sampleTime = 0.0;
-            end.sampleTime = Mathf.Max(1, workingClip.generationFrames) / 30.0;
+            end.sampleTime = Mathf.Max(1, generationFrames) / 30.0;
             samples.Add(begin);
             samples.Add(end);
             constraintsJson = KimodoConstraintJsonExporter.ToConstraintsJson(samples, 0.0, end.sampleTime);
@@ -337,7 +339,7 @@ namespace KimodoUnityMotionTools.ProjectEditor.AnimatorTooling
                 return;
             }
 
-            if (TryResolveAvatarAndMotionForSampling(null, out _, out _, out _))
+            if (TryResolveAvatarAndMotionForSampling(DefaultBridgeModelName, out _, out _, out _))
             {
                 BuildOrRefreshPreviewInstances();
             }
@@ -347,7 +349,7 @@ namespace KimodoUnityMotionTools.ProjectEditor.AnimatorTooling
             }
         }
 
-        private bool TryResolveAvatarAndMotionForSampling(KimodoPlayableClip workingClip, out Avatar avatar, out AnimationClip sourceClip, out string error)
+        private bool TryResolveAvatarAndMotionForSampling(string bridgeModelName, out Avatar avatar, out AnimationClip sourceClip, out string error)
         {
             avatar = null;
             sourceClip = null;
@@ -361,7 +363,7 @@ namespace KimodoUnityMotionTools.ProjectEditor.AnimatorTooling
                     error = "State motion is not an AnimationClip.";
                     return false;
                 }
-                if (!TryPreparePreviewSource(sourceClip, workingClip, out avatar, out error))
+                if (!TryPreparePreviewSource(sourceClip, bridgeModelName, out avatar, out error))
                 {
                     return false;
                 }
@@ -378,7 +380,7 @@ namespace KimodoUnityMotionTools.ProjectEditor.AnimatorTooling
                     return false;
                 }
                 sourceClip = fromClip;
-                if (!TryPreparePreviewSource(sourceClip, workingClip, out avatar, out error))
+                if (!TryPreparePreviewSource(sourceClip, bridgeModelName, out avatar, out error))
                 {
                     return false;
                 }
@@ -401,79 +403,22 @@ namespace KimodoUnityMotionTools.ProjectEditor.AnimatorTooling
 
             double duration = Math.Max(0.001, clip.length);
             double globalTime = Mathf.Clamp01((float)normalizedTime) * duration;
-            Animator tempAnimator = CreateSamplingAnimatorFromAvatar(avatar, out GameObject tempRoot, out error);
-            if (tempAnimator == null)
-            {
-                return false;
-            }
-
-            clip.SampleAnimation(tempAnimator.gameObject, (float)globalTime);
-            KimodoLocalAvatarUtility.AvatarResolveResult sourceAvatarResult = KimodoLocalAvatarUtility.ResolveAvatarFromGameObject(tempAnimator.gameObject);
-            Avatar sourceAvatar = sourceAvatarResult.Avatar;
-            if (sourceAvatar == null || !sourceAvatar.isValid || !sourceAvatar.isHuman)
-            {
-                error = $"Resolve source avatar failed: {sourceAvatarResult.Error}";
-                if (tempRoot != null)
-                {
-                    UnityEngine.Object.DestroyImmediate(tempRoot);
-                }
-                return false;
-            }
 
             if (!KimodoRuntimeAvatarSkeletonBuilder.TryLoadAvatarByModelName(modelName, out Avatar targetAvatar, out string targetError))
             {
                 error = $"Resolve target avatar failed: {targetError}";
-                if (tempRoot != null)
-                {
-                    UnityEngine.Object.DestroyImmediate(tempRoot);
-                }
                 return false;
             }
 
-            bool ok = KimodoMarkerSamplingUtility.TrySampleMarker(
-                tempAnimator,
-                tempAnimator.transform,
-                null,
-                modelName,
-                globalTime,
+            return KimodoMarkerSamplingUtility.TrySampleMarkerFromClipWithRetargetCore(
+                clip,
                 "fullbody",
-                sourceAvatar,
+                globalTime,
+                avatar,
                 targetAvatar,
+                modelName,
                 out sample,
                 out error);
-            if (tempRoot != null)
-            {
-                UnityEngine.Object.DestroyImmediate(tempRoot);
-            }
-
-            return ok;
-        }
-
-        private static Animator CreateSamplingAnimatorFromAvatar(Avatar avatar, out GameObject root, out string error)
-        {
-            root = null;
-            error = string.Empty;
-            if (avatar == null || !avatar.isValid || !avatar.isHuman)
-            {
-                error = "Sampling avatar is null or invalid humanoid avatar.";
-                return null;
-            }
-
-            root = new GameObject("KimodoAnimatorToolSamplingRoot");
-            root.hideFlags = HideFlags.HideAndDontSave;
-            if (!KimodoRuntimeAvatarSkeletonBuilder.TryBuildHierarchyFromAvatarSkeleton(avatar, root.transform, out error))
-            {
-                UnityEngine.Object.DestroyImmediate(root);
-                root = null;
-                return null;
-            }
-
-            Animator animator = root.AddComponent<Animator>();
-            animator.avatar = avatar;
-            animator.enabled = false;
-            animator.Rebind();
-            animator.Update(0f);
-            return animator;
         }
 
         private void BuildOrRefreshPreviewInstances()
@@ -535,7 +480,7 @@ namespace KimodoUnityMotionTools.ProjectEditor.AnimatorTooling
         }
         
 
-        private bool TryPreparePreviewSource(AnimationClip sourceClip, KimodoPlayableClip workingClip, out Avatar avatar, out string error)
+        private bool TryPreparePreviewSource(AnimationClip sourceClip, string bridgeModelName, out Avatar avatar, out string error)
         {
             avatar = null;
             error = string.Empty;
@@ -553,11 +498,21 @@ namespace KimodoUnityMotionTools.ProjectEditor.AnimatorTooling
 
             if (sourceRoot == null)
             {
-                string modelName = workingClip != null ? workingClip.bridgeModelName : string.Empty;
+                string modelName = string.IsNullOrWhiteSpace(bridgeModelName) ? DefaultBridgeModelName : bridgeModelName.Trim();
                 if (KimodoRuntimeAvatarSkeletonBuilder.TryLoadAvatarByModelName(modelName, out Avatar fallbackAvatar, out _)
                     && fallbackAvatar != null && fallbackAvatar.isValid && fallbackAvatar.isHuman)
                 {
-                    sourceRoot = BuildSkeletonTemplateFromAvatar(fallbackAvatar);
+                    if (!KimodoRetargetTools.TryCreateTemporaryHumanoidRoot(
+                        fallbackAvatar,
+                        "KimodoPreviewSkeletonTemplate",
+                        animatorEnabled: false,
+                        applyRootMotion: false,
+                        out sourceRoot,
+                        out _,
+                        out _))
+                    {
+                        sourceRoot = null;
+                    }
                 }
             }
 
@@ -701,34 +656,6 @@ namespace KimodoUnityMotionTools.ProjectEditor.AnimatorTooling
                 return null;
             }
             return AssetDatabase.LoadAssetAtPath<GameObject>(clipPath);
-        }
-
-        private static GameObject BuildSkeletonTemplateFromAvatar(Avatar avatar)
-        {
-            if (avatar == null || !avatar.isValid || !avatar.isHuman)
-            {
-                return null;
-            }
-
-            GameObject root = new GameObject("KimodoPreviewSkeletonTemplate");
-            root.hideFlags = HideFlags.HideAndDontSave;
-            if (!KimodoRuntimeAvatarSkeletonBuilder.TryBuildHierarchyFromAvatarSkeleton(avatar, root.transform, out _))
-            {
-                UnityEngine.Object.DestroyImmediate(root);
-                return null;
-            }
-
-            Animator animator = root.GetComponentInChildren<Animator>(true);
-            if (animator == null)
-            {
-                animator = root.AddComponent<Animator>();
-            }
-            animator.avatar = avatar;
-            animator.enabled = false;
-            animator.applyRootMotion = false;
-            animator.Rebind();
-            animator.Update(0f);
-            return root;
         }
 
         private void DestroyPreviewInstances()

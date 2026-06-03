@@ -1,6 +1,6 @@
-﻿using UnityEditor;
+using UnityEditor;
 
-namespace KimodoUnityMotionTools.ProjectEditor.AnimatorTooling
+namespace KimodoBridge.Editor
 {
     [InitializeOnLoad]
     internal static class KimodoAvatarPreviewLifecycleGuard

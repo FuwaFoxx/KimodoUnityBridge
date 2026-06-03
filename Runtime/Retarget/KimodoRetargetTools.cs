@@ -1,12 +1,13 @@
-using KimodoUnityMotionTools.Generation.Pipeline;
+using KimodoBridge;
 using System;
 using System.Collections.Generic;
 using UnityEditor;
 using UnityEngine;
 using UnityEngine.Animations;
 using UnityEngine.Playables;
+using TimelineInject;
 
-namespace KimodoUnityMotionTools
+namespace KimodoBridge
 {
     public static class KimodoRetargetTools
     {
@@ -36,6 +37,56 @@ namespace KimodoUnityMotionTools
             return avatar != null && avatar.isValid && avatar.isHuman;
         }
 
+        public static bool TryCreateTemporaryHumanoidRoot(
+            Avatar avatar,
+            string rootName,
+            bool animatorEnabled,
+            bool applyRootMotion,
+            out GameObject root,
+            out Animator animator,
+            out string error)
+        {
+            root = null;
+            animator = null;
+            error = string.Empty;
+
+            if (!IsValidHumanoid(avatar))
+            {
+                error = "Avatar is null/invalid/non-humanoid.";
+                return false;
+            }
+
+            root = new GameObject(string.IsNullOrWhiteSpace(rootName) ? "KimodoTemporaryHumanoidRoot" : rootName);
+            root.hideFlags = HideFlags.HideAndDontSave;
+            root.transform.SetPositionAndRotation(Vector3.zero, Quaternion.identity);
+            root.transform.localScale = Vector3.one;
+
+            if (!KimodoRuntimeAvatarSkeletonBuilder.TryBuildHierarchyFromAvatarSkeleton(avatar, root.transform, out error))
+            {
+                UnityEngine.Object.DestroyImmediate(root);
+                root = null;
+                return false;
+            }
+
+            SetHierarchyHideFlags(root.transform, HideFlags.HideAndDontSave);
+
+            animator = root.GetComponent<Animator>();
+            if (animator == null)
+            {
+                animator = root.AddComponent<Animator>();
+            }
+
+            animator.avatar = avatar;
+            animator.runtimeAnimatorController = null;
+            animator.applyRootMotion = applyRootMotion;
+            animator.cullingMode = AnimatorCullingMode.AlwaysAnimate;
+            animator.enabled = true;
+            animator.Rebind();
+            animator.Update(0f);
+            animator.enabled = animatorEnabled;
+            return true;
+        }
+
         public static bool TryBuildSkeletonCache(Avatar avatar, string rootName, out SkeletonCache cache, out string error)
         {
             cache = null;
@@ -47,32 +98,17 @@ namespace KimodoUnityMotionTools
                 return false;
             }
 
-            GameObject root = new GameObject(string.IsNullOrWhiteSpace(rootName) ? "KimodoSkeletonCache" : rootName);
-            root.hideFlags = HideFlags.HideAndDontSave;
-            root.transform.SetPositionAndRotation(Vector3.zero, Quaternion.identity);
-            root.transform.localScale = Vector3.one;
-
-            if (!KimodoRuntimeAvatarSkeletonBuilder.TryBuildHierarchyFromAvatarSkeleton(avatar, root.transform, out error))
+            if (!TryCreateTemporaryHumanoidRoot(
+                avatar,
+                string.IsNullOrWhiteSpace(rootName) ? "KimodoSkeletonCache" : rootName,
+                animatorEnabled: true,
+                applyRootMotion: true,
+                out GameObject root,
+                out Animator animator,
+                out error))
             {
-                UnityEngine.Object.DestroyImmediate(root);
                 return false;
             }
-
-            SetHierarchyHideFlags(root.transform, HideFlags.HideAndDontSave);
-
-            Animator animator = root.GetComponent<Animator>();
-            if (animator == null)
-            {
-                animator = root.AddComponent<Animator>();
-            }
-
-            animator.avatar = avatar;
-            animator.runtimeAnimatorController = null;
-            animator.applyRootMotion = true;
-            animator.enabled = true;
-            animator.cullingMode = AnimatorCullingMode.AlwaysAnimate;
-            animator.Rebind();
-            animator.Update(0f);
 
             string canonicalRootBoneName = KimodoRetargetAvatarUtility.ResolveSkeletonRootBoneName(avatar);
             if (!KimodoRetargetAvatarUtility.TryBuildBoneNameTable(root.transform, canonicalRootBoneName, out string[] bonePaths, out error))
@@ -131,6 +167,31 @@ namespace KimodoUnityMotionTools
             try
             {
                 return TrySampleBoneClipToBoneSample(context, sampleTime, out sample, out error);
+            }
+            finally
+            {
+                DestroyClipSamplingContext(context);
+            }
+        }
+
+        public static bool SampleMuscleClipToMuscleSample(
+            AnimationClip clip,
+            SkeletonCache cache,
+            float sampleTime,
+            out MuscleSample sample,
+            out string error)
+        {
+            sample = null;
+            error = string.Empty;
+
+            if (!TryBuildClipSamplingContext(clip, cache, "KimodoRetargetTools_SourceMuscleSampler", ResolveClipSamplingMode(clip), out ClipSamplingContext context, out error))
+            {
+                return false;
+            }
+
+            try
+            {
+                return TrySampleMuscleClipToMuscleSample(context, sampleTime, out sample, out error);
             }
             finally
             {
@@ -581,6 +642,38 @@ namespace KimodoUnityMotionTools
             return true;
         }
 
+        private static bool TrySampleMuscleClipToMuscleSample(
+            ClipSamplingContext context,
+            float sampleTime,
+            out MuscleSample sample,
+            out string error)
+        {
+            sample = null;
+            error = string.Empty;
+
+            if (!TryEvaluateClipSamplingContext(context, sampleTime, out error))
+            {
+                return false;
+            }
+
+            try
+            {
+                HumanPose pose = new HumanPose
+                {
+                    muscles = new float[HumanTrait.MuscleCount]
+                };
+                context.cache.poseHandler.GetHumanPose(ref pose);
+                EnsureHumanPoseMuscles(ref pose);
+                sample = BuildMuscleSampleFromPose(context.cache, pose);
+                return true;
+            }
+            catch (Exception ex)
+            {
+                error = ex.Message;
+                return false;
+            }
+        }
+
         private static bool TrySampleBoneClipToBoneSample(
             AnimationClip clip,
             SkeletonCache cache,
@@ -758,26 +851,15 @@ namespace KimodoUnityMotionTools
                 for (int frame = 0; frame < frameCount; frame++)
                 {
                     float time = FrameToTime(frame, frameCount, duration);
-                    if (!TryEvaluateClipSamplingContext(context, time, out error))
+                    if (!TrySampleMuscleClipToMuscleSample(context, time, out MuscleSample sample, out error))
                     {
                         return false;
                     }
 
-                    HumanPose pose = new HumanPose
-                    {
-                        muscles = new float[HumanTrait.MuscleCount]
-                    };
-                    context.cache.poseHandler.GetHumanPose(ref pose);
-                    EnsureHumanPoseMuscles(ref pose);
-                    samples[frame] = BuildMuscleSampleFromPose(context.cache, pose);
+                    samples[frame] = CloneMuscleSample(sample);
                 }
 
                 return true;
-            }
-            catch (Exception ex)
-            {
-                error = ex.Message;
-                return false;
             }
             finally
             {

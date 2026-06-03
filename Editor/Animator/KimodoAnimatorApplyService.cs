@@ -3,7 +3,7 @@ using UnityEditor;
 using UnityEditor.Animations;
 using UnityEngine;
 
-namespace KimodoUnityMotionTools.ProjectEditor.AnimatorTooling
+namespace KimodoBridge.Editor
 {
     internal sealed class KimodoAnimatorApplyService
     {

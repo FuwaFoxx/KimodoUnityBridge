@@ -1,8 +1,9 @@
 using System;
 using UnityEditor;
 using UnityEngine;
+using TimelineInject;
 
-namespace KimodoUnityMotionTools.ProjectEditor
+namespace KimodoBridge.Editor
 {
     internal static class KimodoHumanoidAvatarBuilderUtility
     {

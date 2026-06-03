@@ -1,4 +1,4 @@
-namespace KimodoUnityMotionTools.Generation.Pipeline
+namespace KimodoBridge
 {
     public enum KimodoGeneratePipelineStage
     {

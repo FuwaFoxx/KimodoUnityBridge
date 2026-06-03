@@ -1,7 +1,9 @@
 using System;
 using System.Collections.Generic;
+using UnityEngine;
+using UnityEngine.Timeline;
 
-namespace UnityEngine.Timeline
+namespace TimelineInject
 {
     public static class KimodoVectorExtensions
     {

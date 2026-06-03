@@ -1,6 +1,6 @@
 using UnityEngine;
 
-namespace KimodoUnityMotionTools.ProjectEditor.Manager
+namespace KimodoBridge.Editor
 {
     public interface IKimodoEditorCommandResult
     {

@@ -1,8 +1,9 @@
 using System;
 using System.Collections.Generic;
 using UnityEngine;
+using TimelineInject;
 
-namespace KimodoUnityMotionTools.Generation.Pipeline
+namespace KimodoBridge
 {
     public static class KimodoRuntimeAvatarSkeletonBuilder
     {

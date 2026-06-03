@@ -1,26 +1,37 @@
-﻿using KimodoUnityMotionTools.ProjectEditor.Manager;
+using KimodoBridge;
+using KimodoBridge.Editor;
 using System;
 using System.Runtime.ExceptionServices;
+using System.Threading;
+using System.Threading.Tasks;
 using UnityEditor;
 using UnityEditor.Animations;
 using UnityEngine;
+using TimelineInject;
 
-namespace KimodoUnityMotionTools.ProjectEditor.AnimatorTooling
+namespace KimodoBridge.Editor
 {
     public sealed class KimodoAnimatorToolWindow : EditorWindow
     {
         private const string MenuPath = "Kimodo/Kimodo Animator Tool";
 
-        private KimodoPlayableClip workingClip;
-        private SerializedObject clipSo;
         private string lastStatus = string.Empty;
         private string lastError = string.Empty;
         private bool isGenerating;
-        private bool managerSubscribed;
+        private KimodoGenerationBackend generationBackend = KimodoGenerationBackend.KimodoBridge;
+        private string bridgeModelName = "Kimodo-SOMA-RP-v1";
+        private KimodoBridgeVramMode bridgeVramMode = KimodoBridgeVramMode.Low;
+        private string motionPrompt = "a man walk and say hello";
+        private int generationFrames = KimodoPlayableClip.DEFAULT_FRAMES;
+        private int diffusionSteps = 100;
+        private bool randomSeed;
+        private int seed = 42;
         private AnimationClip lastSuccessfulGeneratedClipForApply;
         private readonly KimodoAnimatorApplyService applyService = new KimodoAnimatorApplyService();
+        private readonly KimodoEditorGeneratePipelineOrchestrator generatePipelineOrchestrator = new KimodoEditorGeneratePipelineOrchestrator();
         private KimodoAnimatorPreviewPane previewPane;
         private KimodoAnimatorEditorPane editorPane;
+        private CancellationTokenSource generationCancellationTokenSource;
         private double lastPreviewRepaintTime;
 
         [MenuItem(MenuPath, priority = 110)]
@@ -33,18 +44,16 @@ namespace KimodoUnityMotionTools.ProjectEditor.AnimatorTooling
 
         private void OnEnable()
         {
-            EnsureWorkingClip();
             previewPane = new KimodoAnimatorPreviewPane();
             previewPane.Initialize();
             editorPane = new KimodoAnimatorEditorPane();
-            SubscribeManagerEvents();
             EditorApplication.update += OnEditorUpdate;
         }
 
         private void OnDisable()
         {
             EditorApplication.update -= OnEditorUpdate;
-            UnsubscribeManagerEvents();
+            CancelGenerate();
             previewPane?.Dispose();
             previewPane = null;
             editorPane = null;
@@ -74,12 +83,12 @@ namespace KimodoUnityMotionTools.ProjectEditor.AnimatorTooling
 
         private void OnGUI()
         {
-            EnsureWorkingClip();
             if (previewPane == null)
             {
                 previewPane = new KimodoAnimatorPreviewPane();
                 previewPane.Initialize();
             }
+
             if (editorPane == null)
             {
                 editorPane = new KimodoAnimatorEditorPane();
@@ -90,25 +99,24 @@ namespace KimodoUnityMotionTools.ProjectEditor.AnimatorTooling
             using (new EditorGUILayout.HorizontalScope())
             {
                 previewPane.DrawPreviewPane(position.height);
-
-                if (workingClip == null || clipSo == null)
-                {
-                    EditorGUILayout.HelpBox("Failed to initialize working KimodoPlayableClip instance.", MessageType.Error);
-                }
-                else
-                {
-                    editorPane.Draw(
-                        position.width,
-                        clipSo,
-                        previewPane,
-                        isGenerating,
-                        StartGenerate,
-                        CancelGenerate,
-                        ApplyGeneratedResult,
-                        ResetGenerated,
-                        previewPane.GeneratedClipForPreview,
-                        lastSuccessfulGeneratedClipForApply);
-                }
+                editorPane.Draw(
+                    position.width,
+                    previewPane,
+                    ref generationBackend,
+                    ref bridgeModelName,
+                    ref bridgeVramMode,
+                    ref motionPrompt,
+                    ref generationFrames,
+                    ref diffusionSteps,
+                    ref randomSeed,
+                    ref seed,
+                    isGenerating,
+                    StartGenerate,
+                    CancelGenerate,
+                    ApplyGeneratedResult,
+                    ResetGenerated,
+                    previewPane.GeneratedClipForPreview,
+                    lastSuccessfulGeneratedClipForApply);
             }
 
             if (!string.IsNullOrWhiteSpace(lastError))
@@ -136,46 +144,127 @@ namespace KimodoUnityMotionTools.ProjectEditor.AnimatorTooling
 
         private void StartGenerate()
         {
-            if (previewPane == null || workingClip == null)
+            if (previewPane == null)
             {
-                lastError = "Preview pane or working clip is not ready.";
+                lastError = "Preview pane is not ready.";
                 return;
             }
 
-            if (!previewPane.TryBuildExternalConstraints(workingClip, out string constraintsJson, out string error))
+            if (isGenerating)
+            {
+                return;
+            }
+
+            if (!previewPane.TryBuildExternalConstraints(bridgeModelName, generationFrames, out string constraintsJson, out string error))
             {
                 lastError = error;
                 return;
             }
 
-            bool accepted = KimodoEditorCommandManager.Dispatch(
-                new GeneratePlayableClipCommand(
-                    workingClip,
-                    promptOverride: null,
-                    externalConstraint: new KimodoExternalConstraintRequest
-                    {
-                        Enabled = true,
-                        ConstraintsJson = constraintsJson,
-                        RetargetAvatar = previewPane.RetargetAvatarForPreview
-                    }));
-            if (!accepted)
+            if (previewPane.RetargetAvatarForPreview == null)
             {
-                lastError = "Failed to dispatch generate command.";
+                lastError = "Preview retarget avatar is not ready.";
                 return;
             }
 
+            DisposeGenerationCancellation();
+            generationCancellationTokenSource = new CancellationTokenSource();
+            CancellationTokenSource runCts = generationCancellationTokenSource;
+
             isGenerating = true;
             lastError = string.Empty;
-            lastStatus = "Queued generation...";
+            lastStatus = "Generating and baking...";
+            _ = StartGenerateAsync(constraintsJson, previewPane.RetargetAvatarForPreview, runCts);
+        }
+
+        private async Task StartGenerateAsync(string constraintsJson, Avatar explicitRetargetAvatar, CancellationTokenSource runCts)
+        {
+            KimodoPlayableClip tempClip = null;
+            try
+            {
+                tempClip = CreateTemporaryWorkingClip();
+                KimodoEditorGenerateResult result = await generatePipelineOrchestrator.ExecuteGenerateAndBakeAsync(
+                    tempClip,
+                    promptOverride: null,
+                    (stage, message) =>
+                    {
+                        RunOnEditorThread(() =>
+                        {
+                            lastStatus = string.IsNullOrWhiteSpace(message) ? stage.ToString() : message;
+                            Repaint();
+                        });
+                    },
+                    KimodoTimelinePreviewRefreshUtility.RefreshIfPreviewing,
+                    constraintsJson,
+                    useExternalConstraints: true,
+                    explicitRetargetAvatar,
+                    runCts.Token);
+
+                RunOnEditorThread(() =>
+                {
+                    isGenerating = false;
+                    previewPane?.OnGenerateSuccess(result.GeneratedClip);
+                    lastSuccessfulGeneratedClipForApply = result.GeneratedClip;
+                    lastStatus = "Generation complete.";
+                    lastError = string.Empty;
+                    Repaint();
+                });
+            }
+            catch (OperationCanceledException)
+            {
+                RunOnEditorThread(() =>
+                {
+                    isGenerating = false;
+                    previewPane?.OnGenerateFailedOrCanceled();
+                    lastStatus = "Generation canceled.";
+                    lastError = string.Empty;
+                    Repaint();
+                });
+            }
+            catch (Exception ex)
+            {
+                RunOnEditorThread(() =>
+                {
+                    isGenerating = false;
+                    previewPane?.OnGenerateFailedOrCanceled();
+                    lastError = ex.Message;
+                    lastStatus = "Generation failed.";
+                    Repaint();
+                    RethrowOnNextEditorTick(ex);
+                });
+            }
+            finally
+            {
+                RunOnEditorThread(() =>
+                {
+                    DisposeGenerationCancellation(runCts);
+                    if (tempClip != null)
+                    {
+                        DestroyImmediate(tempClip);
+                    }
+                });
+            }
         }
 
         private void CancelGenerate()
         {
-            if (workingClip == null)
+            CancellationTokenSource cts = generationCancellationTokenSource;
+            if (cts == null)
             {
                 return;
             }
-            KimodoEditorCommandManager.Dispatch(new CancelPlayableClipGenerationCommand(workingClip));
+
+            try
+            {
+                if (!cts.IsCancellationRequested)
+                {
+                    cts.Cancel();
+                }
+            }
+            catch
+            {
+                // Ignore cancellation errors.
+            }
         }
 
         private void ApplyGeneratedResult()
@@ -191,7 +280,10 @@ namespace KimodoUnityMotionTools.ProjectEditor.AnimatorTooling
             if (previewPane.SelectedTransition != null)
             {
                 AnimatorState toState = previewPane.SelectedTransition.destinationState;
-                string suggestedStateName = string.Format("{0}_{1}_KimodoInsert", previewPane.SelectedFromState != null ? previewPane.SelectedFromState.name : "From", toState != null ? toState.name : "To");
+                string suggestedStateName = string.Format(
+                    "{0}_{1}_KimodoInsert",
+                    previewPane.SelectedFromState != null ? previewPane.SelectedFromState.name : "From",
+                    toState != null ? toState.name : "To");
 
                 success = applyService.TryApplyTransition(
                     new KimodoAnimatorApplyService.TransitionApplyContext
@@ -233,111 +325,50 @@ namespace KimodoUnityMotionTools.ProjectEditor.AnimatorTooling
             lastStatus = "Apply completed.";
         }
 
-        private void EnsureWorkingClip()
+        private KimodoPlayableClip CreateTemporaryWorkingClip()
         {
-            if (workingClip != null && clipSo != null)
+            var clip = CreateInstance<KimodoPlayableClip>();
+            clip.name = "KimodoAnimatorTool_WorkingClip";
+            clip.generationBackend = generationBackend;
+            clip.bridgeModelName = bridgeModelName;
+            clip.bridgeVramMode = bridgeVramMode;
+            clip.motionPrompt = motionPrompt ?? string.Empty;
+            clip.generationFrames = Mathf.Clamp(generationFrames, KimodoPlayableClip.MIN_FRAMES, KimodoPlayableClip.MAX_FRAMES);
+            clip.diffusionSteps = Mathf.Clamp(diffusionSteps, 1, 1000);
+            clip.randomSeed = randomSeed;
+            clip.seed = seed;
+            clip.hideFlags = HideFlags.HideAndDontSave;
+            return clip;
+        }
+
+        private void DisposeGenerationCancellation()
+        {
+            DisposeGenerationCancellation(generationCancellationTokenSource);
+        }
+
+        private void DisposeGenerationCancellation(CancellationTokenSource cts)
+        {
+            if (cts == null)
             {
                 return;
             }
 
-            workingClip = CreateInstance<KimodoPlayableClip>();
-            workingClip.name = "KimodoAnimatorTool_WorkingClip";
-            clipSo = new SerializedObject(workingClip);
+            if (ReferenceEquals(generationCancellationTokenSource, cts))
+            {
+                generationCancellationTokenSource = null;
+            }
+
+            cts.Dispose();
         }
 
-        private void SubscribeManagerEvents()
+        private static void RunOnEditorThread(Action action)
         {
-            if (managerSubscribed)
+            if (action == null)
             {
                 return;
             }
 
-            KimodoEditorCommandManager.CommandProgress += OnCommandProgress;
-            KimodoEditorCommandManager.CommandCompleted += OnCommandCompleted;
-            KimodoEditorCommandManager.CommandFailed += OnCommandFailed;
-            KimodoEditorCommandManager.CommandCanceled += OnCommandCanceled;
-            managerSubscribed = true;
-        }
-
-        private void UnsubscribeManagerEvents()
-        {
-            if (!managerSubscribed)
-            {
-                return;
-            }
-
-            KimodoEditorCommandManager.CommandProgress -= OnCommandProgress;
-            KimodoEditorCommandManager.CommandCompleted -= OnCommandCompleted;
-            KimodoEditorCommandManager.CommandFailed -= OnCommandFailed;
-            KimodoEditorCommandManager.CommandCanceled -= OnCommandCanceled;
-            managerSubscribed = false;
-        }
-
-        private void OnCommandProgress(KimodoEditorCommandProgressEvent evt)
-        {
-            if (!IsCommandForWorkingClip(evt.Command))
-            {
-                return;
-            }
-
-            lastStatus = evt.Message;
-            Repaint();
-        }
-
-        private void OnCommandCompleted(KimodoEditorCommandCompletedEvent evt)
-        {
-            if (!IsCommandForWorkingClip(evt.Command))
-            {
-                return;
-            }
-
-            isGenerating = false;
-            if (evt.Payload is KimodoEditorGenerateResult gen)
-            {
-                previewPane?.OnGenerateSuccess(gen.GeneratedClip);
-                lastSuccessfulGeneratedClipForApply = gen.GeneratedClip;
-                lastStatus = "Generation complete.";
-                lastError = string.Empty;
-            }
-
-            Repaint();
-        }
-
-        private void OnCommandFailed(KimodoEditorCommandFailedEvent evt)
-        {
-            if (!IsCommandForWorkingClip(evt.Command))
-            {
-                return;
-            }
-
-            isGenerating = false;
-            previewPane?.OnGenerateFailedOrCanceled();
-            lastError = evt.Message;
-            lastStatus = "Generation failed.";
-            RethrowOnNextEditorTick(evt.Exception ?? new InvalidOperationException(evt.Message));
-            Repaint();
-        }
-
-        private void OnCommandCanceled(KimodoEditorCommandCanceledEvent evt)
-        {
-            if (!IsCommandForWorkingClip(evt.Command))
-            {
-                return;
-            }
-
-            isGenerating = false;
-            previewPane?.OnGenerateFailedOrCanceled();
-            lastStatus = "Generation canceled.";
-            Repaint();
-        }
-
-        private bool IsCommandForWorkingClip(IKimodoEditorCommand command)
-        {
-            if (command == null || workingClip == null)
-            {
-                return false;
-            }
-            return string.Equals(command.TargetKey, "clip:" + workingClip.GetInstanceID(), StringComparison.Ordinal);
+            EditorApplication.delayCall += () => action();
         }
 
         private static void RethrowOnNextEditorTick(Exception exception)
@@ -354,7 +385,7 @@ namespace KimodoUnityMotionTools.ProjectEditor.AnimatorTooling
 
     internal static class KimodoAnimatorSelectionResolver
     {
-        public static UnityEditor.Animations.AnimatorController FindControllerForObject(UnityEngine.Object target)
+        public static AnimatorController FindControllerForObject(UnityEngine.Object target)
         {
             if (target == null)
             {
@@ -367,7 +398,7 @@ namespace KimodoUnityMotionTools.ProjectEditor.AnimatorTooling
                 return null;
             }
 
-            return AssetDatabase.LoadAssetAtPath<UnityEditor.Animations.AnimatorController>(path);
+            return AssetDatabase.LoadAssetAtPath<AnimatorController>(path);
         }
     }
 }

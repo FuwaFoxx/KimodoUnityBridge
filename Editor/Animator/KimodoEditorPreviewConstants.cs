@@ -1,4 +1,4 @@
-﻿namespace KimodoUnityMotionTools.ProjectEditor.AnimatorTooling
+namespace KimodoBridge.Editor
 {
     internal static class KimodoEditorPreviewConstants
     {

@@ -1,14 +1,11 @@
-using KimodoUnityMotionTools.Generation;
-using KimodoUnityMotionTools.Generation.Pipeline;
+using KimodoBridge;
 using System;
 using System.Collections.Generic;
 using System.Threading;
 using System.Threading.Tasks;
 using UnityEngine;
-using UnityEngine.Animations;
-using UnityEngine.Playables;
 
-namespace KimodoUnityMotionTools.Demo
+namespace KimodoBridge
 {
     public sealed class KimodoInfiniteMotionDemo : MonoBehaviour
     {
@@ -36,18 +33,16 @@ namespace KimodoUnityMotionTools.Demo
         private readonly Queue<MotionSegment> queuedSegments = new Queue<MotionSegment>();
         private CancellationTokenSource lifetimeCts;
         private KimodoGeneratePipeline pipeline;
-        private PlayableGraph graph;
-        private AnimationPlayableOutput output;
-        private AnimationMixerPlayable mixer;
-        private AnimationClipPlayable currentPlayable;
-        private AnimationClipPlayable nextPlayable;
         private MotionSegment currentSegment;
-        private MotionSegment transitionSegment;
+        private Avatar sourceAvatar;
+        private string targetRootBoneName;
+        private Transform targetSkeletonRoot;
+        private Transform[] targetBoneTransforms;
         private bool started;
         private bool generationInFlight;
         private string status = "idle";
         private string error = string.Empty;
-        private float transitionT;
+        private float currentSegmentTime;
 
         private void Awake()
         {
@@ -73,39 +68,6 @@ namespace KimodoUnityMotionTools.Demo
             StopDemo();
         }
 
-        private void Update()
-        {
-            if (!started || currentSegment == null || targetAnimator == null)
-            {
-                return;
-            }
-
-            float currentTime = GetCurrentClipTime();
-            float currentLength = Mathf.Max(0.01f, currentSegment.Clip != null ? currentSegment.Clip.length : segmentDurationSeconds);
-            float remaining = currentLength - currentTime;
-
-            if (remaining <= prefetchLeadSeconds)
-            {
-                _ = EnsureNextSegmentAsync();
-            }
-
-            if (queuedSegments.Count > 0 && transitionSegment == null && remaining <= Mathf.Max(0.25f, prefetchLeadSeconds * 0.5f))
-            {
-                BeginTransition();
-            }
-
-            if (transitionSegment != null)
-            {
-                transitionT += Time.deltaTime / Mathf.Max(0.05f, transitionSegment.Duration);
-                mixer.SetInputWeight(0, 1f - transitionT);
-                mixer.SetInputWeight(1, transitionT);
-                if (transitionT >= 1f)
-                {
-                    CommitTransition();
-                }
-            }
-        }
-
         public async Task StartDemoAsync()
         {
             if (started)
@@ -120,7 +82,12 @@ namespace KimodoUnityMotionTools.Demo
                 return;
             }
 
-            EnsurePlayableGraph();
+            if (!TryInitializeRuntimeRetarget(out error))
+            {
+                status = "failed";
+                return;
+            }
+
             started = true;
             status = "starting";
             error = string.Empty;
@@ -136,7 +103,7 @@ namespace KimodoUnityMotionTools.Demo
                 }
             }
 
-            PlaySegment(currentSegment, false);
+            currentSegmentTime = 0f;
             _ = EnsureNextSegmentAsync();
             status = "running";
         }
@@ -151,15 +118,10 @@ namespace KimodoUnityMotionTools.Demo
             lifetimeCts = new CancellationTokenSource();
 
             queuedSegments.Clear();
-            if (graph.IsValid())
-            {
-                graph.Destroy();
-            }
-
             DestroySegmentClips();
             currentSegment = null;
-            transitionSegment = null;
-            transitionT = 0f;
+            currentSegmentTime = 0f;
+            targetBoneTransforms = null;
             generationInFlight = false;
         }
 
@@ -241,7 +203,7 @@ namespace KimodoUnityMotionTools.Demo
                     name = $"KimodoSegment_{index}",
                     legacy = true
                 };
-                if (!KimodoUnityMotionTools.Ai.KimodoRuntimeClipBaker.TryBake(clip, result.MotionJsonCompact, out string bakeError))
+                if (!KimodoBridge.KimodoRuntimeClipBaker.TryBake(clip, result.MotionJsonCompact, out string bakeError))
                 {
                     error = bakeError;
                     status = "failed";
@@ -258,107 +220,116 @@ namespace KimodoUnityMotionTools.Demo
             }
         }
 
-        private void EnsurePlayableGraph()
+        private bool TryInitializeRuntimeRetarget(out string initError)
         {
-            if (graph.IsValid())
+            initError = string.Empty;
+            targetBoneTransforms = null;
+
+            Avatar targetAvatar = targetAnimator != null ? targetAnimator.avatar : null;
+            if (!KimodoRetargetTools.IsValidHumanoid(targetAvatar))
+            {
+                initError = "Target Animator avatar is null, invalid, or non-humanoid.";
+                return false;
+            }
+
+            string sourceModelName = runtimeSettings?.bridgeSettings != null
+                ? runtimeSettings.bridgeSettings.modelName
+                : string.Empty;
+            if (!KimodoRuntimeAvatarSkeletonBuilder.TryLoadAvatarByModelName(sourceModelName, out sourceAvatar, out string sourceAvatarError))
+            {
+                initError = $"Resolve source avatar failed: {sourceAvatarError}";
+                return false;
+            }
+
+            targetRootBoneName = KimodoRetargetAvatarUtility.ResolveSkeletonRootBoneName(targetAvatar);
+            targetSkeletonRoot = KimodoRetargetAvatarUtility.FindTransformByName(targetAnimator.transform, targetRootBoneName);
+            if (targetSkeletonRoot == null)
+            {
+                initError = $"Target skeleton root '{targetRootBoneName}' was not found under target Animator.";
+                return false;
+            }
+
+            return true;
+        }
+
+        private void Update()
+        {
+            if (!started || currentSegment == null || targetAnimator == null)
             {
                 return;
             }
 
-            graph = PlayableGraph.Create("KimodoInfiniteMotionDemo");
-            graph.SetTimeUpdateMode(DirectorUpdateMode.GameTime);
-            mixer = AnimationMixerPlayable.Create(graph, 2, true);
-            output = AnimationPlayableOutput.Create(graph, "KimodoInfiniteMotionDemoOutput", targetAnimator);
-            output.SetSourcePlayable(mixer);
-            graph.Play();
-        }
+            if (!TrySampleAndApplyCurrentSegment(currentSegmentTime, out string sampleError))
+            {
+                error = sampleError;
+                status = "failed";
+                StopDemo();
+                return;
+            }
 
-        private void PlaySegment(MotionSegment segment, bool asTransition)
-        {
-            if (segment == null || segment.Clip == null)
+            float currentLength = Mathf.Max(0.01f, currentSegment.Clip != null ? currentSegment.Clip.length : segmentDurationSeconds);
+            float remaining = currentLength - currentSegmentTime;
+
+            if (remaining <= prefetchLeadSeconds)
+            {
+                _ = EnsureNextSegmentAsync();
+            }
+
+            currentSegmentTime += Time.deltaTime;
+            if (currentSegmentTime < currentLength)
             {
                 return;
             }
 
-            if (!currentPlayable.IsValid())
+            if (queuedSegments.Count == 0)
             {
-                currentPlayable = AnimationClipPlayable.Create(graph, segment.Clip);
-                currentPlayable.SetApplyFootIK(false);
-                currentPlayable.SetTime(0d);
-                mixer.SetInputCount(1);
-                mixer.ConnectInput(0, currentPlayable, 0, 1f);
-                mixer.SetInputWeight(0, 1f);
-                output.SetSourcePlayable(mixer);
-            }
-            else if (asTransition)
-            {
-                nextPlayable = AnimationClipPlayable.Create(graph, segment.Clip);
-                nextPlayable.SetApplyFootIK(false);
-                nextPlayable.SetTime(0d);
-                mixer.SetInputCount(2);
-                mixer.DisconnectInput(0);
-                mixer.DisconnectInput(1);
-                mixer.ConnectInput(0, currentPlayable, 0, 1f);
-                mixer.ConnectInput(1, nextPlayable, 0, 0f);
-                transitionSegment = segment;
-                transitionT = 0f;
-            }
-            else
-            {
-                currentPlayable = AnimationClipPlayable.Create(graph, segment.Clip);
-                currentPlayable.SetApplyFootIK(false);
-                currentPlayable.SetTime(0d);
-                mixer.SetInputCount(1);
-                mixer.ConnectInput(0, currentPlayable, 0, 1f);
-            }
-        }
-
-        private void BeginTransition()
-        {
-            if (queuedSegments.Count == 0 || transitionSegment != null)
-            {
+                currentSegmentTime = Mathf.Repeat(currentSegmentTime, currentLength);
                 return;
             }
 
-            MotionSegment segment = queuedSegments.Dequeue();
-            PlaySegment(segment, true);
+            MotionSegment previous = currentSegment;
+            currentSegment = queuedSegments.Dequeue();
+            currentSegmentTime = 0f;
+            if (previous?.Clip != null)
+            {
+                Destroy(previous.Clip);
+            }
         }
 
-        private void CommitTransition()
+        private bool TrySampleAndApplyCurrentSegment(float sampleTime, out string sampleError)
         {
-            if (transitionSegment == null)
+            sampleError = string.Empty;
+
+            if (currentSegment?.Clip == null)
             {
-                return;
+                sampleError = "Current segment clip is missing.";
+                return false;
             }
 
-            double nextTime = nextPlayable.IsValid() ? nextPlayable.GetTime() : 0d;
-            currentSegment = transitionSegment;
-            transitionSegment = null;
-            transitionT = 0f;
-
-            if (graph.IsValid())
+            if (!KimodoRetargetTools.TryRetargetNew(currentSegment.Clip, sourceAvatar, targetAnimator.avatar, sampleTime, out BoneSample targetSample, out sampleError))
             {
-                graph.Destroy();
+                return false;
             }
 
-            EnsurePlayableGraph();
-            currentPlayable = AnimationClipPlayable.Create(graph, currentSegment.Clip);
-            currentPlayable.SetApplyFootIK(false);
-            currentPlayable.SetTime(nextTime);
-            mixer.SetInputCount(1);
-            mixer.ConnectInput(0, currentPlayable, 0, 1f);
-            mixer.SetInputWeight(0, 1f);
-            nextPlayable = default;
+            return TryApplyBoneSampleToTarget(targetSample, out sampleError);
         }
 
-        private float GetCurrentClipTime()
+        private bool TryApplyBoneSampleToTarget(BoneSample sample, out string applyError)
         {
-            if (!currentPlayable.IsValid())
+            applyError = string.Empty;
+
+            if (targetSkeletonRoot == null)
             {
-                return 0f;
+                applyError = "Target skeleton root is missing.";
+                return false;
             }
 
-            return (float)currentPlayable.GetTime();
+            return KimodoRetargetAvatarUtility.TryApplyBoneSample(
+                sample,
+                targetSkeletonRoot,
+                targetRootBoneName,
+                ref targetBoneTransforms,
+                out applyError);
         }
 
         private string CaptureBoundaryPose()
@@ -385,7 +356,7 @@ namespace KimodoUnityMotionTools.Demo
                 return;
             }
 
-            GUILayout.BeginArea(new Rect(10, 10, 360, 160), GUI.skin.box);
+            GUILayout.BeginArea(new Rect(10, 10, 360, 220), GUI.skin.box);
             GUILayout.Label($"Status: {status}");
             GUILayout.Label($"Error: {error}");
             GUILayout.Label($"Queue: {queuedSegments.Count}");
@@ -400,6 +371,9 @@ namespace KimodoUnityMotionTools.Demo
                 StopDemo();
             }
             GUILayout.EndHorizontal();
+            GUILayout.Space(8f);
+            GUILayout.Label("Prompt");
+            prompt = GUILayout.TextField(prompt ?? string.Empty);
             GUILayout.EndArea();
         }
 
@@ -431,11 +405,6 @@ namespace KimodoUnityMotionTools.Demo
                 {
                     Destroy(segment.Clip);
                 }
-            }
-
-            if (transitionSegment?.Clip != null)
-            {
-                Destroy(transitionSegment.Clip);
             }
         }
     }

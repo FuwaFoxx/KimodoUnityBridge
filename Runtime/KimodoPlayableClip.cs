@@ -1,10 +1,10 @@
-using KimodoUnityMotionTools.Generation.Pipeline;
+using KimodoBridge;
 using UnityEngine;
 using UnityEngine.Playables;
 using UnityEngine.Timeline;
+using TimelineInject;
 
-
-namespace KimodoUnityMotionTools
+namespace KimodoBridge
 {
     public enum KimodoBridgeVramMode
     {

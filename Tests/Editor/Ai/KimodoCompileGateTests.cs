@@ -1,8 +1,8 @@
-using KimodoUnityMotionTools.ProjectEditor;
+using KimodoBridge.Editor;
 using NUnit.Framework;
 using System.Reflection;
 
-namespace KimodoUnityMotionTools.Tests
+namespace KimodoBridge.Editor
 {
     [TestFixture]
     public sealed class KimodoCompileGateTests

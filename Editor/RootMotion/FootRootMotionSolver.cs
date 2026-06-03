@@ -1,6 +1,6 @@
 using UnityEngine;
 
-namespace KimodoUnityMotionTools.ProjectEditor.RootMotionTooling
+namespace KimodoBridge.Editor
 {
     internal static class FootRootMotionSolver
     {

@@ -3,7 +3,7 @@ using System;
 using System.Collections.Generic;
 using UnityEngine;
 
-namespace KimodoUnityMotionTools.Ai
+namespace KimodoBridge
 {
     internal static class KimodoRuntimeClipBaker
     {

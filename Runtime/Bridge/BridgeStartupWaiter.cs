@@ -2,7 +2,7 @@ using System;
 using System.Threading;
 using System.Threading.Tasks;
 
-namespace KimodoUnityMotionTools.Bridge
+namespace KimodoBridge
 {
     internal sealed class BridgeStartupWaiter
     {

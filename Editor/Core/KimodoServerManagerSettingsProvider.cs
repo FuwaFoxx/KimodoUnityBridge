@@ -1,4 +1,4 @@
-﻿using KimodoUnityMotionTools.ProjectEditor.Manager;
+using KimodoBridge.Editor;
 using System;
 using System.Collections.Generic;
 using System.IO;
@@ -7,7 +7,7 @@ using UnityEditor;
 using UnityEngine;
 using UnityEngine.UIElements;
 
-namespace KimodoUnityMotionTools.ProjectEditor
+namespace KimodoBridge.Editor
 {
     internal sealed class KimodoServerManagerSettingsProvider : SettingsProvider
     {

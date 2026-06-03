@@ -1,7 +1,7 @@
 using System;
 using UnityEngine;
 
-namespace KimodoUnityMotionTools.Bridge
+namespace KimodoBridge
 {
     [Serializable]
     public sealed class BridgeRuntimeSettings

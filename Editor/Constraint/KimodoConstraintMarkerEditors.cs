@@ -1,5 +1,5 @@
-using KimodoUnityMotionTools.Generation.Pipeline;
-using KimodoUnityMotionTools.ProjectEditor.GenerationPipeline;
+using KimodoBridge;
+using KimodoBridge.Editor;
 using System;
 using System.Collections.Generic;
 using UnityEditor;
@@ -7,8 +7,9 @@ using UnityEditor.Timeline;
 using UnityEngine;
 using UnityEngine.Playables;
 using UnityEngine.Timeline;
+using TimelineInject;
 
-namespace KimodoUnityMotionTools.ProjectEditor
+namespace KimodoBridge.Editor
 {
     internal abstract class KimodoConstraintStandardMarkerEditorBase : UnityEditor.Editor
     {

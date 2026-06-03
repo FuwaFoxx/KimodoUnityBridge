@@ -1,6 +1,6 @@
 using UnityEngine;
 
-namespace KimodoUnityMotionTools
+namespace KimodoBridge
 {
     public static class KimodoRuntimeUtility
     {

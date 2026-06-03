@@ -1,6 +1,6 @@
-﻿using System;
+using System;
 
-namespace KimodoUnityMotionTools.ProjectEditor.Manager
+namespace KimodoBridge.Editor
 {
     public enum KimodoEditorCommandKind
     {

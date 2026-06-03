@@ -1,6 +1,6 @@
 ﻿{
   "name": "KimodoTool.Editor.UI",
-  "rootNamespace": "",
+  "rootNamespace": "KimodoBridge.Editor",
   "references": [
     "KimodoTool.Editor"
   ],

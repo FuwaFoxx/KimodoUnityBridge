@@ -1,6 +1,5 @@
-using KimodoUnityMotionTools.Bridge;
-using KimodoUnityMotionTools.Generation;
-using KimodoUnityMotionTools.ProjectEditor;
+using KimodoBridge;
+using KimodoBridge.Editor;
 using Newtonsoft.Json.Linq;
 using NUnit.Framework;
 using System;
@@ -16,7 +15,7 @@ using System.Threading.Tasks;
 using UnityEditor;
 using PackageInfo = UnityEditor.PackageManager.PackageInfo;
 
-namespace KimodoUnityMotionTools.Tests
+namespace KimodoBridge.Editor
 {
     internal sealed class KimodoRuntimeScope : IDisposable
     {

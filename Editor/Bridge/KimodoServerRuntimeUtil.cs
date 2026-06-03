@@ -1,8 +1,8 @@
-﻿using System;
+using System;
 using System.IO;
 using PackageInfo = UnityEditor.PackageManager.PackageInfo;
 
-namespace KimodoUnityMotionTools.ProjectEditor
+namespace KimodoBridge.Editor
 {
     internal static class KimodoServerRuntimeUtil
     {

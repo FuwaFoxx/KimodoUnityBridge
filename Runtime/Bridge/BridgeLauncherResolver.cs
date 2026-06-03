@@ -1,7 +1,7 @@
 using System;
 using System.IO;
 
-namespace KimodoUnityMotionTools.Bridge
+namespace KimodoBridge
 {
     public static class BridgeLauncherResolver
     {

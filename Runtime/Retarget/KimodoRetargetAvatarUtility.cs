@@ -1,8 +1,9 @@
 using System;
 using System.Collections.Generic;
 using UnityEngine;
+using TimelineInject;
 
-namespace KimodoUnityMotionTools
+namespace KimodoBridge
 {
     public static class KimodoRetargetAvatarUtility
     {
@@ -127,6 +128,69 @@ namespace KimodoUnityMotionTools
             }
 
             return frame;
+        }
+
+        public static bool TryApplyBoneSample(
+            BoneSample sample,
+            Transform[] boneTransforms,
+            out string error)
+        {
+            error = string.Empty;
+
+            if (sample == null || sample.boneNames == null || sample.localPositions == null || sample.localRotations == null)
+            {
+                error = "Bone sample is invalid.";
+                return false;
+            }
+
+            if (boneTransforms == null || boneTransforms.Length != sample.boneNames.Length)
+            {
+                error = "Bone transform mapping does not match bone sample.";
+                return false;
+            }
+
+            for (int i = 0; i < boneTransforms.Length; i++)
+            {
+                Transform bone = boneTransforms[i];
+                if (bone == null)
+                {
+                    continue;
+                }
+
+                bone.localPosition = sample.localPositions[i];
+                bone.localRotation = sample.localRotations[i];
+            }
+
+            return true;
+        }
+
+        public static bool TryApplyBoneSample(
+            BoneSample sample,
+            Transform root,
+            string rootBoneName,
+            ref Transform[] boneTransforms,
+            out string error)
+        {
+            error = string.Empty;
+
+            if (root == null)
+            {
+                error = "Target root is null.";
+                return false;
+            }
+
+            if (sample == null || sample.boneNames == null)
+            {
+                error = "Bone sample is invalid.";
+                return false;
+            }
+
+            if (boneTransforms == null || boneTransforms.Length != sample.boneNames.Length)
+            {
+                boneTransforms = BuildBoneTransforms(root, sample.boneNames, rootBoneName);
+            }
+
+            return TryApplyBoneSample(sample, boneTransforms, out error);
         }
 
         public static Transform FindByPath(Transform root, string path, string rootBoneName)

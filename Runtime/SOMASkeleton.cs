@@ -1,7 +1,7 @@
 using System.Collections.Generic;
 using UnityEngine;
 
-namespace KimodoUnityMotionTools
+namespace KimodoBridge
 {
     public class SOMABone
     {
