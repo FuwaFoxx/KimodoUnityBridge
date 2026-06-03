@@ -236,20 +236,6 @@ namespace KimodoUnityMotionTools.ProjectEditor
                     EditorGUILayout.LabelField("Bridge status: checking...", EditorStyles.miniLabel);
                 }
 
-                bool closeAllowed = bridgeRunningCached || isGenerating;
-                EditorGUI.BeginDisabledGroup(!closeAllowed);
-                if (GUILayout.Button(new GUIContent("Close Bridge Server", "Request bridge runtime shutdown. Use when idle or to recover server state."), GUILayout.Height(22)))
-                {
-                    KimodoEditorCommandManager.Dispatch(
-                        new BridgeControlCommand(
-                            KimodoBridgeOperation.Stop,
-                            runtimeRoot: KimodoBridgeController.GetRuntimeRootPath(),
-                            modelName: clip.bridgeModelName,
-                            vramMode: clip.bridgeVramMode,
-                            modelsRootOverride: KimodoPlayableClipGenerationSettings.instance.LocalModelsPath));
-                }
-                EditorGUI.EndDisabledGroup();
-
                 if (!bridgeRunningCached && bridgePortDiscoveredCached)
                 {
                     EditorGUILayout.HelpBox(

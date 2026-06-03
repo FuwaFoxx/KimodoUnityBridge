@@ -195,6 +195,25 @@ namespace KimodoUnityMotionTools.ProjectEditor
                 settings.SaveSettings();
             }
 
+            EditorGUI.BeginChangeCheck();
+            bool alwaysKeepServerExperimental = EditorGUILayout.Toggle(
+                new GUIContent(
+                    "Always Keep Server (Experimental)",
+                    "Keep the bridge server alive through compile, assembly reload, and Play Mode transitions. This may leak memory or keep stale runtime state alive."),
+                settings.AlwaysKeepServerExperimental);
+            if (EditorGUI.EndChangeCheck())
+            {
+                settings.AlwaysKeepServerExperimental = alwaysKeepServerExperimental;
+                settings.SaveSettings();
+            }
+
+            if (settings.AlwaysKeepServerExperimental)
+            {
+                EditorGUILayout.HelpBox(
+                    "Experimental: the bridge server will be kept alive during compile and Play Mode transitions. This may cause memory leaks or stale runtime state.",
+                    MessageType.Warning);
+            }
+
             string localModelsPath = settings.LocalModelsPath;
             EditorGUILayout.BeginHorizontal();
             EditorGUI.BeginChangeCheck();

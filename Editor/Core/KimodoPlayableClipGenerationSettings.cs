@@ -16,6 +16,7 @@ namespace KimodoUnityMotionTools.ProjectEditor
         [SerializeField] private string localModelsPath = string.Empty;
         [SerializeField] private float generationTimeoutSeconds = DefaultGenerationTimeoutSeconds;
         [SerializeField] private bool floatingUiEnabled = true;
+        [SerializeField] private bool alwaysKeepServerExperimental;
         [SerializeField, HideInInspector] private bool advancedCurveFilterFoldout = true;
 
         internal int MaxGeneratedClips
@@ -40,6 +41,12 @@ namespace KimodoUnityMotionTools.ProjectEditor
         {
             get => floatingUiEnabled;
             set => floatingUiEnabled = value;
+        }
+
+        internal bool AlwaysKeepServerExperimental
+        {
+            get => alwaysKeepServerExperimental;
+            set => alwaysKeepServerExperimental = value;
         }
 
         internal float GenerationTimeoutSeconds

@@ -533,6 +533,7 @@ namespace KimodoUnityMotionTools.ProjectEditor.AnimatorTooling
             animator.Update(0f);
             return root;
         }
+        
 
         private bool TryPreparePreviewSource(AnimationClip sourceClip, KimodoPlayableClip workingClip, out Avatar avatar, out string error)
         {

@@ -67,6 +67,7 @@ namespace KimodoUnityMotionTools.ProjectEditor
         {
             EditorApplication.delayCall += RecoverBridgeAfterDomainReload;
             AssemblyReloadEvents.beforeAssemblyReload += HandleBeforeAssemblyReload;
+            EditorApplication.playModeStateChanged += HandlePlayModeStateChanged;
             EditorApplication.quitting += HandleEditorQuitting;
             EditorCompilationStateGate.StateChanged += HandleCompilationStateChanged;
         }
@@ -263,10 +264,32 @@ namespace KimodoUnityMotionTools.ProjectEditor
 
         private static void HandleBeforeAssemblyReload()
         {
+            if (ShouldKeepServerAlive())
+            {
+                UnityEngine.Debug.Log("[Kimodo][CompileGate] AlwaysKeepServer enabled, skipping bridge detach before assembly reload.");
+                return;
+            }
+
             _ = generationFacade.ShutdownAsync(
                 KimodoBridgeGenerationFacade.ShutdownMode.DetachOnly,
                 null,
                 CancellationToken.None);
+        }
+
+        private static void HandlePlayModeStateChanged(PlayModeStateChange state)
+        {
+            if (state != PlayModeStateChange.ExitingEditMode)
+            {
+                return;
+            }
+
+            if (ShouldKeepServerAlive())
+            {
+                UnityEngine.Debug.Log("[Kimodo][CompileGate] AlwaysKeepServer enabled, skipping bridge detach before Play Mode.");
+                return;
+            }
+
+            generationFacade.DetachSharedRuntimeGenerationService();
         }
 
         private static void HandleEditorQuitting()
@@ -286,6 +309,12 @@ namespace KimodoUnityMotionTools.ProjectEditor
             serverStateCache.Resume();
             UnityEngine.Debug.Log("[Kimodo][CompileGate] server state cache resumed.");
             EditorApplication.delayCall += RecoverBridgeAfterDomainReload;
+        }
+
+        private static bool ShouldKeepServerAlive()
+        {
+            return KimodoPlayableClipGenerationSettings.instance != null &&
+                   KimodoPlayableClipGenerationSettings.instance.AlwaysKeepServerExperimental;
         }
 
         private sealed class RuntimeMaintenanceScope : IDisposable

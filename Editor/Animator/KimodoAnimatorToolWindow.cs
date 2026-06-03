@@ -1,5 +1,6 @@
 ﻿using KimodoUnityMotionTools.ProjectEditor.Manager;
 using System;
+using System.Runtime.ExceptionServices;
 using UnityEditor;
 using UnityEditor.Animations;
 using UnityEngine;
@@ -313,6 +314,7 @@ namespace KimodoUnityMotionTools.ProjectEditor.AnimatorTooling
             previewPane?.OnGenerateFailedOrCanceled();
             lastError = evt.Message;
             lastStatus = "Generation failed.";
+            RethrowOnNextEditorTick(evt.Exception ?? new InvalidOperationException(evt.Message));
             Repaint();
         }
 
@@ -336,6 +338,17 @@ namespace KimodoUnityMotionTools.ProjectEditor.AnimatorTooling
                 return false;
             }
             return string.Equals(command.TargetKey, "clip:" + workingClip.GetInstanceID(), StringComparison.Ordinal);
+        }
+
+        private static void RethrowOnNextEditorTick(Exception exception)
+        {
+            if (exception == null)
+            {
+                return;
+            }
+
+            ExceptionDispatchInfo dispatchInfo = ExceptionDispatchInfo.Capture(exception);
+            EditorApplication.delayCall += () => dispatchInfo.Throw();
         }
     }
 

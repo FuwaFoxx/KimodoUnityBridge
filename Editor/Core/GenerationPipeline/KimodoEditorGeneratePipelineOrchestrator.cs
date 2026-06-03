@@ -157,6 +157,7 @@ namespace KimodoUnityMotionTools.ProjectEditor.GenerationPipeline
             hasBindingAvatar = false;
             if (explicitRetargetAvatar != null && explicitRetargetAvatar.isValid && explicitRetargetAvatar.isHuman)
             {
+                hasBindingAvatar = true;
                 return explicitRetargetAvatar;
             }
 
