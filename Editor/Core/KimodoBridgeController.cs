@@ -191,8 +191,16 @@ namespace KimodoBridge.Editor
                         startupTimeoutMs = BridgeRuntimeSettings.DefaultStartupTimeoutMs
                     }
                 };
-                using var bridge = new KimodoBridgeService(settings.bridgeSettings);
-                _ = await bridge.AttachAsync(message => UnityEngine.Debug.Log($"[KimodoBridge] {message}"), CancellationToken.None);
+                var bridge = new KimodoBridgeService(settings.bridgeSettings);
+                try
+                {
+                    _ = await bridge.AttachAsync(message => UnityEngine.Debug.Log($"[KimodoBridge] {message}"), CancellationToken.None);
+                    await bridge.DetachAsync(CancellationToken.None);
+                }
+                finally
+                {
+                    bridge.Dispose();
+                }
             }
             catch
             {

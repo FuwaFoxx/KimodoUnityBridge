@@ -161,6 +161,14 @@ namespace KimodoBridge
             out KimodoMarkerSampleResult result,
             out string error)
         {
+            Transform root = skeletonRoot != null ? skeletonRoot : (animator != null ? animator.transform : null);
+            if (animator != null &&
+                root != null &&
+                CanDirectSampleModelPose(modelName, root, animator))
+            {
+                return TrySampleMarkerRaw(animator, root, modelName, globalTime, markerType, out result, out error);
+            }
+
             AnimationClip animationClip = ExtractAnimationClip(sourceClip);
             if (animationClip != null && KimodoRetargetTools.IsValidHumanoid(originAvatar) && KimodoRetargetTools.IsValidHumanoid(targetAvatar))
             {
@@ -185,14 +193,6 @@ namespace KimodoBridge
             if (animator == null)
             {
                 error = "Animator is null.";
-                result = null;
-                return false;
-            }
-
-            Transform root = skeletonRoot != null ? skeletonRoot : animator.transform;
-            if (root == null)
-            {
-                error = "Skeleton root is null.";
                 result = null;
                 return false;
             }
@@ -236,12 +236,25 @@ namespace KimodoBridge
                 return false;
             }
 
-            if (!KimodoRetargetTools.TryRetargetNew(frame, targetAvatar, out MuscleSample muscleFrame, out error))
+            if (!KimodoRetargetTools.TryGetHumanoidRootPoseFromBoneSample(
+                    frame,
+                    targetAvatar,
+                    out Vector3 rootPosition,
+                    out Quaternion rootRotation,
+                    out error))
             {
                 return false;
             }
 
-            return TryBuildMarkerSampleResultFromRetargetFrame(frame, muscleFrame != null ? muscleFrame.pose : new HumanPose(), modelName, markerType, sampleTime, out result, out error);
+            return TryBuildMarkerSampleResultFromRetargetFrame(
+                frame,
+                rootPosition,
+                rootRotation,
+                modelName,
+                markerType,
+                sampleTime,
+                out result,
+                out error);
         }
 
         private static AnimationClip ExtractAnimationClip(TimelineClip sourceClip)
@@ -384,6 +397,37 @@ namespace KimodoBridge
             return transforms;
         }
 
+        private static bool CanDirectSampleModelPose(string modelName, Transform root, Animator animator)
+        {
+            ResolveProfile(modelName, out string[] jointNames, out int[] parentIndices);
+            if (jointNames == null || jointNames.Length == 0)
+            {
+                return false;
+            }
+
+            Transform[] joints = ResolveJointTransforms(jointNames, root, animator);
+            if (joints == null || joints.Length != jointNames.Length)
+            {
+                return false;
+            }
+
+            for (int i = 0; i < jointNames.Length; i++)
+            {
+                if (string.IsNullOrWhiteSpace(jointNames[i]) || joints[i] == null)
+                {
+                    return false;
+                }
+
+                int parent = parentIndices != null && i < parentIndices.Length ? parentIndices[i] : -1;
+                if (parent >= 0 && (parent >= joints.Length || joints[parent] == null))
+                {
+                    return false;
+                }
+            }
+
+            return true;
+        }
+
         private static Transform TryResolveTransformByJointName(string jointName, Transform searchRoot, Animator animator)
         {
             Transform byHuman = TryResolveViaHumanBone(jointName, animator);
@@ -473,7 +517,8 @@ namespace KimodoBridge
 
         private static bool TryBuildMarkerSampleResultFromRetargetFrame(
             BoneSample frame,
-            HumanPose pose,
+            Vector3 rootPosition,
+            Quaternion rootRotation,
             string modelName,
             string markerType,
             double sampleTime,
@@ -530,16 +575,16 @@ namespace KimodoBridge
                 sampleTime = sampleTime,
                 rigType = rigType,
                 hasRootHeading = true,
-                rootPosition = pose.bodyPosition,
+                rootPosition = rootPosition,
                 rootHeading = Vector2.right,
                 jointNames = new List<string>(jointNames),
                 localAxisAngles = localAxisAngles,
                 sampledJointIndices = sampledJointIndices
             };
 
-            if (pose.bodyRotation != Quaternion.identity)
+            if (rootRotation != Quaternion.identity)
             {
-                Vector3 forward = pose.bodyRotation * Vector3.forward;
+                Vector3 forward = rootRotation * Vector3.forward;
                 Vector2 heading = new Vector2(forward.x, forward.z);
                 result.rootHeading = heading.sqrMagnitude > 1e-8f ? heading.normalized : Vector2.right;
             }

@@ -148,13 +148,18 @@ namespace KimodoBridge.Editor
                 1,
                 1000);
 
+            EditorGUILayout.BeginHorizontal();
             enableInbetweenConstraints = EditorGUILayout.ToggleLeft(
                 new GUIContent("In-between Constraint", "Use boundary pose constraints for generation."),
                 enableInbetweenConstraints);
-
-            isLoop = EditorGUILayout.ToggleLeft(
-                new GUIContent("Is Loop", "Reuse the start fullbody pose axes for the end fullbody constraint while preserving end root motion."),
-                isLoop);
+            using (new EditorGUI.DisabledScope(!enableInbetweenConstraints))
+            {
+                isLoop = EditorGUILayout.ToggleLeft(
+                    new GUIContent("Is Loop", "Reuse the start fullbody pose axes for the end fullbody constraint while preserving end root motion."),
+                    isLoop,
+                    GUILayout.Width(90f));
+            }
+            EditorGUILayout.EndHorizontal();
 
             EditorGUILayout.BeginHorizontal();
             randomSeed = EditorGUILayout.ToggleLeft(new GUIContent("Random"), randomSeed, GUILayout.Width(90f));

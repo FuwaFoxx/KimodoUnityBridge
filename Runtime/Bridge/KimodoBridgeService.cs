@@ -98,9 +98,11 @@ namespace KimodoBridge
                     return $"Ready - {settings.modelName} on {host}:{port}";
                 }
 
+                await InvalidateCurrentEndpointAsync();
                 TryDeleteServerPortFile();
             }
 
+            await InvalidateCurrentEndpointAsync();
             processManager.Start(
                 settings.launcherPath,
                 settings.modelName,
@@ -132,6 +134,7 @@ namespace KimodoBridge
             }
             catch
             {
+                await InvalidateCurrentEndpointAsync();
                 await StopAsync(CancellationToken.None);
                 throw;
             }
@@ -151,7 +154,7 @@ namespace KimodoBridge
             CancellationToken token)
         {
             ThrowIfDisposed();
-            await EnsureHealthyOrThrowAsync(token);
+            await EnsureHealthyOrStartAsync(progress, token);
             Debug.Log(
                 $"[KimodoBridge] Generate request: host={currentHost}:{currentPort}, " +
                 $"promptLen={(prompt ?? string.Empty).Length}, duration={durationSeconds:F3}, " +
@@ -160,20 +163,43 @@ namespace KimodoBridge
                 $"loopHint={loopHint}, segmentIndex={segmentIndex}, transition={transitionDurationSeconds:F3}, " +
                 $"boundaryPoseLen={(boundaryPoseJson ?? string.Empty).Length}");
 
-            JObject response = await protocolClient.GenerateAsync(
-                currentHost,
-                currentPort,
-                prompt,
-                durationSeconds,
-                seed,
-                diffusionSteps,
-                constraintsJson,
-                boundaryPoseJson,
-                loopHint,
-                segmentIndex,
-                transitionDurationSeconds,
-                progress,
-                token);
+            JObject response;
+            try
+            {
+                response = await SendGenerateRequestAsync(
+                    prompt,
+                    durationSeconds,
+                    seed,
+                    diffusionSteps,
+                    constraintsJson,
+                    boundaryPoseJson,
+                    loopHint,
+                    segmentIndex,
+                    transitionDurationSeconds,
+                    progress,
+                    token);
+            }
+            catch (Exception ex) when (IsLikelyTransportFailure(ex))
+            {
+                progress?.Invoke($"Bridge connection lost, restarting bridge... {ex.Message}");
+                Debug.LogWarning($"[KimodoBridge] Transport failure during generate. Restarting bridge once. {ex}");
+                await InvalidateCurrentEndpointAsync();
+                TryDeleteServerPortFile();
+                _ = await StartAsync(progress, token);
+                await EnsureHealthyOrThrowAsync(token);
+                response = await SendGenerateRequestAsync(
+                    prompt,
+                    durationSeconds,
+                    seed,
+                    diffusionSteps,
+                    constraintsJson,
+                    boundaryPoseJson,
+                    loopHint,
+                    segmentIndex,
+                    transitionDurationSeconds,
+                    progress,
+                    token);
+            }
 
             string status = response?.Value<string>("status") ?? string.Empty;
             string responseMessage = response?.Value<string>("message") ?? string.Empty;
@@ -195,17 +221,54 @@ namespace KimodoBridge
             return motionJson;
         }
 
+        private Task<JObject> SendGenerateRequestAsync(
+            string prompt,
+            float durationSeconds,
+            int? seed,
+            int diffusionSteps,
+            string constraintsJson,
+            string boundaryPoseJson,
+            bool loopHint,
+            int segmentIndex,
+            float transitionDurationSeconds,
+            Action<string> progress,
+            CancellationToken token)
+        {
+            return protocolClient.GenerateAsync(
+                currentHost,
+                currentPort,
+                prompt,
+                durationSeconds,
+                seed,
+                diffusionSteps,
+                constraintsJson,
+                boundaryPoseJson,
+                loopHint,
+                segmentIndex,
+                transitionDurationSeconds,
+                progress,
+                token);
+        }
+
         public async Task<bool> PingAsync(CancellationToken token, bool acceptLoading = true)
         {
             ThrowIfDisposed();
             if (!TryResolveCurrentEndpoint(out string host, out int port))
             {
+                await InvalidateCurrentEndpointAsync();
+                return false;
+            }
+
+            bool ok = await protocolClient.PingAsync(host, port, token, acceptLoading);
+            if (!ok)
+            {
+                await InvalidateCurrentEndpointAsync();
                 return false;
             }
 
             currentHost = host;
             currentPort = port;
-            return await protocolClient.PingAsync(host, port, token, acceptLoading);
+            return true;
         }
 
         public async Task StopAsync(CancellationToken token)
@@ -231,6 +294,7 @@ namespace KimodoBridge
             ThrowIfDisposed();
             StopLogPump();
             await protocolClient.DetachAsync();
+            processManager.DetachProcess();
         }
 
         public async Task KillAsync(CancellationToken token)
@@ -292,24 +356,84 @@ namespace KimodoBridge
 
         private async Task EnsureHealthyOrThrowAsync(CancellationToken token)
         {
+            string endpointBeforePing = TryResolveCurrentEndpoint(out string host, out int port)
+                ? $"{host}:{port}"
+                : "(none)";
             bool ok = await PingAsync(token, acceptLoading: true);
             if (!ok)
             {
-                throw new Exception("Bridge port is unreachable.");
+                throw new Exception($"Bridge port is unreachable. endpoint={endpointBeforePing}");
             }
+        }
+
+        private async Task EnsureHealthyOrStartAsync(Action<string> progress, CancellationToken token)
+        {
+            bool ok = await PingAsync(token, acceptLoading: true);
+            if (ok)
+            {
+                return;
+            }
+
+            progress?.Invoke("Bridge endpoint is unreachable, restarting bridge...");
+            _ = await StartAsync(progress, token);
+            await EnsureHealthyOrThrowAsync(token);
+        }
+
+        private static bool IsLikelyTransportFailure(Exception exception)
+        {
+            for (Exception current = exception; current != null; current = current.InnerException)
+            {
+                if (current is IOException ||
+                    current is ObjectDisposedException)
+                {
+                    return true;
+                }
+
+                string typeName = current.GetType().Name;
+                if (string.Equals(typeName, "SocketException", StringComparison.Ordinal))
+                {
+                    return true;
+                }
+
+                string message = current.Message ?? string.Empty;
+                if (message.IndexOf("Bridge connect timeout", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                    message.IndexOf("Bridge read timeout", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                    message.IndexOf("Empty bridge response", StringComparison.OrdinalIgnoreCase) >= 0)
+                {
+                    return true;
+                }
+            }
+
+            return false;
         }
 
         private bool TryResolveCurrentEndpoint(out string host, out int port)
         {
-            if (currentPort > 0 && !string.IsNullOrWhiteSpace(currentHost))
+            string filePath = BridgeEndpointResolver.GetServerPortFilePath(settings.runtimeRoot);
+            if (BridgeEndpointResolver.TryReadServerEndpoint(settings.runtimeRoot, settings.hostFallback, out string fileHost, out int filePort, out _))
+            {
+                host = fileHost;
+                port = filePort;
+                return true;
+            }
+
+            if (currentPort > 0 && !string.IsNullOrWhiteSpace(currentHost) && !File.Exists(filePath))
             {
                 host = currentHost;
                 port = currentPort;
                 return true;
             }
 
-            bool ok = BridgeEndpointResolver.TryReadServerEndpoint(settings.runtimeRoot, settings.hostFallback, out host, out port, out _);
-            return ok;
+            host = string.IsNullOrWhiteSpace(settings.hostFallback) ? "127.0.0.1" : settings.hostFallback;
+            port = -1;
+            return false;
+        }
+
+        private async Task InvalidateCurrentEndpointAsync()
+        {
+            currentPort = -1;
+            currentHost = settings.hostFallback;
+            await protocolClient.DetachAsync();
         }
 
         private void StartLogPump(string logPath, Action<string> progress)

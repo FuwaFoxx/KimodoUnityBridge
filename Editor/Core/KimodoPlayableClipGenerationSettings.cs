@@ -11,6 +11,7 @@ namespace KimodoBridge.Editor
         internal const int DefaultGeneratedClipsLimit = 400;
         internal const float MinGenerationTimeoutSeconds = 10f;
         internal const float DefaultGenerationTimeoutSeconds = 120f;
+        private const string AlwaysKeepServerEditorPrefsKey = "KimodoBridge.AlwaysKeepServerExperimental";
 
         [SerializeField] private int maxGeneratedClips = DefaultGeneratedClipsLimit;
         [SerializeField] private string localModelsPath = string.Empty;
@@ -45,8 +46,12 @@ namespace KimodoBridge.Editor
 
         internal bool AlwaysKeepServerExperimental
         {
-            get => alwaysKeepServerExperimental;
-            set => alwaysKeepServerExperimental = value;
+            get => alwaysKeepServerExperimental || EditorPrefs.GetBool(AlwaysKeepServerEditorPrefsKey, false);
+            set
+            {
+                alwaysKeepServerExperimental = value;
+                EditorPrefs.SetBool(AlwaysKeepServerEditorPrefsKey, value);
+            }
         }
 
         internal float GenerationTimeoutSeconds
@@ -57,9 +62,12 @@ namespace KimodoBridge.Editor
 
         internal void SaveSettings()
         {
+            bool effectiveAlwaysKeepServer = AlwaysKeepServerExperimental;
             maxGeneratedClips = Mathf.Clamp(maxGeneratedClips, MinGeneratedClipsLimit, MaxGeneratedClipsLimit);
             localModelsPath = localModelsPath ?? string.Empty;
             generationTimeoutSeconds = Mathf.Max(MinGenerationTimeoutSeconds, generationTimeoutSeconds);
+            alwaysKeepServerExperimental = effectiveAlwaysKeepServer;
+            EditorPrefs.SetBool(AlwaysKeepServerEditorPrefsKey, effectiveAlwaysKeepServer);
             Save(true);
         }
     }

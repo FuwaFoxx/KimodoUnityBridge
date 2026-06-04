@@ -8,6 +8,29 @@ namespace KimodoBridge.Editor
 {
     internal sealed class KimodoAvatarPreviewCore : IDisposable
     {
+        private readonly struct PreviewTransitionSettings
+        {
+            public PreviewTransitionSettings(
+                float exitNormalizedTime,
+                float durationParameter,
+                float blendDurationSeconds,
+                float offsetNormalizedTime,
+                bool hasFixedDuration)
+            {
+                ExitNormalizedTime = exitNormalizedTime;
+                DurationParameter = durationParameter;
+                BlendDurationSeconds = blendDurationSeconds;
+                OffsetNormalizedTime = offsetNormalizedTime;
+                HasFixedDuration = hasFixedDuration;
+            }
+
+            public float ExitNormalizedTime { get; }
+            public float DurationParameter { get; }
+            public float BlendDurationSeconds { get; }
+            public float OffsetNormalizedTime { get; }
+            public bool HasFixedDuration { get; }
+        }
+
         private KimodoAvatarPreview avatarPreview;
         private GameObject sourcePreviewInstance;
         private AnimatorController previewController;
@@ -15,6 +38,7 @@ namespace KimodoBridge.Editor
         private AnimationClip activeClip;
         private string activeStateName;
         private string activeInputKey = string.Empty;
+        private string avatarPreviewInputKey = string.Empty;
         private bool restartRequested;
         private float lastAppliedTime = float.NaN;
         private float preRollSeconds = 0.3f;
@@ -40,6 +64,7 @@ namespace KimodoBridge.Editor
             activeClip = null;
             activeStateName = null;
             activeInputKey = string.Empty;
+            avatarPreviewInputKey = string.Empty;
             lastAppliedTime = float.NaN;
             transitionModeActive = false;
             previewUnavailableMessage = "Preview not ready.";
@@ -92,21 +117,22 @@ namespace KimodoBridge.Editor
                 return;
             }
 
-            string inputKey = BuildTransitionInputKey(root, fromClip, toClip, transition);
+            PreviewTransitionSettings previewSettings = ResolvePreviewTransitionSettings(fromClip, transition);
+            string inputKey = BuildTransitionInputKey(root, fromClip, toClip, transition, previewSettings);
             if (inputKey == activeInputKey && !string.IsNullOrEmpty(activeStateName))
             {
                 return;
             }
 
             EnsurePreviewController();
-            string fromStateName = EnsureTransitionGraph(fromClip, toClip, transition);
+            string fromStateName = EnsureTransitionGraph(fromClip, toClip, transition, previewSettings);
             activeStateName = fromStateName;
             activeInputKey = inputKey;
             previewUnavailableMessage = string.Empty;
             EnsureAvatarPreview(fromClip);
             transitionModeActive = true;
 
-            ComputeTransitionTimeWindow(fromClip, toClip, transition);
+            ComputeTransitionTimeWindow(fromClip, toClip, previewSettings);
             ApplyTimeWindowToPreview();
             restartRequested = true;
         }
@@ -233,29 +259,34 @@ namespace KimodoBridge.Editor
             return "clip:" + rootId + ":" + clipId;
         }
 
-        private static string BuildTransitionInputKey(GameObject root, AnimationClip fromClip, AnimationClip toClip, AnimatorStateTransition transition)
+        private static string BuildTransitionInputKey(
+            GameObject root,
+            AnimationClip fromClip,
+            AnimationClip toClip,
+            AnimatorStateTransition transition,
+            PreviewTransitionSettings previewSettings)
         {
             int rootId = root != null ? root.GetInstanceID() : 0;
             int fromId = fromClip != null ? fromClip.GetInstanceID() : 0;
             int toId = toClip != null ? toClip.GetInstanceID() : 0;
             int transitionId = transition != null ? transition.GetInstanceID() : 0;
-            return "transition:" + rootId + ":" + fromId + ":" + toId + ":" + transitionId;
+            int exitMs = Mathf.RoundToInt(previewSettings.ExitNormalizedTime * 1000f);
+            int durationMs = Mathf.RoundToInt(previewSettings.DurationParameter * 1000f);
+            int offsetMs = Mathf.RoundToInt(previewSettings.OffsetNormalizedTime * 1000f);
+            return "transition:" + rootId + ":" + fromId + ":" + toId + ":" + transitionId +
+                ":" + exitMs + ":" + durationMs + ":" + offsetMs + ":" + (previewSettings.HasFixedDuration ? 1 : 0);
         }
 
-        private void ComputeTransitionTimeWindow(AnimationClip fromClip, AnimationClip toClip, AnimatorStateTransition transition)
+        private void ComputeTransitionTimeWindow(
+            AnimationClip fromClip,
+            AnimationClip toClip,
+            PreviewTransitionSettings previewSettings)
         {
             float fromLen = Mathf.Max(0.001f, fromClip != null ? fromClip.length : 0.001f);
             float toLen = Mathf.Max(0.001f, toClip != null ? toClip.length : 0.001f);
-            float exitNormalized = transition != null ? Mathf.Clamp01(transition.exitTime) : 0f;
-            transitionStartTime = exitNormalized * fromLen;
+            transitionStartTime = previewSettings.ExitNormalizedTime * fromLen;
 
-            float blendDuration = 0.2f;
-            if (transition != null)
-            {
-                blendDuration = transition.hasFixedDuration
-                    ? Mathf.Max(0.001f, transition.duration)
-                    : Mathf.Max(0.001f, transition.duration * fromLen);
-            }
+            float blendDuration = previewSettings.BlendDurationSeconds;
             transitionEndTime = transitionStartTime + blendDuration;
 
             float windowStart = transitionStartTime - Mathf.Max(0f, preRollSeconds);
@@ -314,7 +345,11 @@ namespace KimodoBridge.Editor
             return stateName;
         }
 
-        private string EnsureTransitionGraph(AnimationClip fromClip, AnimationClip toClip, AnimatorStateTransition source)
+        private string EnsureTransitionGraph(
+            AnimationClip fromClip,
+            AnimationClip toClip,
+            AnimatorStateTransition source,
+            PreviewTransitionSettings previewSettings)
         {
             AnimatorStateMachine sm = previewController.layers[0].stateMachine;
             string fromName = "TransitionFrom_" + fromClip.GetInstanceID();
@@ -329,12 +364,7 @@ namespace KimodoBridge.Editor
             RemoveTransitionsTo(to, from);
 
             AnimatorStateTransition fromTo = from.AddTransition(to);
-            CopyTransitionWithoutConditions(fromTo, source);
-            if (!fromTo.hasExitTime)
-            {
-                fromTo.hasExitTime = true;
-                fromTo.exitTime = 1f;
-            }
+            CopyTransitionWithoutConditions(fromTo, source, previewSettings);
 
             AnimatorStateTransition toFrom = to.AddTransition(from);
             toFrom.hasExitTime = true;
@@ -358,7 +388,10 @@ namespace KimodoBridge.Editor
                 return;
             }
 
-            bool needRecreate = avatarPreview == null || activeClip != clip;
+            bool needRecreate =
+                avatarPreview == null ||
+                activeClip != clip ||
+                !string.Equals(avatarPreviewInputKey, activeInputKey, StringComparison.Ordinal);
             if (!needRecreate)
             {
                 return;
@@ -380,6 +413,7 @@ namespace KimodoBridge.Editor
             }
 
             avatarPreview = new KimodoAvatarPreview(sourceAnimator, clip);
+            avatarPreviewInputKey = activeInputKey;
             avatarPreview.ShowIKOnFeetButton = clip.isHumanMotion;
             avatarPreview.ResetPreviewFocus();
             if (avatarPreview.timeControl.currentTime == Mathf.NegativeInfinity)
@@ -398,6 +432,7 @@ namespace KimodoBridge.Editor
 
             UnityEngine.Object.DestroyImmediate(sourcePreviewInstance);
             sourcePreviewInstance = null;
+            avatarPreviewInputKey = string.Empty;
         }
 
         private static Animator CreateSourceAnimatorWithController(AnimatorController controller, string inputKey, out GameObject previewInstance)
@@ -475,16 +510,46 @@ namespace KimodoBridge.Editor
             }
         }
 
-        private static void CopyTransitionWithoutConditions(AnimatorStateTransition dst, AnimatorStateTransition src)
+        private static PreviewTransitionSettings ResolvePreviewTransitionSettings(
+            AnimationClip fromClip,
+            AnimatorStateTransition transition)
         {
-            dst.hasExitTime = src.hasExitTime;
-            dst.exitTime = src.exitTime;
-            dst.duration = src.duration;
-            dst.hasFixedDuration = src.hasFixedDuration;
-            dst.offset = src.offset;
-            dst.interruptionSource = src.interruptionSource;
-            dst.orderedInterruption = src.orderedInterruption;
-            dst.canTransitionToSelf = src.canTransitionToSelf;
+            float fromLen = Mathf.Max(0.001f, fromClip != null ? fromClip.length : 0.001f);
+            bool hasFixedDuration = transition != null && transition.hasFixedDuration;
+            float durationParameter = transition != null
+                ? Mathf.Max(0.001f, transition.duration)
+                : 0.2f;
+            float blendDurationSeconds = hasFixedDuration
+                ? durationParameter
+                : Mathf.Max(0.001f, durationParameter * fromLen);
+            float exitNormalizedTime = transition != null && transition.hasExitTime
+                ? Mathf.Clamp01(transition.exitTime)
+                : 1f;
+            float offsetNormalizedTime = transition != null
+                ? Mathf.Clamp01(transition.offset)
+                : 0f;
+
+            return new PreviewTransitionSettings(
+                exitNormalizedTime,
+                durationParameter,
+                blendDurationSeconds,
+                offsetNormalizedTime,
+                hasFixedDuration);
+        }
+
+        private static void CopyTransitionWithoutConditions(
+            AnimatorStateTransition dst,
+            AnimatorStateTransition src,
+            PreviewTransitionSettings previewSettings)
+        {
+            dst.hasExitTime = true;
+            dst.exitTime = previewSettings.ExitNormalizedTime;
+            dst.duration = previewSettings.DurationParameter;
+            dst.hasFixedDuration = previewSettings.HasFixedDuration;
+            dst.offset = previewSettings.OffsetNormalizedTime;
+            dst.interruptionSource = src != null ? src.interruptionSource : TransitionInterruptionSource.None;
+            dst.orderedInterruption = src != null && src.orderedInterruption;
+            dst.canTransitionToSelf = src != null && src.canTransitionToSelf;
         }
     }
 }

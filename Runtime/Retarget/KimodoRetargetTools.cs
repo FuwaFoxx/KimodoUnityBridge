@@ -6,6 +6,7 @@ using UnityEngine;
 using UnityEngine.Animations;
 using UnityEngine.Playables;
 using TimelineInject;
+using System.Linq;
 
 namespace KimodoBridge
 {
@@ -513,6 +514,59 @@ namespace KimodoBridge
             {
                 DestroySkeletonCache(targetCache);
                 DestroySkeletonCache(sourceCache);
+            }
+        }
+
+        public static bool TryGetHumanoidRootPoseFromBoneSample(
+            BoneSample sample,
+            Avatar targetAvatar,
+            out Vector3 rootPosition,
+            out Quaternion rootRotation,
+            out string error)
+        {
+            rootPosition = Vector3.zero;
+            rootRotation = Quaternion.identity;
+            error = string.Empty;
+
+            if (!ValidateBoneSample(sample, out error))
+            {
+                return false;
+            }
+
+            if (!IsValidHumanoid(targetAvatar))
+            {
+                error = "Target avatar is null/invalid/non-humanoid.";
+                return false;
+            }
+
+            if (!TryBuildSkeletonCache(targetAvatar, "KimodoRetargetTools_TargetRootPose", out SkeletonCache targetCache, out error))
+            {
+                return false;
+            }
+
+            try
+            {
+                if (!TryApplyBoneSampleToCache(sample, targetCache, out _, out error))
+                {
+                    return false;
+                }
+
+                Transform hips = targetCache.animator != null
+                    ? targetCache.animator.GetBoneTransform(HumanBodyBones.Hips)
+                    : null;
+                if (hips == null)
+                {
+                    error = "Target avatar is missing Hips bone mapping.";
+                    return false;
+                }
+
+                rootPosition = hips.position;
+                rootRotation = hips.rotation;
+                return true;
+            }
+            finally
+            {
+                DestroySkeletonCache(targetCache);
             }
         }
 
@@ -1088,6 +1142,39 @@ namespace KimodoBridge
                 }
             }
 
+            if (samples.Count == 1 && samples[0] != null)
+            {
+                HumanPose pose = samples[0].pose;
+                EnsureHumanPoseMuscles(ref pose);
+                AddSingleFrameMuscleCurvePadding(
+                    1f,
+                    samples[0],
+                    pose,
+                    muscleCount,
+                    rootTx,
+                    rootTy,
+                    rootTz,
+                    rootQx,
+                    rootQy,
+                    rootQz,
+                    rootQw,
+                    leftFootTx,
+                    leftFootTy,
+                    leftFootTz,
+                    leftFootQx,
+                    leftFootQy,
+                    leftFootQz,
+                    leftFootQw,
+                    rightFootTx,
+                    rightFootTy,
+                    rightFootTz,
+                    rightFootQx,
+                    rightFootQy,
+                    rightFootQz,
+                    rightFootQw,
+                    muscleCurves);
+            }
+
             SetFloatCurve(clip, "RootT.x", rootTx);
             SetFloatCurve(clip, "RootT.y", rootTy);
             SetFloatCurve(clip, "RootT.z", rootTz);
@@ -1112,7 +1199,7 @@ namespace KimodoBridge
 
             for (int muscle = 0; muscle < muscleCount; muscle++)
             {
-                string muscleName = muscleNames[muscle];
+                string muscleName = GetAnimatorMusclePropertyName(muscleNames[muscle]);
                 if (!string.IsNullOrWhiteSpace(muscleName))
                 {
                     SetFloatCurve(clip, muscleName, muscleCurves[muscle]);
@@ -1340,6 +1427,124 @@ namespace KimodoBridge
             clip.SetCurve(string.Empty, typeof(Animator), propertyName, curve);
         }
 
+        private static void AddSingleFrameMuscleCurvePadding(
+            float time,
+            MuscleSample sample,
+            HumanPose pose,
+            int muscleCount,
+            AnimationCurve rootTx,
+            AnimationCurve rootTy,
+            AnimationCurve rootTz,
+            AnimationCurve rootQx,
+            AnimationCurve rootQy,
+            AnimationCurve rootQz,
+            AnimationCurve rootQw,
+            AnimationCurve leftFootTx,
+            AnimationCurve leftFootTy,
+            AnimationCurve leftFootTz,
+            AnimationCurve leftFootQx,
+            AnimationCurve leftFootQy,
+            AnimationCurve leftFootQz,
+            AnimationCurve leftFootQw,
+            AnimationCurve rightFootTx,
+            AnimationCurve rightFootTy,
+            AnimationCurve rightFootTz,
+            AnimationCurve rightFootQx,
+            AnimationCurve rightFootQy,
+            AnimationCurve rightFootQz,
+            AnimationCurve rightFootQw,
+            AnimationCurve[] muscleCurves)
+        {
+            rootTx.AddKey(time, pose.bodyPosition.x);
+            rootTy.AddKey(time, pose.bodyPosition.y);
+            rootTz.AddKey(time, pose.bodyPosition.z);
+            rootQx.AddKey(time, pose.bodyRotation.x);
+            rootQy.AddKey(time, pose.bodyRotation.y);
+            rootQz.AddKey(time, pose.bodyRotation.z);
+            rootQw.AddKey(time, pose.bodyRotation.w);
+            leftFootTx.AddKey(time, sample.leftFootPosition.x);
+            leftFootTy.AddKey(time, sample.leftFootPosition.y);
+            leftFootTz.AddKey(time, sample.leftFootPosition.z);
+            leftFootQx.AddKey(time, sample.leftFootRotation.x);
+            leftFootQy.AddKey(time, sample.leftFootRotation.y);
+            leftFootQz.AddKey(time, sample.leftFootRotation.z);
+            leftFootQw.AddKey(time, sample.leftFootRotation.w);
+            rightFootTx.AddKey(time, sample.rightFootPosition.x);
+            rightFootTy.AddKey(time, sample.rightFootPosition.y);
+            rightFootTz.AddKey(time, sample.rightFootPosition.z);
+            rightFootQx.AddKey(time, sample.rightFootRotation.x);
+            rightFootQy.AddKey(time, sample.rightFootRotation.y);
+            rightFootQz.AddKey(time, sample.rightFootRotation.z);
+            rightFootQw.AddKey(time, sample.rightFootRotation.w);
+
+            for (int muscle = 0; muscle < muscleCount; muscle++)
+            {
+                float value = muscle < pose.muscles.Length ? pose.muscles[muscle] : 0f;
+                muscleCurves[muscle].AddKey(time, value);
+            }
+        }
+
+        private static string GetAnimatorMusclePropertyName(string muscleName)
+        {
+            if (string.IsNullOrWhiteSpace(muscleName))
+            {
+                return string.Empty;
+            }
+
+            if (TryConvertFingerMusclePropertyName(muscleName, out string propertyName))
+            {
+                return propertyName;
+            }
+
+            return muscleName;
+        }
+
+        private static bool TryConvertFingerMusclePropertyName(string muscleName, out string propertyName)
+        {
+            propertyName = null;
+
+            string[] tokens = muscleName.Split(new[] { ' ' }, StringSplitOptions.RemoveEmptyEntries);
+            if (tokens.Length < 3 || tokens.Length > 4)
+            {
+                return false;
+            }
+
+            string side = tokens[0];
+            if (!string.Equals(side, "Left", StringComparison.Ordinal) &&
+                !string.Equals(side, "Right", StringComparison.Ordinal))
+            {
+                return false;
+            }
+
+            string finger = tokens[1];
+            if (!string.Equals(finger, "Thumb", StringComparison.Ordinal) &&
+                !string.Equals(finger, "Index", StringComparison.Ordinal) &&
+                !string.Equals(finger, "Middle", StringComparison.Ordinal) &&
+                !string.Equals(finger, "Ring", StringComparison.Ordinal) &&
+                !string.Equals(finger, "Little", StringComparison.Ordinal))
+            {
+                return false;
+            }
+
+            if (tokens.Length == 3 && string.Equals(tokens[2], "Spread", StringComparison.Ordinal))
+            {
+                propertyName = $"{side}Hand.{finger}.Spread";
+                return true;
+            }
+
+            if (tokens.Length == 4 &&
+                (string.Equals(tokens[2], "1", StringComparison.Ordinal) ||
+                 string.Equals(tokens[2], "2", StringComparison.Ordinal) ||
+                 string.Equals(tokens[2], "3", StringComparison.Ordinal)) &&
+                string.Equals(tokens[3], "Stretched", StringComparison.Ordinal))
+            {
+                propertyName = $"{side}Hand.{finger}.{tokens[2]} Stretched";
+                return true;
+            }
+
+            return false;
+        }
+
         private static float FrameToTime(int frame, int frameCount, float duration)
         {
             if (frameCount <= 1)
@@ -1447,6 +1652,20 @@ namespace KimodoBridge
             goalRotation = inverseBodyRotation * worldGoalRotation;
             goalPosition /= humanscaleLimit ;
             return true;
+        }
+
+        // Inverse of TryGetHumanoidIkGoalPose:
+        // goalPosition = inverse(RootQ) * (worldGoalPosition - RootT * humanScale) / humanScale
+        // RootT = (worldGoalPosition - RootQ * (goalPosition * humanScale)) / humanScale
+        // For foot goals, worldGoalPosition must include the avatar axis-length offset applied above.
+        private static Vector3 ComputeRootTFromHumanoidIkGoalPose(
+            Vector3 worldGoalPosition,
+            Quaternion rootQ,
+            Vector3 goalPosition,
+            float humanScale)
+        {
+            float scale = Mathf.Max(1e-6f, humanScale);
+            return (worldGoalPosition - rootQ * (goalPosition * scale)) / scale;
         }
 
         private static Transform ResolveHumanBoneTransform(SkeletonCache cache, HumanBodyBones bone)

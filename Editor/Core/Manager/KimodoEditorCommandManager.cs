@@ -130,7 +130,7 @@ namespace KimodoBridge.Editor
 
         private static async Task HandleGeneratePlayableClipAsync(RunningCommandState state, GeneratePlayableClipCommand command)
         {
-            await ExecuteGeneratePlayableClipAsync(state, command, command.Clip, command.PromptOverride);
+            await ExecuteGeneratePlayableClipAsync(state, command, command.Clip, command.PromptOverride, command.ExternalConstraint);
         }
 
         private static async Task HandleGenerateFromPromptAsync(RunningCommandState state, GenerateFromPromptCommand command)
@@ -141,14 +141,15 @@ namespace KimodoBridge.Editor
                 throw new InvalidOperationException("KimodoPlayableClip not found for command target.");
             }
 
-            await ExecuteGeneratePlayableClipAsync(state, command, clip, command.PromptOverride);
+            await ExecuteGeneratePlayableClipAsync(state, command, clip, command.PromptOverride, command.ExternalConstraint);
         }
 
         private static async Task ExecuteGeneratePlayableClipAsync(
             RunningCommandState state,
             IKimodoEditorCommand eventCommand,
             KimodoPlayableClip clip,
-            string promptOverride)
+            string promptOverride,
+            KimodoExternalConstraintRequest externalConstraint)
         {
             if (clip == null)
             {
@@ -157,18 +158,28 @@ namespace KimodoBridge.Editor
 
             EmitProgress(eventCommand, "Generating and baking...", KimodoGeneratePipelineStage.Validate);
 
-            KimodoEditorGenerateResult result = await GeneratePipelineOrchestrator.ExecuteGenerateAndBakeAsync(
+            string prompt = string.IsNullOrWhiteSpace(promptOverride) ? (clip.motionPrompt ?? string.Empty) : promptOverride.Trim();
+            if (string.IsNullOrWhiteSpace(prompt))
+            {
+                throw new InvalidOperationException("Prompt is empty.");
+            }
+
+            if (!string.Equals(clip.motionPrompt, prompt, StringComparison.Ordinal))
+            {
+                clip.motionPrompt = prompt;
+                EditorUtility.SetDirty(clip);
+            }
+
+            KimodoEditorGenerateRequest request = KimodoPlayableClipGenerationHostService.BuildRequest(
                 clip,
-                promptOverride,
-                (stage, message) => EmitProgress(eventCommand, message, stage),
-                KimodoTimelinePreviewRefreshUtility.RefreshIfPreviewing,
-                (eventCommand as GeneratePlayableClipCommand)?.ExternalConstraint?.ConstraintsJson ??
-                (eventCommand as GenerateFromPromptCommand)?.ExternalConstraint?.ConstraintsJson,
-                (eventCommand as GeneratePlayableClipCommand)?.ExternalConstraint?.Enabled == true ||
-                (eventCommand as GenerateFromPromptCommand)?.ExternalConstraint?.Enabled == true,
-                (eventCommand as GeneratePlayableClipCommand)?.ExternalConstraint?.RetargetAvatar ??
-                (eventCommand as GenerateFromPromptCommand)?.ExternalConstraint?.RetargetAvatar,
+                prompt,
+                externalConstraint,
                 state.Token);
+
+            request.Progress = (stage, message) => EmitProgress(eventCommand, message, stage);
+
+            KimodoEditorGenerateResult result = await GeneratePipelineOrchestrator.ExecuteAsync(request);
+            KimodoPlayableClipGenerationHostService.FinalizeGeneration(clip, request, result);
 
             EmitCompleted(eventCommand, result);
         }

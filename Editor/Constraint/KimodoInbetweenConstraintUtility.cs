@@ -125,7 +125,7 @@ namespace KimodoBridge.Editor
             TimelineClip sourceClip,
             Animator animator,
             Transform skeletonRoot,
-            double sampleTime,
+            double timelineTime,
             string markerType,
             out KimodoMarkerSampleResult sample,
             out string error)
@@ -138,6 +138,8 @@ namespace KimodoBridge.Editor
                 error = "Source clip is null.";
                 return false;
             }
+
+            double localSampleTime = KimodoConstraintMarkerEditorUtility.GetLocalSecondsInClip(sourceClip, timelineTime);
 
             string modelName = sourceClip.asset is KimodoPlayableClip playableClip
                 ? playableClip.bridgeModelName
@@ -161,7 +163,7 @@ namespace KimodoBridge.Editor
                     skeletonRoot,
                     sourceClip,
                     modelName,
-                    sampleTime,
+                    localSampleTime,
                     markerType,
                     sourceAvatar,
                     targetAvatar,
@@ -178,7 +180,7 @@ namespace KimodoBridge.Editor
             }
 
             sample.constraintType = markerType ?? string.Empty;
-            sample.sampleTime = sampleTime;
+            sample.sampleTime = timelineTime;
             return true;
         }
 

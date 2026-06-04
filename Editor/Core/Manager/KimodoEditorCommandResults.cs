@@ -30,6 +30,7 @@ namespace KimodoBridge.Editor
         public string ConstraintsPath;
         public string Prompt;
         public int Seed;
+        public string MotionJsonCompact;
         public AnimationClip GeneratedClip;
     }
 }

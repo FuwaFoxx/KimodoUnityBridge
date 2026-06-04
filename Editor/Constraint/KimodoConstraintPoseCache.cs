@@ -216,6 +216,53 @@ namespace KimodoBridge.Editor
             }
         }
 
+        internal static void DestroyEntriesForClipId(int clipId, PoseCacheRenderContext? keepContext = null)
+        {
+            if (clipId == 0 || Entries.Count == 0)
+            {
+                return;
+            }
+
+            string keepContextKey = keepContext.HasValue
+                ? BuildContextKey(keepContext.Value.ClipId, keepContext.Value.AnimatorId)
+                : null;
+            var keysToRemove = new List<string>();
+
+            foreach (KeyValuePair<string, PoseCacheEntry> kv in Entries)
+            {
+                PoseCacheEntry entry = kv.Value;
+                if (entry == null || entry.ClipId != clipId)
+                {
+                    continue;
+                }
+
+                if (!string.IsNullOrEmpty(keepContextKey) &&
+                    string.Equals(entry.ContextKey, keepContextKey, StringComparison.Ordinal))
+                {
+                    continue;
+                }
+
+                keysToRemove.Add(kv.Key);
+            }
+
+            for (int i = 0; i < keysToRemove.Count; i++)
+            {
+                string key = keysToRemove[i];
+                if (!Entries.TryGetValue(key, out PoseCacheEntry entry))
+                {
+                    continue;
+                }
+
+                DestroyEntry(entry);
+                Entries.Remove(key);
+            }
+
+            if (keysToRemove.Count > 0)
+            {
+                SceneView.RepaintAll();
+            }
+        }
+
         internal static void DestroyContext(PoseCacheRenderContext context)
         {
             if (Entries.Count == 0)

@@ -10,9 +10,10 @@ namespace TimelineInject
             {
                 return Quaternion.identity;
             }
-
             return avatar.GetPostRotation(humanId);
         }
+
+
 
         public static float GetAvatarAxisLengthOrZero(Avatar avatar, int humanId)
         {
@@ -20,7 +21,6 @@ namespace TimelineInject
             {
                 return 0f;
             }
-
             return avatar.GetAxisLength(humanId);
         }
 

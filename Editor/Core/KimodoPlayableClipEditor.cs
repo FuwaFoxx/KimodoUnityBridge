@@ -1,6 +1,7 @@
 using KimodoBridge.Editor;
 using System;
 using System.Collections.Generic;
+using System.Reflection;
 using UnityEditor;
 using UnityEditor.Timeline;
 using UnityEngine;
@@ -10,7 +11,7 @@ using TimelineInject;
 namespace KimodoBridge.Editor
 {
     [CustomEditor(typeof(KimodoPlayableClip))]
-    public class KimodoPlayableClipEditor : UnityEditor.Editor
+    public partial class KimodoPlayableClipEditor : UnityEditor.Editor
     {
         private const double RepaintIntervalSeconds = 0.2d;
 
@@ -486,7 +487,7 @@ namespace KimodoBridge.Editor
                 }
 
                 lastConstraintMarkers.Clear();
-                var latestMarkers = KimodoEditorGeneratePipelineOrchestrator.GetLatestConstraintMarkers();
+                var latestMarkers = KimodoPlayableClipGenerationHostService.GetLatestConstraintMarkers();
                 if (latestMarkers != null)
                 {
                     for (int i = 0; i < latestMarkers.Count; i++)
@@ -749,8 +750,11 @@ namespace KimodoBridge.Editor
 
             if (!KimodoConstraintMarkerEditorUtility.TryBuildRenderContextForPlayableClip(clip, out PoseCacheRenderContext context, out TimelineClip timelineClip, out _))
             {
+                KimodoConstraintPoseCache.DestroyEntriesForClipId(clip.GetInstanceID());
                 return;
             }
+
+            KimodoConstraintPoseCache.DestroyEntriesForClipId(clip.GetInstanceID(), context);
 
             if (showConstraint == null || !showConstraint.boolValue)
             {
@@ -853,6 +857,7 @@ namespace KimodoBridge.Editor
 
             if (!KimodoConstraintMarkerEditorUtility.TryBuildRenderContextForPlayableClip(clip, out PoseCacheRenderContext context, out _, out _))
             {
+                KimodoConstraintPoseCache.DestroyEntriesForClipId(clip.GetInstanceID());
                 return;
             }
 

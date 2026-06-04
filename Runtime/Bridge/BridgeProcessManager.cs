@@ -86,6 +86,18 @@ namespace KimodoBridge
             terminator.KillProcessTree(ref process, ref processId);
         }
 
+        public void DetachProcess()
+        {
+            Process proc = process;
+            process = null;
+            processId = -1;
+
+            if (proc != null)
+            {
+                try { proc.Dispose(); } catch { }
+            }
+        }
+
         public void Dispose()
         {
             if (disposed)

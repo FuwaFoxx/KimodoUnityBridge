@@ -264,17 +264,14 @@ namespace KimodoBridge.Editor
         {
             try
             {
-                KimodoEditorGenerateResult result = await generatePipelineOrchestrator.ExecuteAnimatorToolGenerateAndBakeAsync(
-                    motionPrompt,
-                    bridgeModelName,
-                    generationBackend,
-                    bridgeVramMode,
-                    generationFrameCount,
-                    diffusionSteps,
-                    effectiveSeed,
+                AnimationClip targetClip = new KimodoEditorClipWritebackService().CreateGeneratedAnimationClipAsset();
+                KimodoEditorGenerateRequest request = BuildAnimatorGenerateRequest(
                     constraintsJson,
                     explicitRetargetAvatar,
-                    previewPane != null ? previewPane.PreviewAvatarRoot : null,
+                    generationFrameCount,
+                    effectiveSeed,
+                    targetClip,
+                    runCts.Token,
                     (stage, message) =>
                     {
                         RunOnEditorThread(runId, () =>
@@ -282,9 +279,9 @@ namespace KimodoBridge.Editor
                             lastStatus = string.IsNullOrWhiteSpace(message) ? stage.ToString() : message;
                             Repaint();
                         });
-                    },
-                    KimodoTimelinePreviewRefreshUtility.RefreshIfPreviewing,
-                    runCts.Token);
+                    });
+
+                KimodoEditorGenerateResult result = await generatePipelineOrchestrator.ExecuteAsync(request);
 
                 RunOnEditorThread(runId, () =>
                 {
@@ -294,6 +291,7 @@ namespace KimodoBridge.Editor
                     lastSuccessfulGeneratedClipForApply = result.GeneratedClip;
                     lastStatus = "Generation complete.";
                     lastError = string.Empty;
+                    KimodoTimelinePreviewRefreshUtility.RefreshIfPreviewing();
                     Repaint();
                 });
             }
@@ -469,6 +467,54 @@ namespace KimodoBridge.Editor
                 : seed;
             seed = effectiveSeed;
             return effectiveSeed;
+        }
+
+        private KimodoEditorGenerateRequest BuildAnimatorGenerateRequest(
+            string constraintsJson,
+            Avatar explicitRetargetAvatar,
+            int generationFrameCount,
+            int effectiveSeed,
+            AnimationClip targetClip,
+            CancellationToken token,
+            Action<KimodoGeneratePipelineStage, string> progress)
+        {
+            string resolvedModelName = string.IsNullOrWhiteSpace(bridgeModelName) ? "Kimodo-SOMA-RP-v1" : bridgeModelName.Trim();
+            Avatar originRetargetAvatar = null;
+            if (!KimodoRuntimeAvatarSkeletonBuilder.TryLoadAvatarByModelName(resolvedModelName, out originRetargetAvatar, out _) ||
+                originRetargetAvatar == null ||
+                !originRetargetAvatar.isValid ||
+                !originRetargetAvatar.isHuman)
+            {
+                throw new InvalidOperationException("Failed to resolve origin retarget avatar.");
+            }
+
+            if (explicitRetargetAvatar == null || !explicitRetargetAvatar.isValid || !explicitRetargetAvatar.isHuman)
+            {
+                throw new InvalidOperationException("Preview retarget avatar is null/invalid/non-humanoid.");
+            }
+
+            return new KimodoEditorGenerateRequest
+            {
+                Prompt = motionPrompt,
+                ModelName = resolvedModelName,
+                GenerationBackend = generationBackend,
+                BridgeVramMode = bridgeVramMode,
+                DurationSeconds = generationFrameCount / KimodoPlayableClip.FIXED_FRAME_RATE,
+                DiffusionSteps = diffusionSteps,
+                EffectiveSeed = effectiveSeed,
+                ConstraintsJson = constraintsJson ?? string.Empty,
+                OriginRetargetAvatar = originRetargetAvatar,
+                TargetRetargetAvatar = explicitRetargetAvatar,
+                ExportMuscleClip = true,
+                DirectBindingRoot = previewPane != null ? previewPane.PreviewAvatarRoot : null,
+                ModelsRoot = KimodoPlayableClipGenerationSettings.instance.LocalModelsPath?.Trim() ?? string.Empty,
+                ComfyHost = string.Empty,
+                ComfyPort = 8188,
+                GenerationTimeoutSeconds = KimodoPlayableClipGenerationSettings.instance.GenerationTimeoutSeconds,
+                TargetClip = targetClip,
+                Progress = progress,
+                Token = token
+            };
         }
 
         private static int DurationSecondsToFrameCount(float durationSeconds)
