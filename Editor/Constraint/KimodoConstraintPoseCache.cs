@@ -14,6 +14,7 @@ namespace KimodoBridge.Editor
         public readonly int AnimatorId;
         public readonly string ModelName;
         public readonly KimodoConstraintRigType RigType;
+        public readonly string ContextKey;
 
         public PoseCacheRenderContext(int clipId, int animatorId, string modelName, KimodoConstraintRigType rigType)
         {
@@ -21,6 +22,7 @@ namespace KimodoBridge.Editor
             AnimatorId = animatorId;
             ModelName = string.IsNullOrWhiteSpace(modelName) ? "Kimodo-SOMA-RP-v1" : modelName.Trim();
             RigType = rigType;
+            ContextKey = KimodoConstraintMarkerEditorUtility.GetCachedIntString(clipId) + ":" + KimodoConstraintMarkerEditorUtility.GetCachedIntString(animatorId);
         }
     }
 
@@ -78,7 +80,7 @@ namespace KimodoBridge.Editor
                 return true;
             }
 
-            string contextKey = BuildContextKey(context.ClipId, context.AnimatorId);
+            string contextKey = context.ContextKey;
             bool hasVisible = false;
             for (int i = 0; i < items.Count; i++)
             {
@@ -154,7 +156,7 @@ namespace KimodoBridge.Editor
 
         internal static void SetGroupState(PoseCacheRenderContext context, bool visible, bool selectable)
         {
-            string contextKey = BuildContextKey(context.ClipId, context.AnimatorId);
+            string contextKey = context.ContextKey;
             foreach (KeyValuePair<string, PoseCacheEntry> kv in Entries)
             {
                 if (!kv.Key.StartsWith(contextKey + ":", StringComparison.Ordinal))
@@ -177,7 +179,7 @@ namespace KimodoBridge.Editor
 
             string normalizedEntryId = entryId.Trim();
             string keepContextKey = keepContext.HasValue
-                ? BuildContextKey(keepContext.Value.ClipId, keepContext.Value.AnimatorId)
+                ? keepContext.Value.ContextKey
                 : null;
             string entryKeySuffix = ":" + normalizedEntryId;
             var keysToRemove = new List<string>();
@@ -224,7 +226,7 @@ namespace KimodoBridge.Editor
             }
 
             string keepContextKey = keepContext.HasValue
-                ? BuildContextKey(keepContext.Value.ClipId, keepContext.Value.AnimatorId)
+                ? keepContext.Value.ContextKey
                 : null;
             var keysToRemove = new List<string>();
 
@@ -270,7 +272,7 @@ namespace KimodoBridge.Editor
                 return;
             }
 
-            string contextKey = BuildContextKey(context.ClipId, context.AnimatorId);
+            string contextKey = context.ContextKey;
             var keysToRemove = new List<string>();
             foreach (KeyValuePair<string, PoseCacheEntry> kv in Entries)
             {
@@ -324,7 +326,7 @@ namespace KimodoBridge.Editor
                 return false;
             }
 
-            string contextKey = BuildContextKey(context.ClipId, context.AnimatorId);
+            string contextKey = context.ContextKey;
             string normalizedEntryId = string.IsNullOrWhiteSpace(entryId) ? "default" : entryId.Trim();
             string key = BuildEntryKey(contextKey, normalizedEntryId);
             if (Entries.TryGetValue(key, out entry) && entry != null && entry.Root != null && entry.Root.gameObject != null)
@@ -583,7 +585,7 @@ namespace KimodoBridge.Editor
 
         private static string BuildContextKey(int clipId, int animatorId)
         {
-            return clipId.ToString() + ":" + animatorId.ToString();
+            return KimodoConstraintMarkerEditorUtility.GetCachedIntString(clipId) + ":" + KimodoConstraintMarkerEditorUtility.GetCachedIntString(animatorId);
         }
 
         private static string BuildEntryKey(string contextKey, string entryId)

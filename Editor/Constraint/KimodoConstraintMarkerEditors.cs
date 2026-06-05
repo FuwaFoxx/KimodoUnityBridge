@@ -12,6 +12,26 @@ using TimelineInject;
 
 namespace KimodoBridge.Editor
 {
+    [InitializeOnLoad]
+    internal static class KimodoConstraintMarkerSelectionPreviewCleanup
+    {
+        static KimodoConstraintMarkerSelectionPreviewCleanup()
+        {
+            Selection.selectionChanged += OnSelectionChanged;
+            EditorApplication.quitting += ClearAll;
+        }
+
+        private static void OnSelectionChanged()
+        {
+            KimodoConstraintMarkerEditorUtility.HandleSelectionChangedForPreviewCleanup(Selection.activeObject as KimodoConstraintMarkerBase);
+        }
+
+        private static void ClearAll()
+        {
+            KimodoConstraintMarkerEditorUtility.HandleSelectionChangedForPreviewCleanup(null);
+        }
+    }
+
     internal abstract class KimodoConstraintStandardMarkerEditorBase : UnityEditor.Editor
     {
         protected abstract string TypeLabel { get; }
@@ -786,6 +806,35 @@ namespace KimodoBridge.Editor
             SceneView.RepaintAll();
         }
 
+        public static void HandleSelectionChangedForPreviewCleanup(KimodoConstraintMarkerBase selectedMarker)
+        {
+            var markerIds = new List<int>(PoseRenderSignatures.Keys);
+            for (int i = 0; i < markerIds.Count; i++)
+            {
+                int markerId = markerIds[i];
+                KimodoConstraintMarkerBase marker = EditorUtility.InstanceIDToObject(markerId) as KimodoConstraintMarkerBase;
+                if (marker == null)
+                {
+                    AutoSampleCache.Remove(markerId);
+                    PoseRenderSignatures.Remove(markerId);
+                    KimodoConstraintPoseCache.DestroyEntriesForItemId(GetCachedIntString(markerId));
+                    continue;
+                }
+
+                if (ReferenceEquals(marker, selectedMarker))
+                {
+                    continue;
+                }
+
+                if (KimodoConstraintOverrideEditWindow.IsOpenForMarker(marker))
+                {
+                    continue;
+                }
+
+                ClearMarkerPoseCachePreview(marker, keepIfOverrideWindowOpen: true);
+            }
+        }
+
         public static void ClearMarkerPoseCachePreview(KimodoConstraintMarkerBase marker, bool keepIfOverrideWindowOpen)
         {
             if (marker == null)
@@ -995,6 +1044,12 @@ namespace KimodoBridge.Editor
                 return false;
             }
 
+            PoseRenderSignatures[marker.GetInstanceID()] = new PoseRenderCacheEntry
+            {
+                Snapshot = BuildRenderSnapshot(marker, context, normalizedSample),
+                Success = true,
+                Error = string.Empty
+            };
             return true;
         }
 

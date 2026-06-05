@@ -768,7 +768,7 @@ namespace KimodoBridge.Editor
 
                 renderItems.Add(new PoseCacheRenderItem
                 {
-                    EntryId = marker.GetInstanceID().ToString(),
+                    EntryId = KimodoConstraintMarkerEditorUtility.GetCachedIntString(marker.GetInstanceID()),
                     SampleData = sample,
                     ConstraintType = marker.ConstraintType,
                     HighlightJoints = KimodoMarkerSamplingUtility.BuildHighlightJointsForMarker(marker, context.ModelName),
