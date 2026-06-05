@@ -29,6 +29,25 @@ namespace KimodoBridge
         public Quaternion rightHandRotation;
     }
 
+    public sealed class MuscleClipCache
+    {
+        public AnimationClip sourceClip;
+        public Avatar sourceAvatar;
+        public float frameRate;
+        public float duration;
+        public MuscleSample[] samples;
+        public AnimationClip muscleClip;
+
+        public bool IsReady =>
+            sourceClip != null &&
+            sourceAvatar != null &&
+            frameRate > 0f &&
+            duration >= 0f &&
+            samples != null &&
+            samples.Length > 0 &&
+            muscleClip != null;
+    }
+
     public sealed class SkeletonCache
     {
         public Avatar avatar;

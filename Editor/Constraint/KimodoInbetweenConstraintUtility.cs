@@ -139,8 +139,6 @@ namespace KimodoBridge.Editor
                 return false;
             }
 
-            double localSampleTime = KimodoConstraintMarkerEditorUtility.GetLocalSecondsInClip(sourceClip, timelineTime);
-
             string modelName = sourceClip.asset is KimodoPlayableClip playableClip
                 ? playableClip.bridgeModelName
                 : "Kimodo-SOMA-RP-v1";
@@ -163,7 +161,7 @@ namespace KimodoBridge.Editor
                     skeletonRoot,
                     sourceClip,
                     modelName,
-                    localSampleTime,
+                    timelineTime,
                     markerType,
                     sourceAvatar,
                     targetAvatar,

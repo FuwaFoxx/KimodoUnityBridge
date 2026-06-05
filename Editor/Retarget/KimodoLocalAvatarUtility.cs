@@ -1,5 +1,4 @@
 using System;
-using System.IO;
 using System.Linq;
 using UnityEditor;
 using UnityEngine;
@@ -8,6 +7,8 @@ namespace KimodoBridge.Editor
 {
     internal static class KimodoLocalAvatarUtility
     {
+        private static readonly KimodoEditorClipWritebackService ClipWritebackService = new KimodoEditorClipWritebackService();
+
         public readonly struct AvatarResolveResult
         {
             public AvatarResolveResult(Avatar avatar, bool isHumanoid, string source, string error)
@@ -23,8 +24,6 @@ namespace KimodoBridge.Editor
             public string Source { get; }
             public string Error { get; }
         }
-
-        private const string AvatarCacheFolder = "Assets/KimodoGenerated/Avatars";
 
         public static AvatarResolveResult ResolveAvatarFromGameObject(GameObject avatarRoot)
         {
@@ -69,11 +68,8 @@ namespace KimodoBridge.Editor
                 return true;
             }
 
-            EnsureFolderExists(AvatarCacheFolder);
-            string cachePath = BuildAvatarCachePath(avatarRoot);
-            if (File.Exists(cachePath))
+            if (ClipWritebackService.TryLoadGeneratedAvatarCache(avatarRoot, out Avatar cached, out _))
             {
-                Avatar cached = AssetDatabase.LoadAssetAtPath<Avatar>(cachePath);
                 if (IsValidHumanoid(cached) && CheckAvatarValid(cached, avatarRoot))
                 {
                     avatar = cached;
@@ -99,16 +95,8 @@ namespace KimodoBridge.Editor
                 return true;
             }
 
-            try
+            if (ClipWritebackService.TrySaveGeneratedAvatarCache(avatarRoot, generated, out Avatar saved, out string saveError))
             {
-                if (File.Exists(cachePath))
-                {
-                    AssetDatabase.DeleteAsset(cachePath);
-                }
-
-                AssetDatabase.CreateAsset(generated, cachePath);
-                AssetDatabase.SaveAssets();
-                Avatar saved = AssetDatabase.LoadAssetAtPath<Avatar>(cachePath);
                 if (IsValidHumanoid(saved))
                 {
                     avatar = saved;
@@ -116,9 +104,9 @@ namespace KimodoBridge.Editor
                     return true;
                 }
             }
-            catch (Exception e)
+            else
             {
-                Debug.LogWarning($"[Kimodo][Avatar] Save generated avatar failed: {e.Message}");
+                Debug.LogWarning($"[Kimodo][Avatar] Save generated avatar failed: {saveError}");
             }
 
             avatar = generated;
@@ -208,63 +196,6 @@ namespace KimodoBridge.Editor
                 out error);
         }
 
-        private static string BuildAvatarCachePath(GameObject avatarRoot)
-        {
-            string safeName = KimodoRuntimeUtility.SanitizeName(avatarRoot != null ? avatarRoot.name : "Avatar", "Avatar");
-            int hash = ComputeHierarchyHash(avatarRoot != null ? avatarRoot.transform : null);
-            return $"{AvatarCacheFolder}/{safeName}_{hash:X8}.asset";
-        }
-
-        private static int ComputeHierarchyHash(Transform root)
-        {
-            unchecked
-            {
-                int hash = 5381;
-                if (root == null)
-                {
-                    return hash;
-                }
-
-                Transform[] all = root.GetComponentsInChildren<Transform>(true);
-                for (int i = 0; i < all.Length; i++)
-                {
-                    string path = AnimationUtility.CalculateTransformPath(all[i], root);
-                    string name = $"{all[i].name}|{path}";
-                    for (int j = 0; j < name.Length; j++)
-                    {
-                        hash = ((hash << 5) + hash) ^ name[j];
-                    }
-                }
-
-                return hash;
-            }
-        }
-
-
-        private static void EnsureFolderExists(string folderPath)
-        {
-            if (AssetDatabase.IsValidFolder(folderPath))
-            {
-                return;
-            }
-
-            string[] parts = folderPath.Split('/');
-            if (parts.Length == 0)
-            {
-                return;
-            }
-
-            string current = parts[0];
-            for (int i = 1; i < parts.Length; i++)
-            {
-                string next = $"{current}/{parts[i]}";
-                if (!AssetDatabase.IsValidFolder(next))
-                {
-                    AssetDatabase.CreateFolder(current, parts[i]);
-                }
-                current = next;
-            }
-        }
     }
 }
 

@@ -11,10 +11,6 @@ namespace KimodoBridge.Editor
 {
     public static class KimodoRetargetToolsEditor
     {
-        private const string TempClipFolder = "Assets/Temp";
-        private const string TempClipPrefix = "TempClip_";
-        private static int tempClipCounter = -1;
-
         [Serializable]
         private sealed class MotionJsonData
         {
@@ -89,7 +85,6 @@ namespace KimodoBridge.Editor
                 frameRate = fps
             };
             BakeMotionCurvesDirect(rawClip, data, fps, frameCount);
-            SaveTempClipAsset(rawClip, $"{targetClip.name}_Raw");
             KimodoEditorClipUtility.CopyClipData(rawClip, targetClip, forceNoLoopKeepY: true);
             UnityEngine.Object.DestroyImmediate(rawClip);
 
@@ -196,11 +191,9 @@ namespace KimodoBridge.Editor
 
                 CurveFilterOptions filter = BuildCurveFilterOptions(options);
                 recorder.SaveToClip(recordedClip, effectiveFps, filter);
-                SaveTempClipAsset(recordedClip, $"{targetClip.name}_Recorded");
 
                 HashSet<string> allowedPaths = BuildAllowedBindingPaths(sourceClip);
                 filteredClip = BuildFilteredRecordedClip(recordedClip, allowedPaths, targetClip.name, effectiveFps);
-                SaveTempClipAsset(filteredClip, $"{targetClip.name}_Filtered");
                 KimodoEditorClipUtility.CopyClipData(filteredClip, targetClip, forceNoLoopKeepY: true);
 
                 if ((options ?? new KimodoCurveFilterOptions()).ensureQuaternionContinuity)
@@ -351,8 +344,6 @@ namespace KimodoBridge.Editor
                 return false;
             }
 
-            SaveTempClipAsset(temp, $"{clip.name}_FilterTemp");
-
             KimodoEditorClipUtility.CopyClipData(temp, clip, forceNoLoopKeepY: true);
             UnityEngine.Object.DestroyImmediate(temp);
             return true;
@@ -432,96 +423,6 @@ namespace KimodoBridge.Editor
             }
 
             UnityEngine.Object.DestroyImmediate(t.gameObject);
-        }
-
-        private static void SaveTempClipAsset(AnimationClip clip, string label)
-        {
-            if (clip == null)
-            {
-                return;
-            }
-
-            if (!AssetDatabase.IsValidFolder("Assets"))
-            {
-                return;
-            }
-
-            EnsureTempFolder();
-
-            string index = NextTempClipIndex().ToString("0000");
-            string safeLabel = KimodoRuntimeUtility.SanitizeName(label, "clip");
-            string assetPath = $"{TempClipFolder}/{TempClipPrefix}{index}_{safeLabel}.anim";
-            assetPath = AssetDatabase.GenerateUniqueAssetPath(assetPath);
-
-            AnimationClip snapshot = new AnimationClip
-            {
-                name = clip.name,
-                legacy = clip.legacy,
-                frameRate = clip.frameRate
-            };
-            KimodoEditorClipUtility.CopyClipData(clip, snapshot, forceNoLoopKeepY: false);
-            AssetDatabase.CreateAsset(snapshot, assetPath);
-            EditorUtility.SetDirty(snapshot);
-            AssetDatabase.SaveAssets();
-        }
-
-        private static void EnsureTempFolder()
-        {
-            if (!AssetDatabase.IsValidFolder(TempClipFolder))
-            {
-                AssetDatabase.CreateFolder("Assets", "Temp");
-            }
-        }
-
-        private static int NextTempClipIndex()
-        {
-            if (tempClipCounter < 0)
-            {
-                tempClipCounter = ResolveMaxTempClipIndex();
-            }
-
-            tempClipCounter += 1;
-            return tempClipCounter;
-        }
-
-        private static int ResolveMaxTempClipIndex()
-        {
-            EnsureTempFolder();
-            int max = 0;
-            string[] guids = AssetDatabase.FindAssets("t:AnimationClip", new[] { TempClipFolder });
-            for (int i = 0; i < guids.Length; i++)
-            {
-                string path = AssetDatabase.GUIDToAssetPath(guids[i]);
-                if (string.IsNullOrWhiteSpace(path))
-                {
-                    continue;
-                }
-
-                string name = System.IO.Path.GetFileNameWithoutExtension(path);
-                if (string.IsNullOrWhiteSpace(name) || !name.StartsWith(TempClipPrefix, StringComparison.Ordinal))
-                {
-                    continue;
-                }
-
-                int start = TempClipPrefix.Length;
-                int end = start;
-                while (end < name.Length && char.IsDigit(name[end]))
-                {
-                    end++;
-                }
-
-                if (end <= start)
-                {
-                    continue;
-                }
-
-                if (int.TryParse(name.Substring(start, end - start), out int value) && value > max)
-                {
-                    max = value;
-                }
-            }
-
-            return max;
         }
 
         private static MotionJsonData ParseMotionJsonFlexible(string motionJson)

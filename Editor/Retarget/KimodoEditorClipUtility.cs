@@ -6,9 +6,10 @@ namespace KimodoBridge.Editor
 {
     internal static class KimodoEditorClipUtility
     {
-        public static bool CanApplyClipDirectlyToHierarchy(
+        public static bool CanApplyClipDirectlyToProfileSkeleton(
             AnimationClip clip,
             GameObject bindingObject,
+            string modelName,
             out string error)
         {
             error = string.Empty;
@@ -24,23 +25,27 @@ namespace KimodoBridge.Editor
                 return false;
             }
 
-            if (clip.isHumanMotion)
-            {
-                error = "Humanoid clip requires avatar.";
-                return false;
-            }
-
-            Transform bindingRoot = bindingObject.transform;
-            if (bindingRoot == null)
+            Transform root = bindingObject.transform;
+            if (root == null)
             {
                 error = "Binding root is null.";
                 return false;
             }
 
+            if (!KimodoProfileSkeletonUtility.TryResolveProfileSkeleton(modelName, root, out _, out _, out _, out error))
+            {
+                return false;
+            }
+
+            if (clip.isHumanMotion)
+            {
+                return true;
+            }
+
             EditorCurveBinding[] bindings = AnimationUtility.GetCurveBindings(clip);
             for (int i = 0; i < bindings.Length; i++)
             {
-                if (!CanResolveBindingOnHierarchy(bindingRoot, bindings[i].path, bindings[i].type, out error))
+                if (!CanResolveBindingOnHierarchy(root, bindings[i].path, bindings[i].type, out error))
                 {
                     return false;
                 }
@@ -49,7 +54,7 @@ namespace KimodoBridge.Editor
             EditorCurveBinding[] objectBindings = AnimationUtility.GetObjectReferenceCurveBindings(clip);
             for (int i = 0; i < objectBindings.Length; i++)
             {
-                if (!CanResolveBindingOnHierarchy(bindingRoot, objectBindings[i].path, objectBindings[i].type, out error))
+                if (!CanResolveBindingOnHierarchy(root, objectBindings[i].path, objectBindings[i].type, out error))
                 {
                     return false;
                 }

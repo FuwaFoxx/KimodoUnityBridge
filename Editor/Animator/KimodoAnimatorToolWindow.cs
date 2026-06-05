@@ -178,12 +178,6 @@ namespace KimodoBridge.Editor
                 return;
             }
 
-            if (!TryConvertCurrentSourceToRootMotionIfNeeded(out string rootMotionError))
-            {
-                lastError = rootMotionError;
-                return;
-            }
-
             if (!previewPane.TryEnsureGenerationSourceReady(bridgeModelName, out string error))
             {
                 lastError = error;
@@ -224,34 +218,6 @@ namespace KimodoBridge.Editor
                 effectiveSeed,
                 runCts,
                 runId);
-        }
-
-        private bool TryConvertCurrentSourceToRootMotionIfNeeded(out string error)
-        {
-            error = string.Empty;
-            if (previewPane == null)
-            {
-                error = "Preview pane is not ready.";
-                return false;
-            }
-
-            if (!previewPane.TryResolveCurrentSourceClipAndAvatar(bridgeModelName, out AnimationClip sourceClip, out Avatar avatar, out error))
-            {
-                return false;
-            }
-
-            if (sourceClip == null || avatar == null || FootRootMotionClipBaker.HasMeaningfulRootMotion(sourceClip))
-            {
-                return true;
-            }
-
-            if (!KimodoRootMotionEditorUtility.TryCreateRootMotionClipAsset(sourceClip, avatar, out AnimationClip rootMotionClip, out error))
-            {
-                return false;
-            }
-
-            previewPane.OverrideOriginalClipForPreview(rootMotionClip, bridgeModelName);
-            return true;
         }
 
         private async Task StartGenerateAsync(
@@ -506,7 +472,14 @@ namespace KimodoBridge.Editor
                 OriginRetargetAvatar = originRetargetAvatar,
                 TargetRetargetAvatar = explicitRetargetAvatar,
                 ExportMuscleClip = true,
-                DirectBindingRoot = previewPane != null ? previewPane.PreviewAvatarRoot : null,
+                CanSkipRetarget = generatedClip =>
+                    previewPane != null &&
+                    previewPane.PreviewAvatarRoot != null &&
+                    KimodoEditorClipUtility.CanApplyClipDirectlyToProfileSkeleton(
+                        generatedClip,
+                        previewPane.PreviewAvatarRoot,
+                        resolvedModelName,
+                        out _),
                 ModelsRoot = KimodoPlayableClipGenerationSettings.instance.LocalModelsPath?.Trim() ?? string.Empty,
                 ComfyHost = string.Empty,
                 ComfyPort = 8188,

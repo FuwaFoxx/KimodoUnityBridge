@@ -1,5 +1,4 @@
 using System;
-using System.IO;
 using UnityEditor;
 using UnityEditor.Animations;
 using UnityEngine;
@@ -32,6 +31,7 @@ namespace KimodoBridge.Editor
         }
 
         private KimodoAvatarPreview avatarPreview;
+        private readonly KimodoEditorClipWritebackService clipWritebackService = new KimodoEditorClipWritebackService();
         private GameObject sourcePreviewInstance;
         private AnimatorController previewController;
         private string previewControllerAssetPath;
@@ -90,7 +90,12 @@ namespace KimodoBridge.Editor
                 return;
             }
 
-            EnsurePreviewController();
+            if (!EnsurePreviewController())
+            {
+                previewUnavailableMessage = "Preview controller could not be created.";
+                return;
+            }
+
             string stateName = EnsureClipState(clip);
             activeStateName = stateName;
             activeInputKey = inputKey;
@@ -124,7 +129,12 @@ namespace KimodoBridge.Editor
                 return;
             }
 
-            EnsurePreviewController();
+            if (!EnsurePreviewController())
+            {
+                previewUnavailableMessage = "Preview controller could not be created.";
+                return;
+            }
+
             string fromStateName = EnsureTransitionGraph(fromClip, toClip, transition, previewSettings);
             activeStateName = fromStateName;
             activeInputKey = inputKey;
@@ -308,30 +318,28 @@ namespace KimodoBridge.Editor
             avatarPreview.timeControl.loop = true;
         }
 
-        private void EnsurePreviewController()
+        private bool EnsurePreviewController()
         {
             if (previewController != null)
             {
-                return;
+                return true;
             }
 
-            if (string.IsNullOrEmpty(previewControllerAssetPath))
+            if (!clipWritebackService.TryCreateGeneratedPreviewAnimatorControllerAsset(
+                    out previewController,
+                    out previewControllerAssetPath,
+                    out string error))
             {
-                previewControllerAssetPath = "Assets/Temp/KimodoPreview_" + Guid.NewGuid().ToString("N") + ".controller";
+                Debug.LogWarning($"[Kimodo][Preview] Create preview controller failed: {error}");
+                return false;
             }
 
-            string dir = Path.GetDirectoryName(previewControllerAssetPath);
-            if (!string.IsNullOrEmpty(dir) && !AssetDatabase.IsValidFolder(dir))
-            {
-                AssetDatabase.CreateFolder("Assets", "Temp");
-            }
-
-            previewController = AnimatorController.CreateAnimatorControllerAtPath(previewControllerAssetPath);
             if (previewController.layers == null || previewController.layers.Length == 0)
             {
                 previewController.AddLayer("Base Layer");
             }
             Debug.Log("[Kimodo][Preview] Created preview controller: " + previewControllerAssetPath);
+            return true;
         }
 
         private string EnsureClipState(AnimationClip clip)

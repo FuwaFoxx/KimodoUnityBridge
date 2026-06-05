@@ -161,21 +161,23 @@ namespace KimodoBridge
             out KimodoMarkerSampleResult result,
             out string error)
         {
-            Transform root = skeletonRoot != null ? skeletonRoot : (animator != null ? animator.transform : null);
-            if (animator != null &&
-                root != null &&
-                CanDirectSampleModelPose(modelName, root, animator))
-            {
-                return TrySampleMarkerRaw(animator, root, modelName, globalTime, markerType, out result, out error);
-            }
-
             AnimationClip animationClip = ExtractAnimationClip(sourceClip);
             if (animationClip != null && KimodoRetargetTools.IsValidHumanoid(originAvatar) && KimodoRetargetTools.IsValidHumanoid(targetAvatar))
             {
+                double clipSampleTime = sourceClip != null ? sourceClip.ToLocalTime(globalTime) : globalTime;
+                if (clipSampleTime < 0.0)
+                {
+                    clipSampleTime = 0.0;
+                }
+                else if (sourceClip != null && clipSampleTime > sourceClip.duration)
+                {
+                    clipSampleTime = sourceClip.duration;
+                }
+
                 return TrySampleMarkerFromClipWithRetargetCore(
                     animationClip,
                     markerType,
-                    globalTime,
+                    clipSampleTime,
                     originAvatar,
                     targetAvatar,
                     modelName,
@@ -190,6 +192,23 @@ namespace KimodoBridge
                 return false;
             }
 
+            Transform root = skeletonRoot != null ? skeletonRoot : (animator != null ? animator.transform : null);
+            if (root != null &&
+                KimodoProfileSkeletonUtility.TryResolveProfileSkeleton(modelName, root, out string[] jointNames, out int[] parentIndices, out Transform[] jointTransforms, out error))
+            {
+                return TrySampleMarkerRaw(
+                    animator,
+                    root,
+                    modelName,
+                    globalTime,
+                    markerType,
+                    jointNames,
+                    parentIndices,
+                    jointTransforms,
+                    out result,
+                    out error);
+            }
+
             if (animator == null)
             {
                 error = "Animator is null.";
@@ -197,7 +216,22 @@ namespace KimodoBridge
                 return false;
             }
 
-            return TrySampleMarkerRaw(animator, root, modelName, globalTime, markerType, out result, out error);
+            return TrySampleMarkerRaw(
+                animator,
+                root,
+                modelName,
+                globalTime,
+                markerType,
+                null,
+                null,
+                null,
+                out result,
+                out error);
+        }
+
+        public static bool CanDirectSampleModelPose(string modelName, Transform root, out string error)
+        {
+            return KimodoProfileSkeletonUtility.TryResolveProfileSkeleton(modelName, root, out _, out _, out _, out error);
         }
 
         public static bool TrySampleMarkerFromClipWithRetargetCore(
@@ -225,36 +259,71 @@ namespace KimodoBridge
                 return false;
             }
 
-            if (!KimodoRetargetTools.TryRetargetNew(
-                    sourceClip,
-                    originAvatar,
-                    targetAvatar,
-                    (float)sampleTime,
-                    out BoneSample frame,
-                    out error))
+            if (sourceClip == null)
             {
+                error = "Source clip is null.";
                 return false;
             }
 
-            if (!KimodoRetargetTools.TryGetHumanoidRootPoseFromBoneSample(
-                    frame,
-                    targetAvatar,
-                    out Vector3 rootPosition,
-                    out Quaternion rootRotation,
-                    out error))
+            SkeletonCache sourceCache = null;
+            SkeletonCache profileCache = null;
+            MuscleClipCache muscleClipCache = null;
+            try
             {
-                return false;
-            }
+                if (!KimodoRetargetTools.TryBuildSkeletonCache(originAvatar, "KimodoMarkerSampling_SourceMuscleCache", out sourceCache, out error))
+                {
+                    return false;
+                }
 
-            return TryBuildMarkerSampleResultFromRetargetFrame(
-                frame,
-                rootPosition,
-                rootRotation,
-                modelName,
-                markerType,
-                sampleTime,
-                out result,
-                out error);
+                if (!KimodoRetargetTools.TryBuildSkeletonCache(targetAvatar, "KimodoMarkerSampling_ProfileSkeleton", out profileCache, out error))
+                {
+                    return false;
+                }
+
+                if (!KimodoRetargetTools.TryBuildMuscleClipCache(sourceClip, sourceCache, out muscleClipCache, out error))
+                {
+                    return false;
+                }
+
+                if (!KimodoRetargetTools.TrySampleMuscleClipCache(muscleClipCache, (float)sampleTime, out MuscleSample sourceMuscleSample, out error))
+                {
+                    return false;
+                }
+
+                if (!KimodoRetargetTools.ApplyMuscleSampleToSkeletonCache(sourceMuscleSample, profileCache, out _, out error))
+                {
+                    return false;
+                }
+
+                if (!KimodoProfileSkeletonUtility.TryResolveProfileSkeleton(
+                        modelName,
+                        profileCache.skeletonRoot,
+                        out string[] jointNames,
+                        out int[] parentIndices,
+                        out Transform[] jointTransforms,
+                        out error))
+                {
+                    return false;
+                }
+
+                return TrySampleMarkerRaw(
+                    profileCache.animator,
+                    profileCache.skeletonRoot,
+                    modelName,
+                    sampleTime,
+                    markerType,
+                    jointNames,
+                    parentIndices,
+                    jointTransforms,
+                    out result,
+                    out error);
+            }
+            finally
+            {
+                KimodoRetargetTools.DestroyMuscleClipCache(muscleClipCache);
+                KimodoRetargetTools.DestroySkeletonCache(profileCache);
+                KimodoRetargetTools.DestroySkeletonCache(sourceCache);
+            }
         }
 
         private static AnimationClip ExtractAnimationClip(TimelineClip sourceClip)
@@ -273,28 +342,35 @@ namespace KimodoBridge
             string modelName,
             double globalTime,
             string markerType,
+            string[] jointNamesOverride,
+            int[] parentIndicesOverride,
+            Transform[] jointsOverride,
             out KimodoMarkerSampleResult result,
             out string error)
         {
             result = null;
             error = string.Empty;
 
-            if (animator == null)
-            {
-                error = "Animator is null.";
-                return false;
-            }
-
-            Transform root = skeletonRoot != null ? skeletonRoot : animator.transform;
+            Transform root = skeletonRoot != null ? skeletonRoot : (animator != null ? animator.transform : null);
             if (root == null)
             {
                 error = "Skeleton root is null.";
                 return false;
             }
 
-            ResolveProfile(modelName, out string[] jointNames, out int[] parentIndices);
+            string[] jointNames = jointNamesOverride;
+            int[] parentIndices = parentIndicesOverride;
+            Transform[] joints = jointsOverride;
+            if (jointNames == null || parentIndices == null || joints == null)
+            {
+                ResolveProfile(modelName, out jointNames, out parentIndices);
+                joints = ResolveJointTransforms(jointNames, root, animator);
+            }
+
             string rootJointName = jointNames != null && jointNames.Length > 0 ? jointNames[0] : "Hips";
-            Transform pelvis = TryResolveTransformByJointName(rootJointName, root, animator) ?? root;
+            Transform pelvis = joints != null && joints.Length > 0 && joints[0] != null
+                ? joints[0]
+                : TryResolveTransformByJointName(rootJointName, root, animator) ?? root;
 
             Vector3 unityRootPosition = pelvis.position;
 
@@ -309,7 +385,6 @@ namespace KimodoBridge
                 unityHeading.Normalize();
             }
 
-            Transform[] joints = ResolveJointTransforms(jointNames, root, animator);
             Quaternion[] worldRots = new Quaternion[joints.Length];
             for (int i = 0; i < joints.Length; i++)
             {
@@ -390,46 +465,19 @@ namespace KimodoBridge
             for (int i = 0; i < count; i++)
             {
                 string name = names[i];
-                // Keep unresolved joints as null to avoid sampling wrong rotations from a fallback transform.
                 transforms[i] = TryResolveTransformByJointName(name, root, animator);
             }
 
             return transforms;
         }
 
-        private static bool CanDirectSampleModelPose(string modelName, Transform root, Animator animator)
-        {
-            ResolveProfile(modelName, out string[] jointNames, out int[] parentIndices);
-            if (jointNames == null || jointNames.Length == 0)
-            {
-                return false;
-            }
-
-            Transform[] joints = ResolveJointTransforms(jointNames, root, animator);
-            if (joints == null || joints.Length != jointNames.Length)
-            {
-                return false;
-            }
-
-            for (int i = 0; i < jointNames.Length; i++)
-            {
-                if (string.IsNullOrWhiteSpace(jointNames[i]) || joints[i] == null)
-                {
-                    return false;
-                }
-
-                int parent = parentIndices != null && i < parentIndices.Length ? parentIndices[i] : -1;
-                if (parent >= 0 && (parent >= joints.Length || joints[parent] == null))
-                {
-                    return false;
-                }
-            }
-
-            return true;
-        }
-
         private static Transform TryResolveTransformByJointName(string jointName, Transform searchRoot, Animator animator)
         {
+            if (searchRoot == null || string.IsNullOrWhiteSpace(jointName))
+            {
+                return null;
+            }
+
             Transform byHuman = TryResolveViaHumanBone(jointName, animator);
             if (byHuman != null)
             {
@@ -449,14 +497,13 @@ namespace KimodoBridge
             bool hasUpperChest = animator.GetBoneTransform(HumanBodyBones.UpperChest) != null;
             switch (jointName)
             {
-                // SOMA30 aliases
                 case "Hips": return animator.GetBoneTransform(HumanBodyBones.Hips);
                 case "Spine1": return animator.GetBoneTransform(HumanBodyBones.Spine);
                 case "Spine2": return animator.GetBoneTransform(HumanBodyBones.Chest);
                 case "Chest":
                     return hasUpperChest
-                    ? animator.GetBoneTransform(HumanBodyBones.UpperChest)
-                    : animator.GetBoneTransform(HumanBodyBones.Chest);
+                        ? animator.GetBoneTransform(HumanBodyBones.UpperChest)
+                        : animator.GetBoneTransform(HumanBodyBones.Chest);
                 case "Neck1": return animator.GetBoneTransform(HumanBodyBones.Neck);
                 case "Neck2": return animator.GetBoneTransform(HumanBodyBones.Neck);
                 case "Head": return animator.GetBoneTransform(HumanBodyBones.Head);
@@ -483,15 +530,13 @@ namespace KimodoBridge
                 case "RightShin": return animator.GetBoneTransform(HumanBodyBones.RightLowerLeg);
                 case "RightFoot": return animator.GetBoneTransform(HumanBodyBones.RightFoot);
                 case "RightToeBase": return animator.GetBoneTransform(HumanBodyBones.RightToes);
-
-                // SMPLX22 aliases
                 case "pelvis": return animator.GetBoneTransform(HumanBodyBones.Hips);
                 case "spine1": return animator.GetBoneTransform(HumanBodyBones.Spine);
                 case "spine2": return animator.GetBoneTransform(HumanBodyBones.Chest);
                 case "spine3":
                     return hasUpperChest
-                    ? animator.GetBoneTransform(HumanBodyBones.UpperChest)
-                    : animator.GetBoneTransform(HumanBodyBones.Chest);
+                        ? animator.GetBoneTransform(HumanBodyBones.UpperChest)
+                        : animator.GetBoneTransform(HumanBodyBones.Chest);
                 case "neck": return animator.GetBoneTransform(HumanBodyBones.Neck);
                 case "head": return animator.GetBoneTransform(HumanBodyBones.Head);
                 case "left_hip": return animator.GetBoneTransform(HumanBodyBones.LeftUpperLeg);
@@ -510,121 +555,10 @@ namespace KimodoBridge
                 case "right_shoulder": return animator.GetBoneTransform(HumanBodyBones.RightUpperArm);
                 case "right_elbow": return animator.GetBoneTransform(HumanBodyBones.RightLowerArm);
                 case "right_wrist": return animator.GetBoneTransform(HumanBodyBones.RightHand);
-
                 default: return null;
             }
         }
 
-        private static bool TryBuildMarkerSampleResultFromRetargetFrame(
-            BoneSample frame,
-            Vector3 rootPosition,
-            Quaternion rootRotation,
-            string modelName,
-            string markerType,
-            double sampleTime,
-            out KimodoMarkerSampleResult result,
-            out string error)
-        {
-            result = null;
-            error = string.Empty;
-
-            if (frame == null || frame.boneNames == null || frame.localRotations == null)
-            {
-                error = "frame data is empty.";
-                return false;
-            }
-
-            KimodoRigProfileDatabase.ResolveProfile(modelName, out KimodoConstraintRigType rigType, out string[] jointNames, out _);
-            if (jointNames == null || jointNames.Length == 0)
-            {
-                error = $"model joint layout not found for '{modelName}'.";
-                return false;
-            }
-
-            Dictionary<string, Quaternion> rotationMap = BuildLeafRotationMap(frame);
-            if (rotationMap == null || rotationMap.Count == 0)
-            {
-                error = "failed to build canonical joint rotation map.";
-                return false;
-            }
-
-            var localAxisAngles = new List<Vector3>(jointNames.Length);
-            var sampledJointIndices = new List<int>(jointNames.Length);
-            for (int i = 0; i < jointNames.Length; i++)
-            {
-                string jointName = jointNames[i];
-                if (string.IsNullOrWhiteSpace(jointName))
-                {
-                    error = "canonical joint layout contains empty joint name.";
-                    return false;
-                }
-
-                if (!rotationMap.TryGetValue(jointName.Trim(), out Quaternion rotation))
-                {
-                    error = $"canonical joint '{jointName}' missing on sampled frame.";
-                    return false;
-                }
-
-                localAxisAngles.Add(KimodoRuntimeUtility.QuaternionToAxisAngleVector(rotation));
-                sampledJointIndices.Add(i);
-            }
-
-            result = new KimodoMarkerSampleResult
-            {
-                constraintType = markerType ?? string.Empty,
-                sampleTime = sampleTime,
-                rigType = rigType,
-                hasRootHeading = true,
-                rootPosition = rootPosition,
-                rootHeading = Vector2.right,
-                jointNames = new List<string>(jointNames),
-                localAxisAngles = localAxisAngles,
-                sampledJointIndices = sampledJointIndices
-            };
-
-            if (rootRotation != Quaternion.identity)
-            {
-                Vector3 forward = rootRotation * Vector3.forward;
-                Vector2 heading = new Vector2(forward.x, forward.z);
-                result.rootHeading = heading.sqrMagnitude > 1e-8f ? heading.normalized : Vector2.right;
-            }
-
-            return true;
-        }
-
-        private static Dictionary<string, Quaternion> BuildLeafRotationMap(BoneSample BoneSample)
-        {
-            if (BoneSample == null || BoneSample.boneNames == null || BoneSample.localRotations == null)
-            {
-                return null;
-            }
-
-            var map = new Dictionary<string, Quaternion>(StringComparer.OrdinalIgnoreCase);
-            int count = Mathf.Min(BoneSample.boneNames.Length, BoneSample.localRotations.Length);
-            for (int i = 0; i < count; i++)
-            {
-                string leaf = ExtractLeafName(BoneSample.boneNames[i]);
-                if (string.IsNullOrWhiteSpace(leaf) || map.ContainsKey(leaf))
-                {
-                    continue;
-                }
-
-                map[leaf.Trim()] = BoneSample.localRotations[i];
-            }
-
-            return map;
-        }
-
-        private static string ExtractLeafName(string path)
-        {
-            if (string.IsNullOrWhiteSpace(path))
-            {
-                return string.Empty;
-            }
-
-            int index = path.LastIndexOf('/');
-            return index >= 0 && index < path.Length - 1 ? path.Substring(index + 1) : path;
-        }
     }
 }
 

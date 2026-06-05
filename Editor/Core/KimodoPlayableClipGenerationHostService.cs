@@ -1,7 +1,6 @@
 using Newtonsoft.Json.Linq;
 using System;
 using System.Collections.Generic;
-using System.IO;
 using System.Reflection;
 using System.Threading;
 using TimelineInject;
@@ -50,7 +49,6 @@ namespace KimodoBridge.Editor
 
             GameObject bindingObject = ConstraintProvider.FindTimelineBindingObjectForAsset(clip);
             bool exportMuscleClip = hasValidRetargetAvatar && TryResolveBindingAnimatorAvatar(clip, out _);
-
             int effectiveSeed = ResolveEffectiveSeed(clip);
             return new KimodoEditorGenerateRequest
             {
@@ -65,7 +63,9 @@ namespace KimodoBridge.Editor
                 OriginRetargetAvatar = originRetargetAvatar,
                 TargetRetargetAvatar = targetRetargetAvatar,
                 ExportMuscleClip = exportMuscleClip,
-                DirectBindingRoot = hasValidRetargetAvatar ? null : bindingObject,
+                CanSkipRetarget = generatedClip =>
+                    bindingObject != null &&
+                    KimodoEditorClipUtility.CanApplyClipDirectlyToProfileSkeleton(generatedClip, bindingObject, resolvedModelName, out _),
                 ModelsRoot = KimodoPlayableClipGenerationSettings.instance.LocalModelsPath?.Trim() ?? string.Empty,
                 ComfyHost = clip.comfyuiIP,
                 ComfyPort = clip.comfyuiPort,
@@ -107,9 +107,7 @@ namespace KimodoBridge.Editor
             }
 
             clip.clip = ClipWritebackService.CreateGeneratedAnimationClipAsset();
-            EditorUtility.SetDirty(clip);
-            EditorUtility.SetDirty(clip.clip);
-            AssetDatabase.SaveAssets();
+            ClipWritebackService.SaveDirtyAssets(clip, clip.clip);
         }
 
         private static void ApplyGeneratedMetadata(KimodoPlayableClip clip, string prompt, string motionJson)
@@ -134,116 +132,7 @@ namespace KimodoBridge.Editor
                 KimodoPlayableClipGenerationSettings.MinGeneratedClipsLimit,
                 KimodoPlayableClipGenerationSettings.MaxGeneratedClipsLimit);
 
-            if (!AssetDatabase.IsValidFolder(KimodoEditorClipWritebackService.GeneratedClipFolder))
-            {
-                return;
-            }
-
-            string[] clipGuids = AssetDatabase.FindAssets("t:AnimationClip", new[] { KimodoEditorClipWritebackService.GeneratedClipFolder });
-            if (clipGuids == null || clipGuids.Length <= maxCount)
-            {
-                return;
-            }
-
-            var clipPaths = new List<string>(clipGuids.Length);
-            foreach (string guid in clipGuids)
-            {
-                string path = AssetDatabase.GUIDToAssetPath(guid);
-                if (string.IsNullOrWhiteSpace(path) || !path.EndsWith(".anim", StringComparison.OrdinalIgnoreCase))
-                {
-                    continue;
-                }
-
-                string name = Path.GetFileNameWithoutExtension(path) ?? string.Empty;
-                if (!name.StartsWith(KimodoEditorClipWritebackService.GeneratedClipNamePrefix, StringComparison.Ordinal))
-                {
-                    continue;
-                }
-
-                clipPaths.Add(path);
-            }
-
-            if (clipPaths.Count <= maxCount)
-            {
-                return;
-            }
-
-            clipPaths.Sort(CompareGeneratedClipPathsByAgeOldestFirst);
-            string activeClipPath = clip != null && clip.clip != null ? AssetDatabase.GetAssetPath(clip.clip) : string.Empty;
-
-            foreach (string candidatePath in clipPaths)
-            {
-                if (!string.IsNullOrWhiteSpace(activeClipPath) &&
-                    string.Equals(candidatePath, activeClipPath, StringComparison.OrdinalIgnoreCase))
-                {
-                    continue;
-                }
-
-                if (IsAssetReferencedByOtherAssets(candidatePath))
-                {
-                    Debug.Log($"[Kimodo] Generated clip cleanup skipped referenced clip: {candidatePath}");
-                    return;
-                }
-
-                if (AssetDatabase.DeleteAsset(candidatePath))
-                {
-                    AssetDatabase.SaveAssets();
-                }
-
-                return;
-            }
-        }
-
-        private static int CompareGeneratedClipPathsByAgeOldestFirst(string leftPath, string rightPath)
-        {
-            string leftName = Path.GetFileNameWithoutExtension(leftPath) ?? string.Empty;
-            string rightName = Path.GetFileNameWithoutExtension(rightPath) ?? string.Empty;
-            string leftStamp = leftName.StartsWith(KimodoEditorClipWritebackService.GeneratedClipNamePrefix, StringComparison.Ordinal)
-                ? leftName.Substring(KimodoEditorClipWritebackService.GeneratedClipNamePrefix.Length)
-                : leftName;
-            string rightStamp = rightName.StartsWith(KimodoEditorClipWritebackService.GeneratedClipNamePrefix, StringComparison.Ordinal)
-                ? rightName.Substring(KimodoEditorClipWritebackService.GeneratedClipNamePrefix.Length)
-                : rightName;
-            return string.Compare(leftStamp, rightStamp, StringComparison.Ordinal);
-        }
-
-        private static bool IsAssetReferencedByOtherAssets(string assetPath)
-        {
-            if (string.IsNullOrWhiteSpace(assetPath))
-            {
-                return false;
-            }
-
-            string[] allAssets = AssetDatabase.GetAllAssetPaths();
-            foreach (string path in allAssets)
-            {
-                if (string.IsNullOrWhiteSpace(path) ||
-                    string.Equals(path, assetPath, StringComparison.OrdinalIgnoreCase) ||
-                    !path.StartsWith("Assets/", StringComparison.OrdinalIgnoreCase))
-                {
-                    continue;
-                }
-
-                string[] dependencies;
-                try
-                {
-                    dependencies = AssetDatabase.GetDependencies(path, false);
-                }
-                catch
-                {
-                    continue;
-                }
-
-                for (int i = 0; i < dependencies.Length; i++)
-                {
-                    if (string.Equals(dependencies[i], assetPath, StringComparison.OrdinalIgnoreCase))
-                    {
-                        return true;
-                    }
-                }
-            }
-
-            return false;
+            ClipWritebackService.TrimGeneratedClipsToLimit(clip != null ? clip.clip : null, maxCount);
         }
 
         private static void HandleGeneratedClipWritebackCompleted(KimodoPlayableClip playableClip)
@@ -261,7 +150,14 @@ namespace KimodoBridge.Editor
 
         private static void TryMatchOffsetsToPreviousClip(KimodoPlayableClip playableClip)
         {
-            if (playableClip == null || TimelineEditor.inspectedDirector == null)
+            if (playableClip == null ||
+                !playableClip.enableInbetweenInterpolation ||
+                TimelineEditor.inspectedDirector == null)
+            {
+                return;
+            }
+
+            if (!TryResolveBindingAnimatorAvatar(playableClip, out Avatar bindingAvatar) || !IsValidHumanoid(bindingAvatar))
             {
                 return;
             }

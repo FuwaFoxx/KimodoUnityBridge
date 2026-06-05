@@ -44,11 +44,7 @@ namespace KimodoBridge.Editor
                 throw new InvalidOperationException(string.IsNullOrWhiteSpace(bakeError) ? "Bake failed." : bakeError);
             }
 
-            string directBindingError = string.Empty;
-            bool canSkipRetarget =
-                request.DirectBindingRoot != null &&
-                KimodoEditorClipUtility.CanApplyClipDirectlyToHierarchy(request.TargetClip, request.DirectBindingRoot, out directBindingError);
-            if (canSkipRetarget)
+            if (request.CanSkipRetarget != null && request.CanSkipRetarget(request.TargetClip))
             {
                 request.Progress?.Invoke(KimodoGeneratePipelineStage.Retarget, "Skipping retarget: binding hierarchy already matches clip bindings.");
                 return Complete(request, prompt, motionJson, request.TargetClip);
@@ -56,23 +52,44 @@ namespace KimodoBridge.Editor
 
             if (!IsValidHumanoid(request.OriginRetargetAvatar) || !IsValidHumanoid(request.TargetRetargetAvatar))
             {
-                string fallback = string.IsNullOrWhiteSpace(directBindingError)
-                    ? string.Empty
-                    : $" Direct binding fallback failed: {directBindingError}";
-                throw new InvalidOperationException("Retarget requires valid humanoid originAvatar and targetAvatar." + fallback);
+                throw new InvalidOperationException("Retarget requires valid humanoid originAvatar and targetAvatar.");
             }
 
             request.Progress?.Invoke(KimodoGeneratePipelineStage.Retarget, "Retargeting...");
+            if (!clipWritebackService.TryGetOrCreateMuscleClipCache(
+                    request.TargetClip,
+                    request.OriginRetargetAvatar,
+                    out AnimationClip cachedMuscleClip,
+                    out string muscleCacheError))
+            {
+                throw new InvalidOperationException(string.IsNullOrWhiteSpace(muscleCacheError)
+                    ? "Build muscle clip cache failed."
+                    : muscleCacheError);
+            }
+
+            if (request.ExportMuscleClip)
+            {
+                if (!clipWritebackService.WriteMuscleClipCacheToClip(request.TargetClip, cachedMuscleClip, out string writeCacheError))
+                {
+                    throw new InvalidOperationException(string.IsNullOrWhiteSpace(writeCacheError)
+                        ? "Write cached muscle clip failed."
+                        : writeCacheError);
+                }
+
+                return Complete(request, prompt, motionJson, request.TargetClip);
+            }
+
             if (!KimodoRetargetTools.TryRetargetNew(
                     request.TargetClip,
                     request.OriginRetargetAvatar,
                     request.TargetRetargetAvatar,
                     request.ExportMuscleClip,
+                    cachedMuscleClip,
                     out AnimationClip retargetClip,
                     out string retargetError))
             {
                 throw new InvalidOperationException(string.IsNullOrWhiteSpace(retargetError)
-                    ? $"Retarget failed. Direct binding fallback: {directBindingError}"
+                    ? "Retarget failed."
                     : retargetError);
             }
 

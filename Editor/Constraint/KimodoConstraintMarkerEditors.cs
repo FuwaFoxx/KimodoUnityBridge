@@ -2,6 +2,7 @@ using KimodoBridge;
 using KimodoBridge.Editor;
 using System;
 using System.Collections.Generic;
+using System.Globalization;
 using UnityEditor;
 using UnityEditor.Timeline;
 using UnityEngine;
@@ -47,13 +48,9 @@ namespace KimodoBridge.Editor
 
             if (!useOverride && !windowOpen)
             {
-                if (!KimodoConstraintMarkerEditorUtility.TrySampleMarkerDataFromMarker(markerTarget, out KimodoMarkerSampleResult preview, out string error))
+                if (!KimodoConstraintMarkerEditorUtility.TryUpdateAutoSampleMarkerData(markerTarget, out string error))
                 {
                     EditorGUILayout.HelpBox($"Auto preview unavailable: {error}", MessageType.Warning);
-                }
-                else
-                {
-                    KimodoMarkerSamplingEditorUtility.TryWriteConstraintMarkerSample(markerTarget, preview, keepOverrideEnabled: false, out _);
                 }
             }
 
@@ -65,7 +62,7 @@ namespace KimodoBridge.Editor
                 KimodoConstraintMarkerEditorUtility.NotifyInspectorChanged(target as KimodoConstraintMarkerBase);
             }
 
-            if (!windowOpen && markerTarget != null && !KimodoConstraintMarkerEditorUtility.TryRenderMarkerToPoseCache(markerTarget, out string poseError) && !string.IsNullOrWhiteSpace(poseError))
+            if (!windowOpen && markerTarget != null && !KimodoConstraintMarkerEditorUtility.TryRenderMarkerToPoseCacheIfNeeded(markerTarget, out string poseError) && !string.IsNullOrWhiteSpace(poseError))
             {
                 EditorGUILayout.HelpBox($"Pose cache update failed: {poseError}", MessageType.Warning);
             }
@@ -182,13 +179,9 @@ namespace KimodoBridge.Editor
 
             if (!useOverride && !windowOpen)
             {
-                if (!KimodoConstraintMarkerEditorUtility.TrySampleMarkerDataFromMarker(markerTarget, out KimodoMarkerSampleResult preview, out string error))
+                if (!KimodoConstraintMarkerEditorUtility.TryUpdateAutoSampleMarkerData(markerTarget, out string error))
                 {
                     EditorGUILayout.HelpBox($"Auto preview unavailable: {error}", MessageType.Warning);
-                }
-                else
-                {
-                    KimodoMarkerSamplingEditorUtility.TryWriteConstraintMarkerSample(markerTarget, preview, keepOverrideEnabled: false, out _);
                 }
             }
 
@@ -210,7 +203,7 @@ namespace KimodoBridge.Editor
                 KimodoConstraintMarkerEditorUtility.NotifyInspectorChanged(target as KimodoConstraintMarkerBase);
             }
 
-            if (!windowOpen && markerTarget != null && !KimodoConstraintMarkerEditorUtility.TryRenderMarkerToPoseCache(markerTarget, out string poseError) && !string.IsNullOrWhiteSpace(poseError))
+            if (!windowOpen && markerTarget != null && !KimodoConstraintMarkerEditorUtility.TryRenderMarkerToPoseCacheIfNeeded(markerTarget, out string poseError) && !string.IsNullOrWhiteSpace(poseError))
             {
                 EditorGUILayout.HelpBox($"Pose cache update failed: {poseError}", MessageType.Warning);
             }
@@ -262,6 +255,26 @@ namespace KimodoBridge.Editor
     internal static class KimodoConstraintMarkerEditorUtility
     {
         public const double KimodoFps = 30.0;
+        private static readonly Dictionary<int, AutoSampleCacheEntry> AutoSampleCache = new Dictionary<int, AutoSampleCacheEntry>();
+        private static readonly Dictionary<int, string> PoseRenderSignatures = new Dictionary<int, string>();
+
+        private sealed class AutoSampleCacheEntry
+        {
+            public string Signature;
+            public bool Success;
+            public string Error;
+        }
+
+        private struct MarkerSamplingContext
+        {
+            public TimelineClip ClipRange;
+            public TrackAsset Track;
+            public Animator Animator;
+            public AnimationClip SourceClip;
+            public Avatar SourceAvatar;
+            public Avatar TargetAvatar;
+            public string ModelName;
+        }
 
         public static double GetLocalSecondsInClip(TimelineClip clipRange, double globalTime)
         {
@@ -345,6 +358,99 @@ namespace KimodoBridge.Editor
             sampledData = null;
             error = string.Empty;
 
+            if (!TryBuildMarkerSamplingContext(marker, out MarkerSamplingContext context, out error))
+            {
+                return false;
+            }
+
+            double sampleTime = marker.time;
+            double localSampleTime = GetLocalSecondsInClip(context.ClipRange, sampleTime);
+            if (!KimodoMarkerSamplingUtility.TrySampleMarkerFromClipWithRetargetCore(
+                    context.SourceClip,
+                    marker.ConstraintType,
+                    localSampleTime,
+                    context.SourceAvatar,
+                    context.TargetAvatar,
+                    context.ModelName,
+                    out KimodoMarkerSampleResult sample,
+                    out error))
+            {
+                return false;
+            }
+
+            sample.sampleTime = sampleTime;
+            sampledData = KimodoMarkerSamplingUtility.NormalizeConstraintMarkerSample(marker, sample);
+            if (sampledData == null)
+            {
+                error = "failed to build marker sample";
+                return false;
+            }
+
+            return true;
+        }
+
+        public static bool TryUpdateAutoSampleMarkerData(KimodoConstraintMarkerBase marker, out string error)
+        {
+            error = string.Empty;
+            if (marker == null)
+            {
+                error = "marker is null";
+                return false;
+            }
+
+            if (!TryBuildAutoSampleSignature(marker, out string signature, out error))
+            {
+                return false;
+            }
+
+            int id = marker.GetInstanceID();
+            if (AutoSampleCache.TryGetValue(id, out AutoSampleCacheEntry cached) &&
+                string.Equals(cached.Signature, signature, StringComparison.Ordinal))
+            {
+                error = cached.Error ?? string.Empty;
+                return cached.Success;
+            }
+
+            if (!TrySampleMarkerDataFromMarker(marker, out KimodoMarkerSampleResult preview, out error))
+            {
+                AutoSampleCache[id] = new AutoSampleCacheEntry
+                {
+                    Signature = signature,
+                    Success = false,
+                    Error = error ?? string.Empty
+                };
+                return false;
+            }
+
+            if (!KimodoMarkerSamplingEditorUtility.TryWriteConstraintMarkerSample(marker, preview, keepOverrideEnabled: false, out error))
+            {
+                AutoSampleCache[id] = new AutoSampleCacheEntry
+                {
+                    Signature = signature,
+                    Success = false,
+                    Error = error ?? string.Empty
+                };
+                return false;
+            }
+
+            AutoSampleCache[id] = new AutoSampleCacheEntry
+            {
+                Signature = signature,
+                Success = true,
+                Error = string.Empty
+            };
+            PoseRenderSignatures.Remove(id);
+            return true;
+        }
+
+        private static bool TryBuildMarkerSamplingContext(
+            KimodoConstraintMarkerBase marker,
+            out MarkerSamplingContext context,
+            out string error)
+        {
+            context = default;
+            error = string.Empty;
+
             if (marker == null)
             {
                 error = "marker is null";
@@ -378,64 +484,73 @@ namespace KimodoBridge.Editor
                 return false;
             }
 
-            double sampleTime = marker.time;
-
-            double originalTime = director.time;
-            DirectorWrapMode originalWrap = director.extrapolationMode;
-            KimodoMarkerSampleResult sample;
-            try
+            AnimationClip sourceClip = clipRange.asset is AnimationPlayableAsset playableAsset ? playableAsset.clip : null;
+            if (sourceClip == null)
             {
-                director.extrapolationMode = DirectorWrapMode.Hold;
-                director.time = sampleTime;
-                director.Evaluate();
-
-                string modelName = clipRange.asset is KimodoPlayableClip playableClip
-                    ? playableClip.bridgeModelName
-                    : "Kimodo-SOMA-RP-v1";
-                KimodoLocalAvatarUtility.AvatarResolveResult sourceAvatarResult = KimodoLocalAvatarUtility.ResolveAvatarFromGameObject(animator.gameObject);
-                Avatar sourceAvatar = sourceAvatarResult.Avatar;
-                if (sourceAvatar == null || !sourceAvatar.isValid || !sourceAvatar.isHuman)
-                {
-                    error = $"Resolve source avatar failed: {sourceAvatarResult.Error}";
-                    return false;
-                }
-
-                if (!KimodoRuntimeAvatarSkeletonBuilder.TryLoadAvatarByModelName(modelName, out Avatar targetAvatar, out string targetError))
-                {
-                    error = $"Resolve target avatar failed: {targetError}";
-                    return false;
-                }
-
-                if (!KimodoMarkerSamplingUtility.TrySampleMarker(
-                        animator,
-                        animator.transform,
-                        clipRange,
-                        modelName,
-                        sampleTime,
-                        marker.ConstraintType,
-                        sourceAvatar,
-                        targetAvatar,
-                        out sample,
-                        out error))
-                {
-                    return false;
-                }
-            }
-            finally
-            {
-                director.time = originalTime;
-                director.Evaluate();
-                director.extrapolationMode = originalWrap;
-            }
-
-            sample.sampleTime = sampleTime;
-            sampledData = KimodoMarkerSamplingUtility.NormalizeConstraintMarkerSample(marker, sample);
-            if (sampledData == null)
-            {
-                error = "failed to build marker sample";
+                error = "Animation clip is missing.";
                 return false;
             }
 
+            string modelName = ResolveModelName(clipRange);
+            KimodoLocalAvatarUtility.AvatarResolveResult sourceAvatarResult = KimodoLocalAvatarUtility.ResolveAvatarFromGameObject(animator.gameObject);
+            Avatar sourceAvatar = sourceAvatarResult.Avatar;
+            if (sourceAvatar == null || !sourceAvatar.isValid || !sourceAvatar.isHuman)
+            {
+                error = $"Resolve source avatar failed: {sourceAvatarResult.Error}";
+                return false;
+            }
+
+            if (!KimodoRuntimeAvatarSkeletonBuilder.TryLoadAvatarByModelName(modelName, out Avatar targetAvatar, out string targetError))
+            {
+                error = $"Resolve target avatar failed: {targetError}";
+                return false;
+            }
+
+            context = new MarkerSamplingContext
+            {
+                ClipRange = clipRange,
+                Track = track,
+                Animator = animator,
+                SourceClip = sourceClip,
+                SourceAvatar = sourceAvatar,
+                TargetAvatar = targetAvatar,
+                ModelName = modelName
+            };
+            return true;
+        }
+
+        private static bool TryBuildAutoSampleSignature(KimodoConstraintMarkerBase marker, out string signature, out string error)
+        {
+            signature = string.Empty;
+            if (!TryBuildMarkerSamplingContext(marker, out MarkerSamplingContext context, out error))
+            {
+                return false;
+            }
+
+            double globalTime = Math.Max(0.0, marker.time);
+            double localTime = GetLocalSecondsInClip(context.ClipRange, globalTime);
+            KimodoMarkerSampleResult sampleData = marker.SampleData;
+            int clipAssetId = context.ClipRange.asset is UnityEngine.Object clipAsset ? clipAsset.GetInstanceID() : 0;
+            signature = string.Join("|",
+                marker.GetInstanceID().ToString(CultureInfo.InvariantCulture),
+                marker.ConstraintType ?? string.Empty,
+                FormatDouble(globalTime),
+                FormatDouble(localTime),
+                context.ModelName ?? string.Empty,
+                context.Track != null ? context.Track.GetInstanceID().ToString(CultureInfo.InvariantCulture) : "0",
+                context.Animator != null ? context.Animator.GetInstanceID().ToString(CultureInfo.InvariantCulture) : "0",
+                context.SourceClip != null ? context.SourceClip.GetInstanceID().ToString(CultureInfo.InvariantCulture) : "0",
+                clipAssetId.ToString(CultureInfo.InvariantCulture),
+                context.SourceAvatar != null ? context.SourceAvatar.GetInstanceID().ToString(CultureInfo.InvariantCulture) : "0",
+                context.TargetAvatar != null ? context.TargetAvatar.GetInstanceID().ToString(CultureInfo.InvariantCulture) : "0",
+                FormatDouble(context.ClipRange.start),
+                FormatDouble(context.ClipRange.duration),
+                FormatDouble(context.ClipRange.clipIn),
+                FormatDouble(context.ClipRange.timeScale),
+                context.SourceClip != null ? FormatFloat(context.SourceClip.length) : "0",
+                context.SourceClip != null ? FormatFloat(context.SourceClip.frameRate) : "0",
+                sampleData != null && sampleData.hasRootHeading ? "1" : "0",
+                BuildStringListSignature(sampleData != null ? sampleData.jointNames : null));
             return true;
         }
 
@@ -448,6 +563,7 @@ namespace KimodoBridge.Editor
 
             if (marker is KimodoConstraintMarkerBase kimodoMarker)
             {
+                ClearMarkerEditorCaches(kimodoMarker);
                 KimodoConstraintPoseCache.DestroyEntriesForItemId(kimodoMarker.GetInstanceID().ToString());
                 kimodoMarker.time = globalTime;
                 kimodoMarker.SampleData.sampleTime = Math.Max(0.0, globalTime);
@@ -541,6 +657,7 @@ namespace KimodoBridge.Editor
         {
             if (marker != null)
             {
+                ClearMarkerEditorCaches(marker);
                 EditorUtility.SetDirty(marker);
             }
 
@@ -553,6 +670,8 @@ namespace KimodoBridge.Editor
             {
                 return;
             }
+
+            ClearMarkerEditorCaches(marker);
 
             if (keepIfOverrideWindowOpen && KimodoConstraintOverrideEditWindow.IsOpenForMarker(marker))
             {
@@ -601,9 +720,7 @@ namespace KimodoBridge.Editor
             }
 
             KimodoPlayableClip playableClip = clipRange.asset as KimodoPlayableClip;
-            string modelName = playableClip != null && !string.IsNullOrWhiteSpace(playableClip.bridgeModelName)
-                ? playableClip.bridgeModelName.Trim()
-                : "Kimodo-SOMA-RP-v1";
+            string modelName = ResolveModelName(clipRange);
             KimodoConstraintRigType rigType = KimodoRigProfileDatabase.ResolveRigTypeFromModelName(modelName);
             int clipContextId = playableClip != null
                 ? playableClip.GetInstanceID()
@@ -611,6 +728,59 @@ namespace KimodoBridge.Editor
                     ? (clipRange.asset as UnityEngine.Object).GetInstanceID()
                     : track.GetInstanceID());
             context = new PoseCacheRenderContext(clipContextId, animator.GetInstanceID(), modelName, rigType);
+            return true;
+        }
+
+        public static bool TryRenderMarkerToPoseCacheIfNeeded(KimodoConstraintMarkerBase marker, out string error)
+        {
+            error = string.Empty;
+            if (!TryBuildMarkerRenderSignature(marker, out string signature, out error))
+            {
+                return false;
+            }
+
+            int id = marker.GetInstanceID();
+            if (PoseRenderSignatures.TryGetValue(id, out string cached) &&
+                string.Equals(cached, signature, StringComparison.Ordinal))
+            {
+                return true;
+            }
+
+            if (!TryRenderMarkerToPoseCache(marker, out error))
+            {
+                return false;
+            }
+
+            PoseRenderSignatures[id] = signature;
+            return true;
+        }
+
+        private static bool TryBuildMarkerRenderSignature(KimodoConstraintMarkerBase marker, out string signature, out string error)
+        {
+            signature = string.Empty;
+            if (marker == null)
+            {
+                error = "marker is null";
+                return false;
+            }
+
+            if (!TryBuildRenderContextForMarker(marker, out PoseCacheRenderContext context, out error))
+            {
+                return false;
+            }
+
+            if (!KimodoMarkerSamplingUtility.TryNormalizeConstraintMarkerSample(marker, marker.SampleData, out KimodoMarkerSampleResult sample, out error))
+            {
+                return false;
+            }
+
+            signature = string.Join("|",
+                marker.GetInstanceID().ToString(CultureInfo.InvariantCulture),
+                context.ClipId.ToString(CultureInfo.InvariantCulture),
+                context.AnimatorId.ToString(CultureInfo.InvariantCulture),
+                context.ModelName ?? string.Empty,
+                context.RigType.ToString(),
+                BuildSampleSignature(sample));
             return true;
         }
 
@@ -756,6 +926,7 @@ namespace KimodoBridge.Editor
                 {
                     overrideProp.boolValue = true;
                     so.ApplyModifiedProperties();
+                    ClearMarkerEditorCaches(marker);
                 }
 
                 if (marker.useOverride)
@@ -763,6 +934,107 @@ namespace KimodoBridge.Editor
                     KimodoConstraintOverrideEditWindow.ShowWindow(marker);
                 }
             }
+        }
+
+        private static string ResolveModelName(TimelineClip clipRange)
+        {
+            KimodoPlayableClip playableClip = clipRange != null ? clipRange.asset as KimodoPlayableClip : null;
+            return playableClip != null && !string.IsNullOrWhiteSpace(playableClip.bridgeModelName)
+                ? playableClip.bridgeModelName.Trim()
+                : "Kimodo-SOMA-RP-v1";
+        }
+
+        private static void ClearMarkerEditorCaches(KimodoConstraintMarkerBase marker)
+        {
+            if (marker == null)
+            {
+                return;
+            }
+
+            int id = marker.GetInstanceID();
+            AutoSampleCache.Remove(id);
+            PoseRenderSignatures.Remove(id);
+        }
+
+        private static string BuildSampleSignature(KimodoMarkerSampleResult sample)
+        {
+            if (sample == null)
+            {
+                return string.Empty;
+            }
+
+            return string.Join("|",
+                sample.constraintType ?? string.Empty,
+                FormatDouble(sample.sampleTime),
+                sample.rigType.ToString(),
+                sample.hasRootHeading ? "1" : "0",
+                FormatVector3(sample.rootPosition),
+                FormatVector2(sample.rootHeading),
+                BuildStringListSignature(sample.jointNames),
+                BuildVector3ListSignature(sample.localAxisAngles),
+                BuildIntListSignature(sample.sampledJointIndices));
+        }
+
+        private static string BuildStringListSignature(IReadOnlyList<string> values)
+        {
+            if (values == null || values.Count == 0)
+            {
+                return string.Empty;
+            }
+
+            return string.Join(",", values);
+        }
+
+        private static string BuildVector3ListSignature(IReadOnlyList<Vector3> values)
+        {
+            if (values == null || values.Count == 0)
+            {
+                return string.Empty;
+            }
+
+            var parts = new string[values.Count];
+            for (int i = 0; i < values.Count; i++)
+            {
+                parts[i] = FormatVector3(values[i]);
+            }
+
+            return string.Join(",", parts);
+        }
+
+        private static string BuildIntListSignature(IReadOnlyList<int> values)
+        {
+            if (values == null || values.Count == 0)
+            {
+                return string.Empty;
+            }
+
+            var parts = new string[values.Count];
+            for (int i = 0; i < values.Count; i++)
+            {
+                parts[i] = values[i].ToString(CultureInfo.InvariantCulture);
+            }
+
+            return string.Join(",", parts);
+        }
+
+        private static string FormatVector2(Vector2 value)
+        {
+            return $"{FormatFloat(value.x)},{FormatFloat(value.y)}";
+        }
+
+        private static string FormatVector3(Vector3 value)
+        {
+            return $"{FormatFloat(value.x)},{FormatFloat(value.y)},{FormatFloat(value.z)}";
+        }
+
+        private static string FormatDouble(double value)
+        {
+            return value.ToString("R", CultureInfo.InvariantCulture);
+        }
+
+        private static string FormatFloat(float value)
+        {
+            return value.ToString("R", CultureInfo.InvariantCulture);
         }
     }
 }

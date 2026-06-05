@@ -132,7 +132,6 @@ namespace KimodoBridge.Editor
         {
             EditorGUILayout.LabelField("Generate Motion", EditorStyles.boldLabel);
             EditorGUILayout.BeginVertical("box");
-            DrawRootMotionButtonIfNeeded();
             if (generationBackend != null)
             {
                 EditorGUILayout.PropertyField(generationBackend, new GUIContent("Backend"));
@@ -258,38 +257,6 @@ namespace KimodoBridge.Editor
 
             EditorGUILayout.EndVertical();
             EditorGUILayout.Space();
-        }
-
-        private void DrawRootMotionButtonIfNeeded()
-        {
-            if (clip == null || clip.clip == null || FootRootMotionClipBaker.HasMeaningfulRootMotion(clip.clip))
-            {
-                return;
-            }
-
-            if (!KimodoRootMotionEditorUtility.TryResolveAvatarForPlayableClip(clip, out Avatar avatar, out string avatarError))
-            {
-                EditorGUILayout.HelpBox($"Root motion conversion unavailable: {avatarError}", MessageType.Info);
-                return;
-            }
-
-            if (GUILayout.Button(new GUIContent("Convert To Root Motion", "Create a new root-motion version of the current animation clip and assign it to this playable clip."), GUILayout.Height(28f)))
-            {
-                if (!KimodoRootMotionEditorUtility.TryCreateRootMotionClipAsset(clip.clip, avatar, out AnimationClip outputClip, out string error))
-                {
-                    lastError = error;
-                    return;
-                }
-
-                Undo.RecordObject(clip, "Convert To Root Motion");
-                clip.clip = outputClip;
-                EditorUtility.SetDirty(clip);
-                EditorUtility.SetDirty(outputClip);
-                lastError = string.Empty;
-                lastStatus = $"Root motion clip created: {outputClip.name}";
-            }
-
-            EditorGUILayout.Space(4f);
         }
 
         private void DrawConstraintReferenceList()
