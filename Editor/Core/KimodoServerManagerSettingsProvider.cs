@@ -207,11 +207,29 @@ namespace KimodoBridge.Editor
                 settings.SaveSettings();
             }
 
+            EditorGUI.BeginChangeCheck();
+            int idleShutdownMinutes = EditorGUILayout.IntField(
+                new GUIContent(
+                    "Idle Shutdown (min)",
+                    "Auto-close bridge server after this many idle minutes. 0 disables idle shutdown. This value is passed to the bridge runtime as KIMODO_IDLE_TIMEOUT_SEC."),
+                settings.ServerIdleShutdownMinutes);
+            if (EditorGUI.EndChangeCheck())
+            {
+                settings.ServerIdleShutdownMinutes = idleShutdownMinutes;
+                settings.SaveSettings();
+            }
+
             if (settings.AlwaysKeepServerExperimental)
             {
                 EditorGUILayout.HelpBox(
-                    "Experimental: the bridge server will be kept alive during compile and Play Mode transitions. This may cause memory leaks or stale runtime state.",
+                    "Experimental: the bridge server will be kept alive during compile and Play Mode transitions. This may cause memory leaks or stale runtime state. Idle shutdown still depends on bridge runtime behavior while the server is otherwise idle.",
                     MessageType.Warning);
+            }
+            else if (settings.ServerIdleShutdownMinutes > 0)
+            {
+                EditorGUILayout.HelpBox(
+                    $"Bridge server will auto-close after {settings.ServerIdleShutdownMinutes} idle minute(s).",
+                    MessageType.None);
             }
 
             string localModelsPath = settings.LocalModelsPath;

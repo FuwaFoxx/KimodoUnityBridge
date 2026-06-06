@@ -160,6 +160,12 @@ namespace KimodoBridge.Editor
                 return generated;
             }
 
+            Material sharedPreviewMaterial = CreatePreviewMaterial();
+            if (sharedPreviewMaterial != null)
+            {
+                generated.Add(sharedPreviewMaterial);
+            }
+
             Renderer[] renderers = instance.GetComponentsInChildren<Renderer>(true);
             for (int i = 0; i < renderers.Length; i++)
             {
@@ -181,30 +187,43 @@ namespace KimodoBridge.Editor
                     continue;
                 }
 
+                if (sharedPreviewMaterial == null)
+                {
+                    continue;
+                }
+
                 Material[] mats = new Material[shared.Length];
                 for (int m = 0; m < mats.Length; m++)
                 {
-                    Material source = shared[m];
-                    if (source == null)
-                    {
-                        mats[m] = null;
-                        continue;
-                    }
-
-                    Material mat = new Material(source)
-                    {
-                        hideFlags = HideFlags.HideAndDontSave,
-                        name = $"{source.name}_PoseCache"
-                    };
-                    SetMaterialColor(mat, NonConstraintColor, NonConstraintAlpha);
-                    mats[m] = mat;
-                    generated.Add(mat);
+                    mats[m] = sharedPreviewMaterial;
                 }
 
                 renderer.sharedMaterials = mats;
             }
 
             return generated;
+        }
+
+        private static Material CreatePreviewMaterial()
+        {
+            Shader shader = Shader.Find("Universal Render Pipeline/Lit");
+            if (shader == null)
+            {
+                shader = Shader.Find("Standard");
+            }
+
+            if (shader == null)
+            {
+                return null;
+            }
+
+            Material material = new Material(shader)
+            {
+                hideFlags = HideFlags.HideAndDontSave,
+                name = "__KimodoPoseCachePreview"
+            };
+            SetMaterialColor(material, NonConstraintColor, NonConstraintAlpha);
+            return material;
         }
 
         private static void SetMaterialColor(Material mat, Color color, float alpha)

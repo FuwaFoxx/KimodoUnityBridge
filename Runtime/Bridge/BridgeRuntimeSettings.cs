@@ -35,6 +35,7 @@ namespace KimodoBridge
         public int modelLoadingPollIntervalMs = DefaultModelLoadingPollIntervalMs;
         public int statusConnectTimeoutMs = DefaultStatusConnectTimeoutMs;
         public int statusIoTimeoutMs = DefaultStatusIoTimeoutMs;
+        public int idleTimeoutSeconds = 0;
         public int logPumpWaitFileTimeoutMs = DefaultLogPumpWaitFileTimeoutMs;
         public int logPumpMissingFilePollMinMs = DefaultLogPumpMissingFilePollMinMs;
         public int logPumpMissingFilePollMaxMs = DefaultLogPumpMissingFilePollMaxMs;
@@ -68,6 +69,7 @@ namespace KimodoBridge
             modelLoadingPollIntervalMs = Math.Max(100, modelLoadingPollIntervalMs);
             statusConnectTimeoutMs = Math.Max(250, statusConnectTimeoutMs);
             statusIoTimeoutMs = Math.Max(250, statusIoTimeoutMs);
+            idleTimeoutSeconds = Math.Max(0, idleTimeoutSeconds);
             logPumpWaitFileTimeoutMs = Math.Max(1000, logPumpWaitFileTimeoutMs);
             logPumpMissingFilePollMinMs = Math.Max(30, logPumpMissingFilePollMinMs);
             logPumpMissingFilePollMaxMs = Math.Max(logPumpMissingFilePollMinMs, logPumpMissingFilePollMaxMs);

@@ -2,7 +2,7 @@
 using System;
 
 [Serializable]
-public sealed class KimodoRightFootConstraintMarker : KimodoEndEffectorConstraintMarker
+public sealed class KimodoRightHandConstraintMarker : KimodoEndEffectorConstraintMarker
 {
-    public override string ConstraintType => "right-foot";
+    public override string ConstraintType => "right-hand";
 }

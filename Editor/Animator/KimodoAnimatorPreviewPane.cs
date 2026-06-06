@@ -708,18 +708,11 @@ namespace KimodoBridge.Editor
 
             double globalTime = ResolveClipSampleTime(clip, normalizedTime);
 
-            if (!KimodoRuntimeAvatarSkeletonBuilder.TryLoadAvatarByModelName(modelName, out Avatar targetAvatar, out string targetError))
-            {
-                error = $"Resolve target avatar failed: {targetError}";
-                return false;
-            }
-
-            return KimodoMarkerSamplingUtility.TrySampleMarkerFromClipWithRetargetCore(
+            return KimodoRetargetToolsEditor.TrySampleMarkerFromClipWithEditorCache(
                 clip,
                 "fullbody",
                 globalTime,
                 avatar,
-                targetAvatar,
                 modelName,
                 out sample,
                 out error);

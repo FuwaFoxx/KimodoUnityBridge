@@ -68,16 +68,4 @@ namespace TimelineInject
         }
     }
 
-    public interface IKimodoSampleMarker
-    {
-        bool TrySampleMarker(
-            Animator animator,
-            Transform skeletonRoot,
-            TimelineClip sourceClip,
-            string modelName,
-            double globalTime,
-            string markerType,
-            out KimodoMarkerSampleResult result,
-            out string error);
-    }
 }

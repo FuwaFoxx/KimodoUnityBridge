@@ -412,7 +412,6 @@ namespace KimodoBridge
                     FullBodyConstraintType,
                     sampleTime,
                     somaAvatar,
-                    somaAvatar,
                     modelName,
                     out KimodoMarkerSampleResult sample,
                     out string error))

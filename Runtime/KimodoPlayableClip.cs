@@ -1,4 +1,3 @@
-using KimodoBridge;
 using UnityEngine;
 using UnityEngine.Playables;
 using UnityEngine.Timeline;
@@ -45,7 +44,7 @@ namespace KimodoBridge
     }
 
     [System.Serializable]
-    public class KimodoPlayableClip : AnimationPlayableAsset, IKimodoSampleMarker
+    public class KimodoPlayableClip : AnimationPlayableAsset
     {
         [Header("Generation Backend")]
         public KimodoGenerationBackend generationBackend = KimodoGenerationBackend.KimodoBridge;
@@ -123,37 +122,6 @@ namespace KimodoBridge
         public override Playable CreatePlayable(PlayableGraph graph, GameObject owner)
         {
             return base.CreatePlayable(graph, owner);
-        }
-
-        public bool TrySampleMarker(
-            Animator animator,
-            Transform skeletonRoot,
-            TimelineClip sourceClip,
-            string modelName,
-            double globalTime,
-            string markerType,
-            out KimodoMarkerSampleResult result,
-            out string error)
-        {
-            Avatar sourceAvatar = animator != null ? animator.avatar : null;
-            if (!KimodoRuntimeAvatarSkeletonBuilder.TryLoadAvatarByModelName(modelName, out Avatar targetAvatar, out string avatarError))
-            {
-                result = null;
-                error = string.IsNullOrWhiteSpace(avatarError) ? "Failed to resolve target avatar." : avatarError;
-                return false;
-            }
-
-            return KimodoMarkerSamplingUtility.TrySampleMarker(
-                animator,
-                skeletonRoot,
-                sourceClip,
-                modelName,
-                globalTime,
-                markerType,
-                sourceAvatar,
-                targetAvatar,
-                out result,
-                out error);
         }
 
         public void ResetGeneration()

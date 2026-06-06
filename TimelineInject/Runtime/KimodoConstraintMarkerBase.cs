@@ -88,8 +88,14 @@ public abstract class KimodoConstraintMarkerBase : Marker
         EnsureSampleData();
     }
 
-    protected virtual void OnDisable()
+protected virtual void OnDisable()
     {
         // no-op: marker lifecycle event hub has been removed.
     }
+}
+
+[Serializable]
+public sealed class KimodoRoot2DConstraintMarker : KimodoConstraintMarkerBase
+{
+    public override string ConstraintType => "root2d";
 }

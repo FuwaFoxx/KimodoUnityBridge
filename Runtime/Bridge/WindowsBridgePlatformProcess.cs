@@ -12,7 +12,7 @@ namespace KimodoBridge
             return Application.platform == RuntimePlatform.WindowsEditor || Application.platform == RuntimePlatform.WindowsPlayer;
         }
 
-        public ProcessStartInfo BuildLauncherStartInfo(string launcherPath, string modelName, bool highVram, bool forceSetup, string modelsRoot)
+        public ProcessStartInfo BuildLauncherStartInfo(string launcherPath, string modelName, bool highVram, bool forceSetup, string modelsRoot, int idleTimeoutSeconds)
         {
             string ext = Path.GetExtension(launcherPath)?.ToLowerInvariant() ?? string.Empty;
             if (ext != ".bat" && ext != ".cmd")
@@ -27,11 +27,12 @@ namespace KimodoBridge
                 : $" --models-root {QuoteForCmd(modelsRoot.Trim())}";
             string forceSetupArg = forceSetup ? " --force-setup" : string.Empty;
             string args = $"--model {qModel}{(highVram ? " --highvram" : string.Empty)}{modelsArg}{forceSetupArg} --output file";
+            string idleTimeoutSet = $"set KIMODO_IDLE_TIMEOUT_SEC={Math.Max(0, idleTimeoutSeconds)}";
 
             return new ProcessStartInfo
             {
                 FileName = "cmd.exe",
-                Arguments = $"/d /c \"set KIMODO_SERVER_WINDOW_STYLE=Hidden && call {qLauncher} {args}\"",
+                Arguments = $"/d /c \"set KIMODO_SERVER_WINDOW_STYLE=Hidden && {idleTimeoutSet} && call {qLauncher} {args}\"",
                 UseShellExecute = false,
                 CreateNoWindow = true,
                 WorkingDirectory = Path.GetDirectoryName(launcherPath) ?? Environment.CurrentDirectory

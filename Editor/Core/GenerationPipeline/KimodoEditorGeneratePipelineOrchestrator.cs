@@ -64,20 +64,10 @@ namespace KimodoBridge.Editor
             }
 
             request.Progress?.Invoke(KimodoGeneratePipelineStage.Retarget, "Retargeting...");
-            if (!KimodoEditorClipWritebackService.TryGetOrCreateClipCache(
-                    request.TargetClip,
-                    out AnimationClip cachedMuscleClip,
-                    out string clipCacheError))
-            {
-                throw new InvalidOperationException(string.IsNullOrWhiteSpace(clipCacheError)
-                    ? "Get clip cache failed."
-                    : clipCacheError);
-            }
-
             if (!KimodoRetargetToolsEditor.TryBakeMuscleClipCacheToClip(
                     request.TargetClip,
                     request.OriginRetargetAvatar,
-                    cachedMuscleClip,
+                    request.TargetClip,
                     out string muscleCacheError))
             {
                 throw new InvalidOperationException(string.IsNullOrWhiteSpace(muscleCacheError)
@@ -87,7 +77,6 @@ namespace KimodoBridge.Editor
 
             if (request.ExportMuscleClip)
             {
-                KimodoEditorClipUtility.CopyClipData(cachedMuscleClip, request.TargetClip);
                 request.TargetClip.EnsureQuaternionContinuity();
                 EditorUtility.SetDirty(request.TargetClip);
                 AssetDatabase.SaveAssets();
@@ -100,7 +89,7 @@ namespace KimodoBridge.Editor
                     request.OriginRetargetAvatar,
                     request.TargetRetargetAvatar,
                     request.ExportMuscleClip,
-                    cachedMuscleClip,
+                    request.TargetClip,
                     out AnimationClip retargetClip,
                     out string retargetError))
             {
@@ -179,7 +168,10 @@ namespace KimodoBridge.Editor
                     modelName = modelName,
                     highVram = highVram,
                     modelsRoot = modelsRoot,
-                    startupTimeoutMs = ComputeBridgeStartupTimeoutMs(kimodoRootPath, highVram, modelName, request.GenerationTimeoutSeconds)
+                    startupTimeoutMs = ComputeBridgeStartupTimeoutMs(kimodoRootPath, highVram, modelName, request.GenerationTimeoutSeconds),
+                    idleTimeoutSeconds = KimodoPlayableClipGenerationSettings.instance != null
+                        ? KimodoPlayableClipGenerationSettings.instance.ServerIdleShutdownSeconds
+                        : 0
                 },
                 comfyHost = string.IsNullOrWhiteSpace(request.ComfyHost) ? "127.0.0.1" : request.ComfyHost.Trim(),
                 comfyPort = request.ComfyPort,

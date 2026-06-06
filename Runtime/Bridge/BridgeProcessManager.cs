@@ -48,10 +48,10 @@ namespace KimodoBridge
 
         public int ProcessId => processId;
 
-        public Process Start(string launcherPath, string modelName, bool highVram, bool forceSetup, string modelsRoot)
+        public Process Start(string launcherPath, string modelName, bool highVram, bool forceSetup, string modelsRoot, int idleTimeoutSeconds)
         {
             ThrowIfDisposed();
-            Process proc = launcher.Start(launcherPath, modelName, highVram, forceSetup, modelsRoot);
+            Process proc = launcher.Start(launcherPath, modelName, highVram, forceSetup, modelsRoot, idleTimeoutSeconds);
             process = proc;
             processId = proc.Id;
             return proc;

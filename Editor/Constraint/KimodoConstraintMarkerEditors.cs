@@ -304,7 +304,6 @@ namespace KimodoBridge.Editor
             public int SourceClipId;
             public int ClipAssetId;
             public int SourceAvatarId;
-            public int TargetAvatarId;
             public double ClipStart;
             public double ClipDuration;
             public double ClipIn;
@@ -338,7 +337,6 @@ namespace KimodoBridge.Editor
             public Animator Animator;
             public AnimationClip SourceClip;
             public Avatar SourceAvatar;
-            public Avatar TargetAvatar;
             public string ModelName;
         }
 
@@ -355,21 +353,7 @@ namespace KimodoBridge.Editor
 
         public static double GetLocalSecondsInClip(TimelineClip clipRange, double globalTime)
         {
-            if (clipRange == null)
-            {
-                return 0.0;
-            }
-
-            double local = clipRange.ToLocalTime(globalTime);
-            if (local < 0.0)
-            {
-                return 0.0;
-            }
-            if (local > clipRange.duration)
-            {
-                return clipRange.duration;
-            }
-            return local;
+            return KimodoMarkerSamplingUtility.ClampLocalSampleTime(clipRange, globalTime);
         }
 
         public static bool TryGetClipRangeForMarker(IMarker marker, out TimelineClip clipRange)
@@ -440,31 +424,7 @@ namespace KimodoBridge.Editor
                 return false;
             }
 
-            double sampleTime = marker.time;
-            double localSampleTime = GetLocalSecondsInClip(context.ClipRange, sampleTime);
-
-            if (!KimodoMarkerSamplingUtility.TrySampleMarkerFromClipWithRetargetCore(
-                    context.SourceClip,
-                    marker.ConstraintType,
-                    localSampleTime,
-                    context.SourceAvatar,
-                    context.TargetAvatar,
-                    context.ModelName,
-                    out KimodoMarkerSampleResult sample,
-                    out error))
-            {
-                return false;
-            }
-
-            sample.sampleTime = sampleTime;
-            sampledData = KimodoMarkerSamplingUtility.NormalizeConstraintMarkerSample(marker, sample);
-            if (sampledData == null)
-            {
-                error = "failed to build marker sample";
-                return false;
-            }
-
-            return true;
+            return TrySampleMarkerDataFromMarker(marker, context, out sampledData, out error);
         }
 
         public static bool TryUpdateAutoSampleMarkerData(KimodoConstraintMarkerBase marker, out string error)
@@ -562,10 +522,8 @@ namespace KimodoBridge.Editor
                 return false;
             }
 
-            AnimationClip sourceClip = clipRange.asset is AnimationPlayableAsset playableAsset ? playableAsset.clip : null;
-            if (sourceClip == null)
+            if (!KimodoMarkerSamplingUtility.TryResolveAnimationClipFromTimelineClip(clipRange, out AnimationClip sourceClip, out error))
             {
-                error = "Animation clip is missing.";
                 return false;
             }
 
@@ -578,12 +536,6 @@ namespace KimodoBridge.Editor
                 return false;
             }
 
-            if (!KimodoRuntimeAvatarSkeletonBuilder.TryLoadAvatarByModelName(modelName, out Avatar targetAvatar, out string targetError))
-            {
-                error = $"Resolve target avatar failed: {targetError}";
-                return false;
-            }
-
             context = new MarkerSamplingContext
             {
                 ClipRange = clipRange,
@@ -591,7 +543,6 @@ namespace KimodoBridge.Editor
                 Animator = animator,
                 SourceClip = sourceClip,
                 SourceAvatar = sourceAvatar,
-                TargetAvatar = targetAvatar,
                 ModelName = modelName
             };
             return true;
@@ -607,14 +558,12 @@ namespace KimodoBridge.Editor
             error = string.Empty;
 
             double sampleTime = marker.time;
-            double localSampleTime = GetLocalSecondsInClip(context.ClipRange, sampleTime);
 
-            if (!KimodoMarkerSamplingUtility.TrySampleMarkerFromClipWithRetargetCore(
-                    context.SourceClip,
+            if (!KimodoRetargetToolsEditor.TrySampleMarkerFromTimelineClipWithEditorCache(
+                    context.ClipRange,
                     marker.ConstraintType,
-                    localSampleTime,
+                    sampleTime,
                     context.SourceAvatar,
-                    context.TargetAvatar,
                     context.ModelName,
                     out KimodoMarkerSampleResult sample,
                     out error))
@@ -654,7 +603,6 @@ namespace KimodoBridge.Editor
                 SourceClipId = context.SourceClip != null ? context.SourceClip.GetInstanceID() : 0,
                 ClipAssetId = clipAssetId,
                 SourceAvatarId = context.SourceAvatar != null ? context.SourceAvatar.GetInstanceID() : 0,
-                TargetAvatarId = context.TargetAvatar != null ? context.TargetAvatar.GetInstanceID() : 0,
                 ClipStart = context.ClipRange != null ? context.ClipRange.start : 0.0,
                 ClipDuration = context.ClipRange != null ? context.ClipRange.duration : 0.0,
                 ClipIn = context.ClipRange != null ? context.ClipRange.clipIn : 0.0,
@@ -685,7 +633,6 @@ namespace KimodoBridge.Editor
                 snapshot.SourceClipId == (context.SourceClip != null ? context.SourceClip.GetInstanceID() : 0) &&
                 snapshot.ClipAssetId == clipAssetId &&
                 snapshot.SourceAvatarId == (context.SourceAvatar != null ? context.SourceAvatar.GetInstanceID() : 0) &&
-                snapshot.TargetAvatarId == (context.TargetAvatar != null ? context.TargetAvatar.GetInstanceID() : 0) &&
                 Math.Abs(snapshot.ClipStart - (context.ClipRange != null ? context.ClipRange.start : 0.0)) <= 1e-9 &&
                 Math.Abs(snapshot.ClipDuration - (context.ClipRange != null ? context.ClipRange.duration : 0.0)) <= 1e-9 &&
                 Math.Abs(snapshot.ClipIn - (context.ClipRange != null ? context.ClipRange.clipIn : 0.0)) <= 1e-9 &&

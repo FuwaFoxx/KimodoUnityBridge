@@ -6,11 +6,20 @@ using System.Collections.Generic;
 using UnityEditor;
 using UnityEditor.Animations;
 using UnityEngine;
+using UnityEngine.Timeline;
+using TimelineInject;
 
 namespace KimodoBridge.Editor
 {
+    [InitializeOnLoad]
     public static class KimodoRetargetToolsEditor
     {
+        private const string DefaultBridgeModelName = "Kimodo-SOMA-RP-v1";
+        private static readonly Dictionary<HumanoidClipCacheKey, HumanoidClipCacheEntry> EditorHumanoidClipCache =
+            new Dictionary<HumanoidClipCacheKey, HumanoidClipCacheEntry>();
+        private static readonly Dictionary<string, ProfileSkeletonCacheEntry> EditorProfileSkeletonCaches =
+            new Dictionary<string, ProfileSkeletonCacheEntry>(StringComparer.Ordinal);
+
         [Serializable]
         private sealed class MotionJsonData
         {
@@ -21,6 +30,168 @@ namespace KimodoBridge.Editor
             public int[] joint_parents;
             public List<List<List<float>>> positions;
             public List<float> local_rot_quats;
+        }
+
+        private struct HumanoidClipCacheKey : IEquatable<HumanoidClipCacheKey>
+        {
+            public int sourceClipId;
+            public int sourceAvatarId;
+
+            public bool Equals(HumanoidClipCacheKey other)
+            {
+                return sourceClipId == other.sourceClipId &&
+                    sourceAvatarId == other.sourceAvatarId;
+            }
+
+            public override bool Equals(object obj)
+            {
+                return obj is HumanoidClipCacheKey other && Equals(other);
+            }
+
+            public override int GetHashCode()
+            {
+                unchecked
+                {
+                    return (sourceClipId * 397) ^ sourceAvatarId;
+                }
+            }
+        }
+
+        private sealed class HumanoidClipCacheEntry
+        {
+            public MuscleClipCache cache;
+            public float frameRate;
+        }
+
+        private sealed class ProfileSkeletonCacheEntry
+        {
+            public string modelName;
+            public Avatar avatar;
+            public SkeletonCache cache;
+        }
+
+        static KimodoRetargetToolsEditor()
+        {
+            AssemblyReloadEvents.beforeAssemblyReload += ClearEditorSamplingCaches;
+            EditorApplication.quitting += ClearEditorSamplingCaches;
+            EditorApplication.playModeStateChanged += OnPlayModeStateChanged;
+        }
+
+        public static void ClearEditorSamplingCaches()
+        {
+            foreach (HumanoidClipCacheEntry entry in EditorHumanoidClipCache.Values)
+            {
+                if (entry?.cache != null)
+                {
+                    EditorCompilationStateGate.UnregisterDisposable(entry.cache);
+                    entry.cache.Dispose();
+                }
+            }
+
+            foreach (ProfileSkeletonCacheEntry entry in EditorProfileSkeletonCaches.Values)
+            {
+                if (entry?.cache != null)
+                {
+                    EditorCompilationStateGate.UnregisterDisposable(entry.cache);
+                    entry.cache.Dispose();
+                }
+            }
+
+            EditorProfileSkeletonCaches.Clear();
+            EditorHumanoidClipCache.Clear();
+        }
+
+        public static bool TrySampleMarkerFromTimelineClipWithEditorCache(
+            TimelineClip sourceTimelineClip,
+            string markerType,
+            double globalTime,
+            Avatar originAvatar,
+            string modelName,
+            out KimodoMarkerSampleResult result,
+            out string error)
+        {
+            result = null;
+            error = string.Empty;
+
+            if (!KimodoMarkerSamplingUtility.TryResolveAnimationClipFromTimelineClip(sourceTimelineClip, out AnimationClip sourceClip, out error))
+            {
+                return false;
+            }
+
+            double localSampleTime = KimodoMarkerSamplingUtility.ClampLocalSampleTime(sourceTimelineClip, globalTime);
+            return TrySampleMarkerFromClipWithEditorCache(
+                sourceClip,
+                markerType,
+                localSampleTime,
+                originAvatar,
+                modelName,
+                out result,
+                out error);
+        }
+
+        public static bool TrySampleMarkerFromClipWithEditorCache(
+            AnimationClip sourceClip,
+            string markerType,
+            double sampleTime,
+            Avatar originAvatar,
+            string modelName,
+            out KimodoMarkerSampleResult result,
+            out string error)
+        {
+            result = null;
+            error = string.Empty;
+
+            if (sourceClip == null)
+            {
+                error = "Source clip is null.";
+                return false;
+            }
+
+            if (!KimodoRetargetTools.IsValidHumanoid(originAvatar))
+            {
+                error = "Source avatar is null/invalid/non-humanoid.";
+                return false;
+            }
+
+            if (!TryGetOrCreateEditorSourceHumanoidClip(
+                    sourceClip,
+                    originAvatar,
+                    out AnimationClip sourceHumanoidClip,
+                    out SkeletonCache sourceCache,
+                    out MuscleClipCache sourceMuscleClipCache,
+                    out _,
+                    out error))
+            {
+                return false;
+            }
+
+            string effectiveModelName = NormalizeModelName(modelName);
+            if (!TryGetOrCreateEditorProfileSkeletonCache(effectiveModelName, out ProfileSkeletonCacheEntry profileEntry, out error))
+            {
+                return false;
+            }
+
+            if (!KimodoRetargetTools.TryRetargetNew(
+                    sourceHumanoidClip,
+                    originAvatar,
+                    ref sourceCache,
+                    ref sourceMuscleClipCache,
+                    profileEntry.cache,
+                    (float)sampleTime,
+                    out _,
+                    out _,
+                    out error))
+            {
+                return false;
+            }
+
+            return KimodoMarkerSamplingUtility.TrySampleMarkerFromProfileSkeleton(
+                profileEntry.cache,
+                effectiveModelName,
+                markerType,
+                sampleTime,
+                out result,
+                out error);
         }
 
         public static bool BakeIntoClip(
@@ -114,42 +285,263 @@ namespace KimodoBridge.Editor
                 return false;
             }
 
-            if (!KimodoRetargetTools.TryBuildSkeletonCache(sourceAvatar, "KimodoRetargetToolsEditor_SourceMuscleCache", out SkeletonCache sourceCache, out error))
+            if (TryGetOrCreateEditorMuscleCacheClip(sourceClip, sourceAvatar, out AnimationClip muscleCacheClip, out float cacheFrameRate, out error))
+            {
+                if (!ReferenceEquals(targetClip, muscleCacheClip))
+                {
+                    KimodoEditorClipUtility.CopyClipData(muscleCacheClip, targetClip, forceNoLoopKeepY: true);
+                }
+
+                targetClip.legacy = false;
+                targetClip.frameRate = cacheFrameRate > 0f
+                    ? cacheFrameRate
+                    : (sourceClip.frameRate > 0f ? sourceClip.frameRate : KimodoPlayableClip.FIXED_FRAME_RATE);
+
+                EditorUtility.SetDirty(targetClip);
+                AssetDatabase.SaveAssets();
+                return true;
+            }
+
+            return false;
+        }
+
+        public static bool TryGetOrCreateEditorMuscleCacheClip(
+            AnimationClip sourceClip,
+            Avatar sourceAvatar,
+            out AnimationClip muscleCacheClip,
+            out float frameRate,
+            out string error)
+        {
+            muscleCacheClip = null;
+            frameRate = 0f;
+            if (!TryGetOrCreateEditorMuscleCache(sourceClip, sourceAvatar, out MuscleClipCache muscleCache, out frameRate, out error))
             {
                 return false;
             }
 
+            muscleCacheClip = muscleCache.muscleClip;
+            return muscleCacheClip != null;
+        }
+
+        private static bool ClipHasContent(AnimationClip clip)
+        {
+            if (clip == null)
+            {
+                return false;
+            }
+
+            return AnimationUtility.GetCurveBindings(clip).Length > 0 ||
+                AnimationUtility.GetObjectReferenceCurveBindings(clip).Length > 0;
+        }
+
+        private static bool TryGetOrCreateEditorSourceHumanoidClip(
+            AnimationClip sourceClip,
+            Avatar sourceAvatar,
+            out AnimationClip humanoidClip,
+            out SkeletonCache sourceCache,
+            out MuscleClipCache sourceMuscleClipCache,
+            out float frameRate,
+            out string error)
+        {
+            humanoidClip = null;
+            sourceCache = null;
+            sourceMuscleClipCache = null;
+            frameRate = 0f;
+            error = string.Empty;
+
+            if (sourceClip == null)
+            {
+                error = "Source clip is null.";
+                return false;
+            }
+
+            if (!KimodoRetargetTools.IsValidHumanoid(sourceAvatar))
+            {
+                error = "Source avatar is null/invalid/non-humanoid.";
+                return false;
+            }
+
+            if (sourceClip.isHumanMotion)
+            {
+                humanoidClip = sourceClip;
+                frameRate = sourceClip.frameRate > 0f ? sourceClip.frameRate : KimodoPlayableClip.FIXED_FRAME_RATE;
+                return true;
+            }
+
+            HumanoidClipCacheKey key = new HumanoidClipCacheKey
+            {
+                sourceClipId = sourceClip.GetInstanceID(),
+                sourceAvatarId = sourceAvatar.GetInstanceID()
+            };
+
+            if (EditorHumanoidClipCache.TryGetValue(key, out HumanoidClipCacheEntry cachedEntry) &&
+                cachedEntry != null &&
+                cachedEntry.cache != null &&
+                cachedEntry.cache.IsReady &&
+                cachedEntry.cache.sourceClip == sourceClip &&
+                cachedEntry.cache.sourceAvatar == sourceAvatar &&
+                cachedEntry.cache.muscleClip != null &&
+                ClipHasContent(cachedEntry.cache.muscleClip))
+            {
+                sourceMuscleClipCache = cachedEntry.cache;
+                humanoidClip = cachedEntry.cache.muscleClip;
+                frameRate = cachedEntry.frameRate > 0f
+                    ? cachedEntry.frameRate
+                    : (cachedEntry.cache.muscleClip.frameRate > 0f ? cachedEntry.cache.muscleClip.frameRate : KimodoPlayableClip.FIXED_FRAME_RATE);
+                return true;
+            }
+
+            if (!TryGetOrCreateEditorMuscleCache(sourceClip, sourceAvatar, out sourceMuscleClipCache, out frameRate, out error))
+            {
+                return false;
+            }
+
+            humanoidClip = sourceMuscleClipCache.muscleClip;
+            EditorHumanoidClipCache[key] = new HumanoidClipCacheEntry
+            {
+                cache = sourceMuscleClipCache,
+                frameRate = frameRate
+            };
+            return true;
+        }
+
+        private static bool TryGetOrCreateEditorProfileSkeletonCache(
+            string modelName,
+            out ProfileSkeletonCacheEntry entry,
+            out string error)
+        {
+            entry = null;
+            error = string.Empty;
+
+            string effectiveModelName = NormalizeModelName(modelName);
+            if (EditorProfileSkeletonCaches.TryGetValue(effectiveModelName, out entry) &&
+                entry != null &&
+                entry.avatar != null &&
+                entry.cache != null &&
+                entry.cache.IsReady)
+            {
+                return true;
+            }
+
+            if (entry?.cache != null)
+            {
+                EditorCompilationStateGate.UnregisterDisposable(entry.cache);
+                entry.cache.Dispose();
+            }
+
+            if (!KimodoRuntimeAvatarSkeletonBuilder.TryLoadAvatarByModelName(effectiveModelName, out Avatar targetAvatar, out string targetError))
+            {
+                error = string.IsNullOrWhiteSpace(targetError)
+                    ? "Failed to resolve target avatar."
+                    : $"Resolve target avatar failed: {targetError}";
+                return false;
+            }
+
+            if (!KimodoRetargetTools.TryBuildSkeletonCache(targetAvatar, $"KimodoEditorProfileSkeleton_{effectiveModelName}", out SkeletonCache profileCache, out error))
+            {
+                return false;
+            }
+
+            entry = new ProfileSkeletonCacheEntry
+            {
+                modelName = effectiveModelName,
+                avatar = targetAvatar,
+                cache = profileCache
+            };
+            EditorCompilationStateGate.RegisterDisposable(profileCache);
+            EditorProfileSkeletonCaches[effectiveModelName] = entry;
+            return true;
+        }
+
+        private static bool TryGetOrCreateEditorMuscleCache(
+            AnimationClip sourceClip,
+            Avatar sourceAvatar,
+            out MuscleClipCache muscleClipCache,
+            out float frameRate,
+            out string error)
+        {
+            muscleClipCache = null;
+            frameRate = 0f;
+            error = string.Empty;
+
+            if (sourceClip == null)
+            {
+                error = "Source clip is null.";
+                return false;
+            }
+
+            if (!KimodoRetargetTools.IsValidHumanoid(sourceAvatar))
+            {
+                error = "Source avatar is null/invalid/non-humanoid.";
+                return false;
+            }
+
+            if (KimodoEditorClipWritebackService.TryGetOrCreateClipCache(sourceClip, out AnimationClip cachedClip, out string cacheError))
+            {
+                float cachedFrameRate = cachedClip != null && cachedClip.frameRate > 0f
+                    ? cachedClip.frameRate
+                    : (sourceClip.frameRate > 0f ? sourceClip.frameRate : KimodoPlayableClip.FIXED_FRAME_RATE);
+
+                if (cachedClip != null && ClipHasContent(cachedClip))
+                {
+                    muscleClipCache = new MuscleClipCache
+                    {
+                        sourceClip = sourceClip,
+                        sourceAvatar = sourceAvatar,
+                        frameRate = cachedFrameRate,
+                        duration = Mathf.Max(0f, sourceClip.length),
+                        samples = Array.Empty<MuscleSample>(),
+                        muscleClip = cachedClip,
+                        ownsMuscleClip = false
+                    };
+                    frameRate = cachedFrameRate;
+                    return true;
+                }
+            }
+            else if (!string.IsNullOrWhiteSpace(cacheError))
+            {
+                error = cacheError;
+                return false;
+            }
+
+            SkeletonCache sourceCache = null;
             try
             {
-                if (!KimodoRetargetTools.TryBuildMuscleClipCache(sourceClip, sourceCache, out MuscleClipCache muscleClipCache, out error))
+                if (!KimodoRetargetTools.TryBuildSkeletonCache(sourceAvatar, "KimodoRetargetToolsEditor_SourceMuscleCache", out sourceCache, out error))
                 {
                     return false;
                 }
 
-                try
+                if (!KimodoRetargetTools.TryBuildMuscleClipCache(sourceClip, sourceCache, out muscleClipCache, out error))
                 {
-                    targetClip.legacy = false;
-                    targetClip.frameRate = muscleClipCache.frameRate > 0f
-                        ? muscleClipCache.frameRate
-                        : (sourceClip.frameRate > 0f ? sourceClip.frameRate : KimodoPlayableClip.FIXED_FRAME_RATE);
-
-                    if (!KimodoRetargetTools.WriteMuscleSampleToMuscleClip(muscleClipCache.samples, targetClip, out error))
-                    {
-                        return false;
-                    }
-
-                    EditorUtility.SetDirty(targetClip);
-                    AssetDatabase.SaveAssets();
-                    return true;
+                    return false;
                 }
-                finally
-                {
-                    KimodoRetargetTools.DestroyMuscleClipCache(muscleClipCache, destroyMuscleClip: true);
-                }
+
+                frameRate = muscleClipCache.frameRate > 0f
+                    ? muscleClipCache.frameRate
+                    : (sourceClip.frameRate > 0f ? sourceClip.frameRate : KimodoPlayableClip.FIXED_FRAME_RATE);
+                EditorCompilationStateGate.RegisterDisposable(muscleClipCache);
+                return true;
             }
             finally
             {
-                KimodoRetargetTools.DestroySkeletonCache(sourceCache);
+                sourceCache?.Dispose();
+            }
+        }
+
+        private static string NormalizeModelName(string modelName)
+        {
+            return string.IsNullOrWhiteSpace(modelName)
+                ? DefaultBridgeModelName
+                : modelName.Trim();
+        }
+
+        private static void OnPlayModeStateChanged(PlayModeStateChange change)
+        {
+            if (change == PlayModeStateChange.ExitingEditMode ||
+                change == PlayModeStateChange.ExitingPlayMode)
+            {
+                ClearEditorSamplingCaches();
             }
         }
 

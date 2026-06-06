@@ -188,7 +188,10 @@ namespace KimodoBridge.Editor
                         highVram = false,
                         forceSetup = false,
                         modelsRoot = string.Empty,
-                        startupTimeoutMs = BridgeRuntimeSettings.DefaultStartupTimeoutMs
+                        startupTimeoutMs = BridgeRuntimeSettings.DefaultStartupTimeoutMs,
+                        idleTimeoutSeconds = KimodoPlayableClipGenerationSettings.instance != null
+                            ? KimodoPlayableClipGenerationSettings.instance.ServerIdleShutdownSeconds
+                            : 0
                     }
                 };
                 var bridge = new KimodoBridgeService(settings.bridgeSettings);

@@ -108,7 +108,8 @@ namespace KimodoBridge
                 settings.modelName,
                 settings.highVram,
                 settings.forceSetup,
-                settings.modelsRoot);
+                settings.modelsRoot,
+                settings.idleTimeoutSeconds);
             progress?.Invoke("Bridge process launched.");
             StartLogPump(BridgeEndpointResolver.ResolveAttachLogPath(settings.runtimeRoot), progress);
 

@@ -88,13 +88,6 @@ namespace KimodoBridge.Editor
                 return false;
             }
 
-            Transform skeletonRoot = animator.transform;
-            if (skeletonRoot == null)
-            {
-                error = "Animator transform is null.";
-                return false;
-            }
-
             double originalTime = director.time;
             DirectorWrapMode originalWrap = director.extrapolationMode;
 
@@ -103,7 +96,7 @@ namespace KimodoBridge.Editor
                 director.extrapolationMode = DirectorWrapMode.Hold;
                 for (int i = 0; i < markers.Count; i++)
                 {
-                    if (!TryBuildMarkerSample(markers[i], sourceClip, skeletonRoot, animator, director, out KimodoMarkerSampleResult sample, out error))
+                    if (!TryBuildMarkerSample(markers[i], sourceClip, animator, director, out KimodoMarkerSampleResult sample, out error))
                     {
                         return false;
                     }
@@ -124,7 +117,6 @@ namespace KimodoBridge.Editor
         internal static bool TrySamplePoseFromClipAsset(
             TimelineClip sourceClip,
             Animator animator,
-            Transform skeletonRoot,
             double timelineTime,
             string markerType,
             out KimodoMarkerSampleResult sample,
@@ -150,27 +142,19 @@ namespace KimodoBridge.Editor
                 return false;
             }
 
-            if (!KimodoRuntimeAvatarSkeletonBuilder.TryLoadAvatarByModelName(modelName, out Avatar targetAvatar, out string targetError))
-            {
-                error = $"Resolve target avatar failed: {targetError}";
-                return false;
-            }
-
-            if (!KimodoMarkerSamplingUtility.TrySampleMarker(
-                    animator,
-                    skeletonRoot,
-                    sourceClip,
-                    modelName,
-                    timelineTime,
-                    markerType,
-                    sourceAvatar,
-                    targetAvatar,
-                    out sample,
-                    out error))
+            if (!KimodoRetargetToolsEditor.TrySampleMarkerFromTimelineClipWithEditorCache(
+                sourceClip,
+                markerType,
+                timelineTime,
+                sourceAvatar,
+                modelName,
+                out KimodoMarkerSampleResult sampledPose,
+                out error))
             {
                 return false;
             }
 
+            sample = sampledPose;
             if (sample == null)
             {
                 error = "sample result is null";
@@ -185,7 +169,6 @@ namespace KimodoBridge.Editor
         private static bool TryBuildMarkerSample(
             KimodoConstraintMarkerBase marker,
             TimelineClip sourceClip,
-            Transform skeletonRoot,
             Animator animator,
             PlayableDirector director,
             out KimodoMarkerSampleResult sample,
@@ -220,7 +203,6 @@ namespace KimodoBridge.Editor
             if (!TrySamplePoseFromClipAsset(
                     sourceClip,
                     animator,
-                    skeletonRoot,
                     sampleTime,
                     marker.ConstraintType,
                     out KimodoMarkerSampleResult captured,
@@ -274,13 +256,6 @@ namespace KimodoBridge.Editor
                 return false;
             }
 
-            Transform skeletonRoot = animator.transform;
-            if (skeletonRoot == null)
-            {
-                warning = "Animator transform is null, skip inbetween interpolation.";
-                return false;
-            }
-
             FindNeighborClips(sourceClip, out TimelineClip leftNeighbor, out TimelineClip rightNeighbor);
             if (leftNeighbor == null && rightNeighbor == null)
             {
@@ -301,7 +276,7 @@ namespace KimodoBridge.Editor
                 if (leftNeighbor != null && !occupiedManualTimes.Contains(ToTimeKey(0.0)))
                 {
                     double evalTime = Math.Max(leftNeighbor.start, leftNeighbor.end - NeighborSampleDeltaSeconds);
-                    if (TryCapturePoseAtTime(leftNeighbor, director, skeletonRoot, animator, evalTime, "fullbody", out KimodoMarkerSampleResult pose, out string captureError))
+                    if (TryCapturePoseAtTime(leftNeighbor, director, animator, evalTime, "fullbody", out KimodoMarkerSampleResult pose, out string captureError))
                     {
                         samples.Add(pose);
                     }
@@ -315,7 +290,7 @@ namespace KimodoBridge.Editor
                 if (rightNeighbor != null && !occupiedManualTimes.Contains(ToTimeKey(endFrame / (double)generationFrames)))
                 {
                     double evalTime = rightNeighbor.start;
-                    if (TryCapturePoseAtTime(rightNeighbor, director, skeletonRoot, animator, evalTime, "fullbody", out KimodoMarkerSampleResult pose, out string captureError))
+                    if (TryCapturePoseAtTime(rightNeighbor, director, animator, evalTime, "fullbody", out KimodoMarkerSampleResult pose, out string captureError))
                     {
                         samples.Add(pose);
                     }
@@ -450,13 +425,6 @@ namespace KimodoBridge.Editor
                 return false;
             }
 
-            Transform skeletonRoot = animator.transform;
-            if (skeletonRoot == null)
-            {
-                warning = "Animator transform is null, skip inbetween preview boundaries.";
-                return false;
-            }
-
             FindNeighborClips(sourceClip, out TimelineClip leftNeighbor, out TimelineClip rightNeighbor);
             if (leftNeighbor == null && rightNeighbor == null)
             {
@@ -473,7 +441,7 @@ namespace KimodoBridge.Editor
                 if (leftNeighbor != null)
                 {
                     double evalTime = Math.Max(leftNeighbor.start, leftNeighbor.end - NeighborSampleDeltaSeconds);
-                    if (!TryCapturePoseAtTime(leftNeighbor, director, skeletonRoot, animator, evalTime, "fullbody", out leftNeighborEndPose, out string leftError))
+                    if (!TryCapturePoseAtTime(leftNeighbor, director, animator, evalTime, "fullbody", out leftNeighborEndPose, out string leftError))
                     {
                         Debug.LogWarning($"{LogPrefix} Failed to sample left neighbor end pose for preview: {leftError}");
                     }
@@ -483,7 +451,7 @@ namespace KimodoBridge.Editor
                 {
                     _ = Math.Max(0, generationFrames - 1);
                     double evalTime = rightNeighbor.start;
-                    if (!TryCapturePoseAtTime(rightNeighbor, director, skeletonRoot, animator, evalTime, "fullbody", out rightNeighborStartPose, out string rightError))
+                    if (!TryCapturePoseAtTime(rightNeighbor, director, animator, evalTime, "fullbody", out rightNeighborStartPose, out string rightError))
                     {
                         Debug.LogWarning($"{LogPrefix} Failed to sample right neighbor start pose for preview: {rightError}");
                     }
@@ -502,7 +470,6 @@ namespace KimodoBridge.Editor
         private static bool TryCapturePoseAtTime(
             TimelineClip sourceClip,
             PlayableDirector director,
-            Transform skeletonRoot,
             Animator animator,
             double evalTime,
             string markerType,
@@ -519,7 +486,6 @@ namespace KimodoBridge.Editor
                 if (!TrySamplePoseFromClipAsset(
                         sourceClip,
                         animator,
-                        skeletonRoot,
                         evalTime,
                         markerType,
                         out pose,

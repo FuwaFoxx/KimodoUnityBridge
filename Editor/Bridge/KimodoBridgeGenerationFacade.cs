@@ -181,6 +181,7 @@ namespace KimodoBridge.Editor
             string modelsRoot,
             int startupTimeoutMs)
         {
+            KimodoPlayableClipGenerationSettings editorSettings = KimodoPlayableClipGenerationSettings.instance;
             return new BridgeRuntimeSettings
             {
                 runtimeRoot = runtimeRoot,
@@ -195,7 +196,8 @@ namespace KimodoBridge.Editor
                 modelLoadingTimeoutMs = BridgeRuntimeSettings.DefaultModelLoadingTimeoutMs,
                 modelLoadingPollIntervalMs = BridgeRuntimeSettings.DefaultModelLoadingPollIntervalMs,
                 statusConnectTimeoutMs = BridgeRuntimeSettings.DefaultStatusConnectTimeoutMs,
-                statusIoTimeoutMs = BridgeRuntimeSettings.DefaultStatusIoTimeoutMs
+                statusIoTimeoutMs = BridgeRuntimeSettings.DefaultStatusIoTimeoutMs,
+                idleTimeoutSeconds = editorSettings != null ? editorSettings.ServerIdleShutdownSeconds : 0
             };
         }
 
