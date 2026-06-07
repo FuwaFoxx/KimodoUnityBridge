@@ -16,8 +16,6 @@ namespace KimodoBridge.Editor
         private const string DefaultBridgeModelName = "Kimodo-SOMA-RP-v1";
         private const string MuscleCacheType = "muscle";
         private const string BoneCacheType = "bone";
-        private const float RawBoneIdentityLeadInTime = -0.016f;
-
         [Serializable]
         private sealed class MotionJsonData
         {
@@ -997,10 +995,6 @@ namespace KimodoBridge.Editor
                     AnimationCurve py = new AnimationCurve();
                     AnimationCurve pz = new AnimationCurve();
 
-                    px.AddKey(RawBoneIdentityLeadInTime, 0f);
-                    py.AddKey(RawBoneIdentityLeadInTime, 0f);
-                    pz.AddKey(RawBoneIdentityLeadInTime, 0f);
-
                     for (int f = 0; f < frameCount; f++)
                     {
                         float t = f / fps;
@@ -1021,11 +1015,6 @@ namespace KimodoBridge.Editor
                     AnimationCurve qy = new AnimationCurve();
                     AnimationCurve qz = new AnimationCurve();
                     AnimationCurve qw = new AnimationCurve();
-
-                    qx.AddKey(RawBoneIdentityLeadInTime, 0f);
-                    qy.AddKey(RawBoneIdentityLeadInTime, 0f);
-                    qz.AddKey(RawBoneIdentityLeadInTime, 0f);
-                    qw.AddKey(RawBoneIdentityLeadInTime, 1f);
 
                     for (int f = 0; f < frameCount; f++)
                     {

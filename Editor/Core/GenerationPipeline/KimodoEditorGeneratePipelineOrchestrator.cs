@@ -7,11 +7,11 @@ using UnityEngine;
 
 namespace KimodoBridge.Editor
 {
-    internal sealed class KimodoEditorGeneratePipelineOrchestrator
+    internal static class KimodoEditorGeneratePipelineOrchestrator
     {
         private const string DefaultModelName = "Kimodo-SOMA-RP-v1";
 
-        public async Task<KimodoEditorGenerateResult> ExecuteAsync(KimodoEditorGenerateRequest request)
+        public static async Task<KimodoEditorGenerateResult> ExecuteAsync(KimodoEditorGenerateRequest request)
         {
             if (request == null)
             {
@@ -110,7 +110,7 @@ namespace KimodoBridge.Editor
             return Complete(request, prompt, motionJson, request.TargetClip, rawBoneClip);
         }
 
-        private KimodoEditorGenerateResult Complete(
+        private static KimodoEditorGenerateResult Complete(
             KimodoEditorGenerateRequest request,
             string prompt,
             string motionJson,

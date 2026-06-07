@@ -13,7 +13,6 @@ namespace KimodoBridge.Editor
     [InitializeOnLoad]
     public static class KimodoEditorCommandManager
     {
-        private static readonly KimodoEditorGeneratePipelineOrchestrator GeneratePipelineOrchestrator = new KimodoEditorGeneratePipelineOrchestrator();
         public static event Action<KimodoEditorCommandProgressEvent> CommandProgress;
         public static event Action<KimodoEditorCommandCompletedEvent> CommandCompleted;
         public static event Action<KimodoEditorCommandFailedEvent> CommandFailed;
@@ -179,7 +178,7 @@ namespace KimodoBridge.Editor
             {
                 request.Progress = (stage, message) => EmitProgress(eventCommand, message, stage);
 
-                KimodoEditorGenerateResult result = await GeneratePipelineOrchestrator.ExecuteAsync(request);
+                KimodoEditorGenerateResult result = await KimodoEditorGeneratePipelineOrchestrator.ExecuteAsync(request);
                 KimodoPlayableClipGenerationHostService.FinalizeGeneration(clip, request, result);
 
                 EmitCompleted(eventCommand, result);

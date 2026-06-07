@@ -37,9 +37,11 @@ namespace KimodoBridge.Editor
                 return false;
             }
 
-            if (clip.isHumanMotion)
+            var animator = bindingObject.GetComponent<Animator>();
+            var avatar = animator == null ? null : animator.avatar;
+            if (avatar!=null&&avatar.isHuman &&!clip.isHumanMotion)
             {
-                return true;
+                return false;
             }
 
             EditorCurveBinding[] bindings = AnimationUtility.GetCurveBindings(clip);

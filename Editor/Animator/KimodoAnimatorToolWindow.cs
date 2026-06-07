@@ -31,7 +31,6 @@ namespace KimodoBridge.Editor
         private int seed = 42;
         private AnimationClip lastSuccessfulGeneratedClipForApply;
         private readonly KimodoAnimatorApplyService applyService = new KimodoAnimatorApplyService();
-        private readonly KimodoEditorGeneratePipelineOrchestrator generatePipelineOrchestrator = new KimodoEditorGeneratePipelineOrchestrator();
         private KimodoAnimatorPreviewPane previewPane;
         private KimodoAnimatorEditorPane editorPane;
         private CancellationTokenSource generationCancellationTokenSource;
@@ -247,7 +246,7 @@ namespace KimodoBridge.Editor
                         });
                     });
 
-                KimodoEditorGenerateResult result = await generatePipelineOrchestrator.ExecuteAsync(request);
+                KimodoEditorGenerateResult result = await KimodoEditorGeneratePipelineOrchestrator.ExecuteAsync(request);
 
                 RunOnEditorThread(runId, () =>
                 {
