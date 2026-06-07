@@ -8,55 +8,55 @@ using UnityEditor;
 
 namespace KimodoBridge.Editor
 {
+    internal readonly struct ModelSetupStatus
+    {
+        public readonly bool Missing;
+        public readonly int MissingPoints;
+        public readonly int EstimatedMinutes;
+
+        public ModelSetupStatus(bool missing, int missingPoints, int estimatedMinutes)
+        {
+            Missing = missing;
+            MissingPoints = missingPoints;
+            EstimatedMinutes = estimatedMinutes;
+        }
+    }
+
+    internal readonly struct ModelDirectoryInfo
+    {
+        public readonly string Name;
+        public readonly string DirectoryPath;
+
+        public ModelDirectoryInfo(string name, string directoryPath)
+        {
+            Name = name ?? string.Empty;
+            DirectoryPath = directoryPath ?? string.Empty;
+        }
+    }
+
+    internal readonly struct ServerStatusSnapshot
+    {
+        public readonly bool Ready;
+        public readonly bool Running;
+        public readonly bool HasPort;
+        public readonly bool QueryInFlight;
+        public readonly string Host;
+        public readonly int Port;
+
+        public ServerStatusSnapshot(bool ready, bool running, bool hasPort, bool queryInFlight, string host, int port)
+        {
+            Ready = ready;
+            Running = running;
+            HasPort = hasPort;
+            QueryInFlight = queryInFlight;
+            Host = host ?? "127.0.0.1";
+            Port = port;
+        }
+    }
+
     [InitializeOnLoad]
     internal static class KimodoBridgeController
     {
-        internal readonly struct ModelSetupStatus
-        {
-            public readonly bool Missing;
-            public readonly int MissingPoints;
-            public readonly int EstimatedMinutes;
-
-            public ModelSetupStatus(bool missing, int missingPoints, int estimatedMinutes)
-            {
-                Missing = missing;
-                MissingPoints = missingPoints;
-                EstimatedMinutes = estimatedMinutes;
-            }
-        }
-
-        internal readonly struct ModelDirectoryInfo
-        {
-            public readonly string Name;
-            public readonly string DirectoryPath;
-
-            public ModelDirectoryInfo(string name, string directoryPath)
-            {
-                Name = name ?? string.Empty;
-                DirectoryPath = directoryPath ?? string.Empty;
-            }
-        }
-
-        internal readonly struct ServerStatusSnapshot
-        {
-            public readonly bool Ready;
-            public readonly bool Running;
-            public readonly bool HasPort;
-            public readonly bool QueryInFlight;
-            public readonly string Host;
-            public readonly int Port;
-
-            public ServerStatusSnapshot(bool ready, bool running, bool hasPort, bool queryInFlight, string host, int port)
-            {
-                Ready = ready;
-                Running = running;
-                HasPort = hasPort;
-                QueryInFlight = queryInFlight;
-                Host = host ?? "127.0.0.1";
-                Port = port;
-            }
-        }
-
         private static readonly KimodoBridgeGenerationFacade generationFacade = new KimodoBridgeGenerationFacade();
         private static readonly KimodoBridgeServerStateCache serverStateCache = new KimodoBridgeServerStateCache();
         private static bool isRecovering;

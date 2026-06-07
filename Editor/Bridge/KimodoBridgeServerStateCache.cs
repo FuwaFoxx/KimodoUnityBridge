@@ -33,11 +33,11 @@ namespace KimodoBridge.Editor
             }
         }
 
-        internal KimodoBridgeController.ServerStatusSnapshot GetSnapshot()
+        internal ServerStatusSnapshot GetSnapshot()
         {
             lock (gate)
             {
-                return new KimodoBridgeController.ServerStatusSnapshot(
+                return new ServerStatusSnapshot(
                     ready: ready,
                     running: runningCached,
                     hasPort: hasPortCached,

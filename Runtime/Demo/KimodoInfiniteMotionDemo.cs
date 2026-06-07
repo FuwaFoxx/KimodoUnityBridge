@@ -1,13 +1,13 @@
 using System;
 using System.Collections.Generic;
 using System.IO;
-using System.Reflection;
 using System.Threading;
 using System.Threading.Tasks;
 using TimelineInject;
 using UnityEngine;
 using UnityEngine.Animations;
 using UnityEngine.Playables;
+using UnityEngine.UI;
 
 namespace KimodoBridge
 {
@@ -384,7 +384,8 @@ namespace KimodoBridge
                     dancerAvatar,
                     exportMuscleClip: true,
                     out AnimationClip retargetedClip,
-                    out string error))
+                    out string error,
+                    providedSourceHumanoidClip: dancerClip))
             {
                 UnityEngine.Object.Destroy(dancerClip);
                 throw new InvalidOperationException(string.IsNullOrWhiteSpace(error) ? "Dancer clip retarget failed." : error);
@@ -407,11 +408,13 @@ namespace KimodoBridge
             }
 
             double sampleTime = Math.Max(0.0, somaClip.length - (1.0 / KimodoPlayableClip.FIXED_FRAME_RATE));
-            if (!KimodoMarkerSamplingUtility.TrySampleMarkerFromClipWithRetargetCore(
+            if (!KimodoRetargetMarkerSamplingUtility.TrySampleMarkerFromClip(
                     somaClip,
                     FullBodyConstraintType,
                     sampleTime,
                     somaAvatar,
+                    null,
+                    somaAnimator,
                     modelName,
                     out KimodoMarkerSampleResult sample,
                     out string error))
@@ -539,7 +542,7 @@ namespace KimodoBridge
             }
 
             dancerAvatar = dancerAnimator != null ? dancerAnimator.avatar : null;
-            if (!KimodoRetargetTools.IsValidHumanoid(dancerAvatar))
+            if (dancerAvatar == null || !dancerAvatar.isValid || !dancerAvatar.isHuman)
             {
                 throw new InvalidOperationException("Dancer animator avatar is null, invalid, or not humanoid.");
             }
@@ -677,20 +680,12 @@ namespace KimodoBridge
                 return string.Empty;
             }
 
-            PropertyInfo property = component.GetType().GetProperty("text", BindingFlags.Instance | BindingFlags.Public);
-            if (property == null || property.PropertyType != typeof(string) || !property.CanRead)
+            if (component is Text uiText)
             {
-                return string.Empty;
+                return uiText.text ?? string.Empty;
             }
 
-            try
-            {
-                return property.GetValue(component) as string ?? string.Empty;
-            }
-            catch
-            {
-                return string.Empty;
-            }
+            return string.Empty;
         }
 
         private static void WriteTextProperty(Component component, string value)
@@ -700,18 +695,11 @@ namespace KimodoBridge
                 return;
             }
 
-            PropertyInfo property = component.GetType().GetProperty("text", BindingFlags.Instance | BindingFlags.Public);
-            if (property == null || property.PropertyType != typeof(string) || !property.CanWrite)
+            string safeValue = value ?? string.Empty;
+            if (component is Text uiText)
             {
+                uiText.text = safeValue;
                 return;
-            }
-
-            try
-            {
-                property.SetValue(component, value ?? string.Empty);
-            }
-            catch
-            {
             }
         }
 

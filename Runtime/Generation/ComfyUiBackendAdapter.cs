@@ -272,13 +272,6 @@ namespace KimodoBridge
                 }
             }
 
-            if (history["outputs"] is JObject || history["status"] is JObject)
-            {
-                entry = history;
-                note = "using root object as entry fallback.";
-                return true;
-            }
-
             return false;
         }
 
@@ -347,7 +340,7 @@ namespace KimodoBridge
                 }
             }
 
-            return candidates.Count > 0 ? candidates[0] : null;
+            return null;
         }
 
         private static void CollectMotionJsonCandidates(JToken token, List<string> results)

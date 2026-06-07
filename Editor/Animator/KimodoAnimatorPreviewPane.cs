@@ -1,7 +1,6 @@
 ﻿
 using System;
 using System.Collections.Generic;
-using System.Reflection;
 using TimelineInject;
 using UnityEditor;
 using UnityEditor.Animations;
@@ -391,11 +390,31 @@ namespace KimodoBridge.Editor
             double endConstraintTime = ResolveConstraintEndSampleTimeSeconds(generatedFrameCount);
 
             var samples = new List<KimodoMarkerSampleResult>(2);
-            if (!TrySampleAtNormalizedTime(avatar, beginClip, modelName, beginNormalizedTime, out KimodoMarkerSampleResult begin, out error))
+            if (!KimodoMarkerRetargetEditorFacade.TrySampleMarkerFromClip(
+                    beginClip,
+                    "fullbody",
+                    ResolveClipSampleTime(beginClip, beginNormalizedTime),
+                    avatar,
+                    avatar,
+                    null,
+                    modelName,
+                    forceRefresh: false,
+                    out KimodoMarkerSampleResult begin,
+                    out error))
             {
                 return false;
             }
-            if (!TrySampleAtNormalizedTime(avatar, endClip, modelName, endNormalizedTime, out KimodoMarkerSampleResult end, out error))
+            if (!KimodoMarkerRetargetEditorFacade.TrySampleMarkerFromClip(
+                    endClip,
+                    "fullbody",
+                    ResolveClipSampleTime(endClip, endNormalizedTime),
+                    avatar,
+                    avatar,
+                    null,
+                    modelName,
+                    forceRefresh: false,
+                    out KimodoMarkerSampleResult end,
+                    out error))
             {
                 return false;
             }
@@ -417,6 +436,34 @@ namespace KimodoBridge.Editor
 
             constraintsJson = KimodoConstraintJsonExporter.ToConstraintsJson(samples, 0.0, generatedClipDurationSeconds);
             return true;
+        }
+
+        private static double ResolveClipSampleTime(AnimationClip clip, double normalizedTime)
+        {
+            if (clip == null)
+            {
+                return 0.0;
+            }
+
+            double duration = Math.Max(0.0, clip.length);
+            if (duration <= 0.0)
+            {
+                return 0.0;
+            }
+
+            double clampedNormalizedTime = Math.Max(0.0, Math.Min(1.0, normalizedTime));
+            if (clampedNormalizedTime <= 0.0)
+            {
+                return 0.0;
+            }
+
+            if (clampedNormalizedTime >= 1.0)
+            {
+                double epsilon = Math.Min(1e-3, duration * 0.5);
+                return Math.Max(0.0, duration - epsilon);
+            }
+
+            return clampedNormalizedTime * duration;
         }
 
         private static void OverwriteLoopEndPoseAxes(KimodoMarkerSampleResult begin, KimodoMarkerSampleResult end)
@@ -696,28 +743,6 @@ namespace KimodoBridge.Editor
             retargetAvatarBridgeModelName = string.Empty;
         }
 
-        private static bool TrySampleAtNormalizedTime(Avatar avatar, AnimationClip clip, string modelName, double normalizedTime, out KimodoMarkerSampleResult sample, out string error)
-        {
-            sample = null;
-            error = string.Empty;
-            if (avatar == null || clip == null)
-            {
-                error = "Avatar or source clip is null.";
-                return false;
-            }
-
-            double globalTime = ResolveClipSampleTime(clip, normalizedTime);
-
-            return KimodoRetargetToolsEditor.TrySampleMarkerFromClipWithEditorCache(
-                clip,
-                "fullbody",
-                globalTime,
-                avatar,
-                modelName,
-                out sample,
-                out error);
-        }
-
         private static int ResolveConstraintFrameCount(float generationDurationSeconds)
         {
             float minDuration = KimodoPlayableClip.MIN_FRAMES / KimodoPlayableClip.FIXED_FRAME_RATE;
@@ -741,34 +766,6 @@ namespace KimodoBridge.Editor
             return clampedFrameCount <= 1
                 ? 0.0
                 : (clampedFrameCount - 1.0) / KimodoPlayableClip.FIXED_FRAME_RATE;
-        }
-
-        private static double ResolveClipSampleTime(AnimationClip clip, double normalizedTime)
-        {
-            if (clip == null)
-            {
-                return 0.0;
-            }
-
-            double duration = Math.Max(0.0, clip.length);
-            if (duration <= 0.0)
-            {
-                return 0.0;
-            }
-
-            double clampedNormalizedTime = Math.Max(0.0, Math.Min(1.0, normalizedTime));
-            if (clampedNormalizedTime <= 0.0)
-            {
-                return 0.0;
-            }
-
-            if (clampedNormalizedTime >= 1.0)
-            {
-                double epsilon = Math.Min(1e-3, duration * 0.5);
-                return Math.Max(0.0, duration - epsilon);
-            }
-
-            return clampedNormalizedTime * duration;
         }
 
         private void SetGeneratedPreviewByIndex()
@@ -810,7 +807,7 @@ namespace KimodoBridge.Editor
                     if (KimodoRuntimeAvatarSkeletonBuilder.TryLoadAvatarByModelName(modelName, out Avatar fallbackAvatar, out _)
                         && fallbackAvatar != null && fallbackAvatar.isValid && fallbackAvatar.isHuman)
                     {
-                        if (!KimodoRetargetTools.TryCreateTemporaryHumanoidRoot(
+                        if (!KimodoRetargetAvatarUtility.TryCreateTemporaryHumanoidRoot(
                             fallbackAvatar,
                             "KimodoPreviewSkeletonTemplate",
                             animatorEnabled: false,

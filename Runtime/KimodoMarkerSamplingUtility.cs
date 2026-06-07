@@ -188,266 +188,6 @@ namespace KimodoBridge
             return localSampleTime;
         }
 
-        public static bool TrySampleMarkerFromTimelineClipWithRetargetCore(
-            TimelineClip sourceTimelineClip,
-            string markerType,
-            double globalTime,
-            Avatar originAvatar,
-            string modelName,
-            out KimodoMarkerSampleResult result,
-            out string error)
-        {
-            SkeletonCache sourceCache = null;
-            MuscleClipCache sourceMuscleClipCache = null;
-            SkeletonCache targetCache = null;
-            return TrySampleMarkerFromTimelineClipWithRetargetCore(
-                sourceTimelineClip,
-                markerType,
-                globalTime,
-                originAvatar,
-                ref sourceCache,
-                ref sourceMuscleClipCache,
-                modelName,
-                ref targetCache,
-                out result,
-                out error);
-        }
-
-        public static bool TrySampleMarkerFromTimelineClipWithRetargetCore(
-            TimelineClip sourceTimelineClip,
-            string markerType,
-            double globalTime,
-            Avatar originAvatar,
-            ref SkeletonCache sourceCache,
-            ref MuscleClipCache sourceMuscleClipCache,
-            string modelName,
-            ref SkeletonCache targetCache,
-            out KimodoMarkerSampleResult result,
-            out string error)
-        {
-            result = null;
-            error = string.Empty;
-
-            if (!TryResolveAnimationClipFromTimelineClip(sourceTimelineClip, out AnimationClip sourceClip, out error))
-            {
-                return false;
-            }
-
-            double localSampleTime = ClampLocalSampleTime(sourceTimelineClip, globalTime);
-            return TrySampleMarkerFromClipWithRetargetCore(
-                sourceClip,
-                markerType,
-                localSampleTime,
-                originAvatar,
-                ref sourceCache,
-                ref sourceMuscleClipCache,
-                modelName,
-                ref targetCache,
-                out result,
-                out error);
-        }
-
-        public static bool TrySampleMarkerFromTimelineClipWithRetargetCore(
-            TimelineClip sourceTimelineClip,
-            string markerType,
-            double globalTime,
-            Avatar originAvatar,
-            Avatar targetAvatar,
-            string modelName,
-            out KimodoMarkerSampleResult result,
-            out string error)
-        {
-            result = null;
-            error = string.Empty;
-
-            if (!TryResolveAnimationClipFromTimelineClip(sourceTimelineClip, out AnimationClip sourceClip, out error))
-            {
-                return false;
-            }
-
-            double localSampleTime = ClampLocalSampleTime(sourceTimelineClip, globalTime);
-            return TrySampleMarkerFromClipWithRetargetCore(
-                sourceClip,
-                markerType,
-                localSampleTime,
-                originAvatar,
-                targetAvatar,
-                modelName,
-                out result,
-                out error);
-        }
-
-        public static bool TrySampleMarkerFromClipWithRetargetCore(
-            AnimationClip sourceClip,
-            string markerType,
-            double sampleTime,
-            Avatar originAvatar,
-            string modelName,
-            out KimodoMarkerSampleResult result,
-            out string error)
-        {
-            SkeletonCache sourceCache = null;
-            MuscleClipCache sourceMuscleClipCache = null;
-            SkeletonCache targetCache = null;
-            return TrySampleMarkerFromClipWithRetargetCore(
-                sourceClip,
-                markerType,
-                sampleTime,
-                originAvatar,
-                ref sourceCache,
-                ref sourceMuscleClipCache,
-                modelName,
-                ref targetCache,
-                out result,
-                out error);
-        }
-
-        public static bool TrySampleMarkerFromClipWithRetargetCore(
-            AnimationClip sourceClip,
-            string markerType,
-            double sampleTime,
-            Avatar originAvatar,
-            ref SkeletonCache sourceCache,
-            ref MuscleClipCache sourceMuscleClipCache,
-            string modelName,
-            ref SkeletonCache targetCache,
-            out KimodoMarkerSampleResult result,
-            out string error)
-        {
-            result = null;
-            error = string.Empty;
-
-            if (!KimodoRuntimeAvatarSkeletonBuilder.TryLoadAvatarByModelName(modelName, out Avatar targetAvatar, out string targetError))
-            {
-                error = string.IsNullOrWhiteSpace(targetError)
-                    ? "Failed to resolve target avatar."
-                    : $"Resolve target avatar failed: {targetError}";
-                return false;
-            }
-
-            return TrySampleMarkerFromClipWithRetargetCore(
-                sourceClip,
-                markerType,
-                sampleTime,
-                originAvatar,
-                ref sourceCache,
-                ref sourceMuscleClipCache,
-                targetAvatar,
-                modelName,
-                ref targetCache,
-                out result,
-                out error);
-        }
-
-        public static bool TrySampleMarkerFromClipWithRetargetCore(
-            AnimationClip sourceClip,
-            string markerType,
-            double sampleTime,
-            Avatar originAvatar,
-            Avatar targetAvatar,
-            string modelName,
-            out KimodoMarkerSampleResult result,
-            out string error)
-        {
-            SkeletonCache sourceCache = null;
-            MuscleClipCache sourceMuscleClipCache = null;
-            SkeletonCache targetCache = null;
-            return TrySampleMarkerFromClipWithRetargetCore(
-                sourceClip,
-                markerType,
-                sampleTime,
-                originAvatar,
-                ref sourceCache,
-                ref sourceMuscleClipCache,
-                targetAvatar,
-                modelName,
-                ref targetCache,
-                out result,
-                out error);
-        }
-
-        public static bool TrySampleMarkerFromClipWithRetargetCore(
-            AnimationClip sourceClip,
-            string markerType,
-            double sampleTime,
-            Avatar originAvatar,
-            ref SkeletonCache sourceCache,
-            ref MuscleClipCache sourceMuscleClipCache,
-            Avatar targetAvatar,
-            string modelName,
-            ref SkeletonCache targetCache,
-            out KimodoMarkerSampleResult result,
-            out string error)
-        {
-            result = null;
-            error = string.Empty;
-
-            if (!KimodoRetargetTools.IsValidHumanoid(originAvatar))
-            {
-                error = "Source avatar is null/invalid/non-humanoid.";
-                return false;
-            }
-
-            if (!KimodoRetargetTools.IsValidHumanoid(targetAvatar))
-            {
-                error = "Target avatar is null/invalid/non-humanoid.";
-                return false;
-            }
-
-            if (sourceClip == null)
-            {
-                error = "Source clip is null.";
-                return false;
-            }
-
-            if (targetCache == null || !targetCache.IsReady || targetCache.avatar != targetAvatar)
-            {
-                targetCache?.Dispose();
-                targetCache = null;
-                if (!KimodoRetargetTools.TryBuildSkeletonCache(targetAvatar, "KimodoMarkerSampling_ProfileSkeleton", out targetCache, out error))
-                {
-                    return false;
-                }
-            }
-
-            if (!KimodoRetargetTools.TryRetargetNew(
-                    sourceClip,
-                    originAvatar,
-                    ref sourceCache,
-                    ref sourceMuscleClipCache,
-                    targetCache,
-                    (float)sampleTime,
-                    out _,
-                    out _,
-                    out error))
-            {
-                return false;
-            }
-
-            if (!KimodoProfileSkeletonUtility.TryResolveProfileSkeleton(
-                    modelName,
-                    targetCache.skeletonRoot,
-                    out string[] jointNames,
-                    out int[] parentIndices,
-                    out Transform[] jointTransforms,
-                    out error))
-            {
-                return false;
-            }
-
-            return TrySampleMarkerRaw(
-                targetCache.animator,
-                targetCache.skeletonRoot,
-                modelName,
-                sampleTime,
-                markerType,
-                jointNames,
-                parentIndices,
-                jointTransforms,
-                out result,
-                out error);
-        }
-
         public static bool TrySampleMarkerFromProfileSkeleton(
             SkeletonCache profileCache,
             string modelName,
@@ -485,6 +225,31 @@ namespace KimodoBridge
                 jointNames,
                 parentIndices,
                 jointTransforms,
+                out result,
+                out error);
+        }
+
+        internal static bool TrySampleMarkerFromProfileSkeletonRaw(
+            Animator animator,
+            Transform skeletonRoot,
+            string modelName,
+            double globalTime,
+            string markerType,
+            string[] jointNamesOverride,
+            int[] parentIndicesOverride,
+            Transform[] jointsOverride,
+            out KimodoMarkerSampleResult result,
+            out string error)
+        {
+            return TrySampleMarkerRaw(
+                animator,
+                skeletonRoot,
+                modelName,
+                globalTime,
+                markerType,
+                jointNamesOverride,
+                parentIndicesOverride,
+                jointsOverride,
                 out result,
                 out error);
         }

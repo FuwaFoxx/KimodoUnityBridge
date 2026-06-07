@@ -52,19 +52,21 @@ namespace KimodoBridge.Editor
             EditorUtility.SetDirty(request.TargetClip);
             AssetDatabase.SaveAssets();
 
+            AnimationClip rawBoneClip = CreateRawBoneWritebackClip(request.TargetClip);
+
             if (request.CanSkipRetarget != null && request.CanSkipRetarget(request.TargetClip))
             {
                 request.Progress?.Invoke(KimodoGeneratePipelineStage.Retarget, "Skipping retarget: binding hierarchy already matches clip bindings.");
-                return Complete(request, prompt, motionJson, request.TargetClip);
+                return Complete(request, prompt, motionJson, request.TargetClip, rawBoneClip);
             }
 
-            if (!IsValidHumanoid(request.OriginRetargetAvatar) || !IsValidHumanoid(request.TargetRetargetAvatar))
+            if (!KimodoRetargetCoreUtility.IsValidHumanoid(request.OriginRetargetAvatar) || !KimodoRetargetCoreUtility.IsValidHumanoid(request.TargetRetargetAvatar))
             {
                 throw new InvalidOperationException("Retarget requires valid humanoid originAvatar and targetAvatar.");
             }
 
             request.Progress?.Invoke(KimodoGeneratePipelineStage.Retarget, "Retargeting...");
-            if (!KimodoRetargetToolsEditor.TryBakeMuscleClipCacheToClip(
+            if (!KimodoRetargetToolsEditor.TryBakeMuscleClipToClip(
                     request.TargetClip,
                     request.OriginRetargetAvatar,
                     request.TargetClip,
@@ -81,7 +83,7 @@ namespace KimodoBridge.Editor
                 EditorUtility.SetDirty(request.TargetClip);
                 AssetDatabase.SaveAssets();
 
-                return Complete(request, prompt, motionJson, request.TargetClip);
+                return Complete(request, prompt, motionJson, request.TargetClip, rawBoneClip);
             }
 
             if (!KimodoRetargetTools.TryRetargetNew(
@@ -89,9 +91,9 @@ namespace KimodoBridge.Editor
                     request.OriginRetargetAvatar,
                     request.TargetRetargetAvatar,
                     request.ExportMuscleClip,
-                    request.TargetClip,
                     out AnimationClip retargetClip,
-                    out string retargetError))
+                    out string retargetError,
+                    providedSourceHumanoidClip: request.TargetClip))
             {
                 throw new InvalidOperationException(string.IsNullOrWhiteSpace(retargetError)
                     ? "Retarget failed."
@@ -105,10 +107,15 @@ namespace KimodoBridge.Editor
                 AssetDatabase.SaveAssets();
             }
 
-            return Complete(request, prompt, motionJson, request.TargetClip);
+            return Complete(request, prompt, motionJson, request.TargetClip, rawBoneClip);
         }
 
-        private KimodoEditorGenerateResult Complete(KimodoEditorGenerateRequest request, string prompt, string motionJson, AnimationClip generatedClip)
+        private KimodoEditorGenerateResult Complete(
+            KimodoEditorGenerateRequest request,
+            string prompt,
+            string motionJson,
+            AnimationClip generatedClip,
+            AnimationClip rawBoneClip)
         {
             request.Progress?.Invoke(KimodoGeneratePipelineStage.Finalize, "Finalizing generated assets...");
             request.Progress?.Invoke(KimodoGeneratePipelineStage.Completed, "Generation complete.");
@@ -119,8 +126,27 @@ namespace KimodoBridge.Editor
                 Prompt = prompt,
                 Seed = request.EffectiveSeed,
                 MotionJsonCompact = motionJson,
-                GeneratedClip = generatedClip
+                GeneratedClip = generatedClip,
+                RawBoneClip = rawBoneClip
             };
+        }
+
+        private static AnimationClip CreateRawBoneWritebackClip(AnimationClip sourceClip)
+        {
+            if (sourceClip == null)
+            {
+                return null;
+            }
+
+            string sourceName = string.IsNullOrWhiteSpace(sourceClip.name) ? "KimodoRawBone" : sourceClip.name.Trim();
+            AnimationClip rawBoneClip = KimodoEditorClipWritebackService.CreateGeneratedAnimationClipAsset($"{sourceName}_RawBone");
+            KimodoEditorClipUtility.CopyClipData(sourceClip, rawBoneClip, forceNoLoopKeepY: true);
+            rawBoneClip.legacy = sourceClip.legacy;
+            rawBoneClip.frameRate = sourceClip.frameRate;
+            EditorUtility.SetDirty(rawBoneClip);
+            AssetDatabase.SaveAssets();
+            Debug.Log($"[Kimodo][Generate] Wrote raw Kimodo bone clip: '{AssetDatabase.GetAssetPath(rawBoneClip)}'.");
+            return rawBoneClip;
         }
 
         private static async Task<string> GenerateMotionJsonAsync(KimodoEditorGenerateRequest request, string prompt, string modelName)
@@ -199,7 +225,7 @@ namespace KimodoBridge.Editor
             int requestedMs = Math.Max(30000, Mathf.RoundToInt(generationTimeoutSeconds * 1000f));
             int timeoutMs = requestedMs;
 
-            KimodoBridgeController.ModelSetupStatus modelStatus =
+            ModelSetupStatus modelStatus =
                 KimodoBridgeController.EvaluateModelSetupStatus(runtimeRoot, highVram, modelName, modelsRootOverride: null);
             if (modelStatus.Missing)
             {
@@ -214,11 +240,6 @@ namespace KimodoBridge.Editor
         private static string NormalizeModelName(string modelName)
         {
             return string.IsNullOrWhiteSpace(modelName) ? DefaultModelName : modelName.Trim();
-        }
-
-        private static bool IsValidHumanoid(Avatar avatar)
-        {
-            return avatar != null && avatar.isValid && avatar.isHuman;
         }
     }
 }

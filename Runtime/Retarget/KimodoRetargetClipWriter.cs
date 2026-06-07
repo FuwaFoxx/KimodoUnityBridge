@@ -6,6 +6,8 @@ namespace KimodoBridge
 {
     internal static class KimodoRetargetClipWriter
     {
+        private const float IdentityLeadInTime = -0.016f;
+
         internal static bool WriteMuscleCurves(IReadOnlyList<MuscleSample> samples, AnimationClip clip, out string error)
         {
             error = string.Empty;
@@ -50,6 +52,14 @@ namespace KimodoBridge
             {
                 muscleCurves[i] = new AnimationCurve();
             }
+
+            rootTx.AddKey(IdentityLeadInTime, 0f);
+            rootTy.AddKey(IdentityLeadInTime, 0f);
+            rootTz.AddKey(IdentityLeadInTime, 0f);
+            rootQx.AddKey(IdentityLeadInTime, 0f);
+            rootQy.AddKey(IdentityLeadInTime, 0f);
+            rootQz.AddKey(IdentityLeadInTime, 0f);
+            rootQw.AddKey(IdentityLeadInTime, 1f);
 
             float frameRate = clip.frameRate > 0f ? clip.frameRate : KimodoPlayableClip.FIXED_FRAME_RATE;
             for (int frame = 0; frame < samples.Count; frame++)

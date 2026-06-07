@@ -47,7 +47,7 @@ namespace KimodoBridge.Editor
                 $"Bridge launcher not found under runtime root: {runtimeRoot}. Expected new pipeline launcher: run_server.bat or bash/start_server.bat.");
         }
 
-        internal static KimodoBridgeController.ModelSetupStatus EvaluateModelSetupStatus(
+        internal static ModelSetupStatus EvaluateModelSetupStatus(
             string runtimeRoot,
             bool highVram,
             string modelName,
@@ -55,22 +55,22 @@ namespace KimodoBridge.Editor
         {
             if (string.IsNullOrWhiteSpace(runtimeRoot))
             {
-                return new KimodoBridgeController.ModelSetupStatus(false, 0, 0);
+                return new ModelSetupStatus(false, 0, 0);
             }
 
             if (!string.IsNullOrWhiteSpace(modelsRootOverride))
             {
-                return new KimodoBridgeController.ModelSetupStatus(false, 0, 0);
+                return new ModelSetupStatus(false, 0, 0);
             }
 
             int points = KimodoServerRuntimeUtil.EstimateMissingConfigPoints(runtimeRoot, highVram, modelName, modelsRootOverride);
             if (points <= 0)
             {
-                return new KimodoBridgeController.ModelSetupStatus(false, 0, 0);
+                return new ModelSetupStatus(false, 0, 0);
             }
 
             int minutes = Math.Max(3, points * 3);
-            return new KimodoBridgeController.ModelSetupStatus(true, points, minutes);
+            return new ModelSetupStatus(true, points, minutes);
         }
 
         internal static bool TryGetModelMissingSetupMinutes(
@@ -80,7 +80,7 @@ namespace KimodoBridge.Editor
             string modelsRootOverride,
             out int minutes)
         {
-            KimodoBridgeController.ModelSetupStatus status = EvaluateModelSetupStatus(runtimeRoot, highVram, modelName, modelsRootOverride);
+            ModelSetupStatus status = EvaluateModelSetupStatus(runtimeRoot, highVram, modelName, modelsRootOverride);
             minutes = 0;
             if (!status.Missing)
             {
@@ -91,9 +91,9 @@ namespace KimodoBridge.Editor
             return true;
         }
 
-        internal static System.Collections.Generic.List<KimodoBridgeController.ModelDirectoryInfo> QueryDisplayableModelDirectories(string modelsRoot)
+        internal static System.Collections.Generic.List<ModelDirectoryInfo> QueryDisplayableModelDirectories(string modelsRoot)
         {
-            var result = new System.Collections.Generic.List<KimodoBridgeController.ModelDirectoryInfo>();
+            var result = new System.Collections.Generic.List<ModelDirectoryInfo>();
             if (string.IsNullOrWhiteSpace(modelsRoot))
             {
                 return result;
@@ -125,7 +125,7 @@ namespace KimodoBridge.Editor
                     continue;
                 }
 
-                result.Add(new KimodoBridgeController.ModelDirectoryInfo(name, dir));
+                result.Add(new ModelDirectoryInfo(name, dir));
             }
 
             return result;

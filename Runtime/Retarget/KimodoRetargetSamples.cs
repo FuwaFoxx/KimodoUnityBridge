@@ -30,48 +30,6 @@ namespace KimodoBridge
         public Quaternion rightHandRotation;
     }
 
-    public sealed class MuscleClipCache : IDisposable
-    {
-        public AnimationClip sourceClip;
-        public Avatar sourceAvatar;
-        public float frameRate;
-        public float duration;
-        public MuscleSample[] samples;
-        public AnimationClip muscleClip;
-        public bool ownsMuscleClip = true;
-        private bool disposed;
-
-        public bool IsReady =>
-            !disposed &&
-            sourceClip != null &&
-            sourceAvatar != null &&
-            frameRate > 0f &&
-            duration >= 0f &&
-            muscleClip != null;
-
-        public void Dispose()
-        {
-            if (disposed)
-            {
-                return;
-            }
-
-            disposed = true;
-            if (ownsMuscleClip && muscleClip != null)
-            {
-                UnityEngine.Object.DestroyImmediate(muscleClip);
-            }
-
-            sourceClip = null;
-            sourceAvatar = null;
-            samples = null;
-            muscleClip = null;
-            frameRate = 0f;
-            duration = 0f;
-            ownsMuscleClip = false;
-        }
-    }
-
     public sealed class SkeletonCache : IDisposable
     {
         public Avatar avatar;

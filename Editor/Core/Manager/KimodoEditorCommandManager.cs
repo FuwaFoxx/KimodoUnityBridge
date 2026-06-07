@@ -283,7 +283,7 @@ namespace KimodoBridge.Editor
             }
 
             KimodoBridgeController.RequestServerStateRefresh(force: true);
-            KimodoBridgeController.ServerStatusSnapshot snapshot = KimodoBridgeController.GetServerStatusSnapshot();
+            ServerStatusSnapshot snapshot = KimodoBridgeController.GetServerStatusSnapshot();
             if (command.Operation == KimodoBridgeOperation.Stop && snapshot.Running)
             {
                 throw new InvalidOperationException(

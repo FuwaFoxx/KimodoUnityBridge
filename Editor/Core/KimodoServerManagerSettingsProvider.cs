@@ -305,7 +305,7 @@ namespace KimodoBridge.Editor
             else
             {
                 EditorGUILayout.HelpBox("Server is not running.", MessageType.None);
-                KimodoBridgeController.ServerStatusSnapshot staleSnapshot = KimodoBridgeController.GetServerStatusSnapshot();
+                ServerStatusSnapshot staleSnapshot = KimodoBridgeController.GetServerStatusSnapshot();
                 if (staleSnapshot.HasPort)
                 {
                     EditorGUILayout.HelpBox("Detected stale endpoint file (serverport). Process is not alive.", MessageType.None);
@@ -550,11 +550,11 @@ namespace KimodoBridge.Editor
 
             try
             {
-                List<KimodoBridgeController.ModelDirectoryInfo> source =
+                List<ModelDirectoryInfo> source =
                     KimodoBridgeController.QueryDisplayableModelDirectories(resolvedModelsRoot);
                 for (int i = 0; i < source.Count; i++)
                 {
-                    KimodoBridgeController.ModelDirectoryInfo item = source[i];
+                    ModelDirectoryInfo item = source[i];
                     models.Add(new InstalledModelInfoView
                     {
                         Name = item.Name,
@@ -588,7 +588,7 @@ namespace KimodoBridge.Editor
             }
 
             KimodoBridgeController.RequestServerStateRefresh(forceRefresh);
-            KimodoBridgeController.ServerStatusSnapshot snapshot = KimodoBridgeController.GetServerStatusSnapshot();
+            ServerStatusSnapshot snapshot = KimodoBridgeController.GetServerStatusSnapshot();
             if (!snapshot.Ready)
             {
                 serverState = ServerState.Disabled;

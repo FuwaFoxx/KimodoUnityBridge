@@ -46,7 +46,7 @@ namespace KimodoBridge
             goalPosition = Vector3.zero;
             goalRotation = Quaternion.identity;
 
-            if (!KimodoRetargetTools.ValidateRetargetCache(cache, out _))
+            if (!KimodoRetargetAvatarUtility.ValidateRetargetCache(cache, out _))
             {
                 return false;
             }
@@ -108,7 +108,7 @@ namespace KimodoBridge
                 }
             }
 
-            if (!KimodoRetargetTools.IsValidHumanoid(cache.avatar))
+            if (!KimodoRetargetCoreUtility.IsValidHumanoid(cache.avatar))
             {
                 return null;
             }

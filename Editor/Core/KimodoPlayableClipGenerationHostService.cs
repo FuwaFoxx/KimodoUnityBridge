@@ -43,9 +43,9 @@ namespace KimodoBridge.Editor
             Avatar originRetargetAvatar = ResolveOriginRetargetAvatar(resolvedModelName);
             Avatar targetRetargetAvatar = ResolveTargetRetargetAvatar(clip, externalConstraint?.RetargetAvatar, out bool hasBindingAvatar);
             bool hasValidRetargetAvatar =
-                IsValidHumanoid(originRetargetAvatar) &&
+                KimodoRetargetCoreUtility.IsValidHumanoid(originRetargetAvatar) &&
                 hasBindingAvatar &&
-                IsValidHumanoid(targetRetargetAvatar);
+                KimodoRetargetCoreUtility.IsValidHumanoid(targetRetargetAvatar);
 
             GameObject bindingObject = ConstraintProvider.FindTimelineBindingObjectForAsset(clip);
             bool exportMuscleClip = hasValidRetargetAvatar && TryResolveBindingAnimatorAvatar(clip, out _);
@@ -131,15 +131,8 @@ namespace KimodoBridge.Editor
 
         private static void HandleGeneratedClipWritebackCompleted(KimodoPlayableClip playableClip)
         {
-            try
-            {
-                KimodoTimelinePreviewRefreshUtility.RefreshIfPreviewing();
-                TryMatchOffsetsToPreviousClip(playableClip);
-            }
-            catch (Exception ex)
-            {
-                Debug.LogWarning($"[Kimodo] Generated clip post-writeback failed: {ex.Message}");
-            }
+            KimodoTimelinePreviewRefreshUtility.RefreshIfPreviewing();
+            TryMatchOffsetsToPreviousClip(playableClip);
         }
 
         private static void TryMatchOffsetsToPreviousClip(KimodoPlayableClip playableClip)
@@ -151,7 +144,7 @@ namespace KimodoBridge.Editor
                 return;
             }
 
-            if (!TryResolveBindingAnimatorAvatar(playableClip, out Avatar bindingAvatar) || !IsValidHumanoid(bindingAvatar))
+            if (!TryResolveBindingAnimatorAvatar(playableClip, out Avatar bindingAvatar) || !KimodoRetargetCoreUtility.IsValidHumanoid(bindingAvatar))
             {
                 return;
             }
@@ -164,8 +157,8 @@ namespace KimodoBridge.Editor
 
             if (!TryInvokeTimelineMatchClipsToPrevious(timelineClip, out string error))
             {
-                Debug.LogWarning($"[Kimodo] Match Offsets to Previous Clip failed for '{playableClip.name}': {error}");
-                return;
+                throw new InvalidOperationException(
+                    $"Match Offsets to Previous Clip failed for '{playableClip.name}': {error}");
             }
 
             EditorUtility.SetDirty(playableClip);
@@ -254,7 +247,7 @@ namespace KimodoBridge.Editor
                 return null;
             }
 
-            return IsValidHumanoid(avatar) ? avatar : null;
+            return KimodoRetargetCoreUtility.IsValidHumanoid(avatar) ? avatar : null;
         }
 
         private static Avatar ResolveTargetRetargetAvatar(KimodoPlayableClip clip, Avatar explicitRetargetAvatar, out bool hasBindingAvatar)
@@ -325,9 +318,5 @@ namespace KimodoBridge.Editor
             return effectiveSeed;
         }
 
-        private static bool IsValidHumanoid(Avatar avatar)
-        {
-            return avatar != null && avatar.isValid && avatar.isHuman;
-        }
     }
 }

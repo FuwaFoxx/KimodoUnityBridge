@@ -131,36 +131,48 @@ namespace KimodoBridge.Editor
                 return false;
             }
 
-            string modelName = sourceClip.asset is KimodoPlayableClip playableClip
-                ? playableClip.bridgeModelName
-                : "Kimodo-SOMA-RP-v1";
-            KimodoLocalAvatarUtility.AvatarResolveResult sourceAvatarResult = KimodoLocalAvatarUtility.ResolveAvatarFromGameObject(animator.gameObject);
-            Avatar sourceAvatar = sourceAvatarResult.Avatar;
-            if (sourceAvatar == null || !sourceAvatar.isValid || !sourceAvatar.isHuman)
+            TrackAsset track = sourceClip.GetParentTrack();
+            if (track == null)
             {
-                error = $"Resolve source avatar failed: {sourceAvatarResult.Error}";
+                error = "Parent track not found.";
                 return false;
             }
 
-            if (!KimodoRetargetToolsEditor.TrySampleMarkerFromTimelineClipWithEditorCache(
-                sourceClip,
-                markerType,
-                timelineTime,
-                sourceAvatar,
-                modelName,
-                out KimodoMarkerSampleResult sampledPose,
-                out error))
+            if (animator == null)
+            {
+                error = "Animation track has no Animator binding.";
+                return false;
+            }
+
+            if (!KimodoMarkerSamplingUtility.TryResolveAnimationClipFromTimelineClip(sourceClip, out AnimationClip resolvedClip, out error))
+            {
+                return false;
+            }
+
+            KimodoLocalAvatarUtility.AvatarResolveResult avatarResult = KimodoLocalAvatarUtility.ResolveAvatarFromGameObject(animator.gameObject);
+            Avatar sourceAvatar = avatarResult.Avatar;
+            if (!KimodoRetargetCoreUtility.IsValidHumanoid(sourceAvatar))
+            {
+                error = $"Resolve source avatar failed: {avatarResult.Error}";
+                return false;
+            }
+
+            if (!KimodoMarkerRetargetEditorFacade.TrySampleMarkerFromClip(
+                    resolvedClip,
+                    markerType,
+                    timelineTime,
+                    sourceAvatar,
+                    null,
+                    animator,
+                    string.IsNullOrWhiteSpace(((KimodoPlayableClip)sourceClip.asset)?.bridgeModelName) ? "Kimodo-SOMA-RP-v1" : ((KimodoPlayableClip)sourceClip.asset).bridgeModelName.Trim(),
+                    forceRefresh: false,
+                    out KimodoMarkerSampleResult sampledPose,
+                    out error))
             {
                 return false;
             }
 
             sample = sampledPose;
-            if (sample == null)
-            {
-                error = "sample result is null";
-                return false;
-            }
-
             sample.constraintType = markerType ?? string.Empty;
             sample.sampleTime = timelineTime;
             return true;

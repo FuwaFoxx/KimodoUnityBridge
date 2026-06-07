@@ -1,7 +1,6 @@
 using KimodoBridge.Editor;
 using System;
 using System.Collections.Generic;
-using System.Reflection;
 using UnityEditor;
 using UnityEditor.Timeline;
 using UnityEngine;
@@ -296,7 +295,7 @@ namespace KimodoBridge.Editor
             }
 
             KimodoBridgeController.RequestServerStateRefresh(forceRefresh);
-            KimodoBridgeController.ServerStatusSnapshot snapshot = KimodoBridgeController.GetServerStatusSnapshot();
+            ServerStatusSnapshot snapshot = KimodoBridgeController.GetServerStatusSnapshot();
             bridgeStatusReady = snapshot.Ready;
             bridgeRunningCached = snapshot.Running;
             bridgePortDiscoveredCached = snapshot.HasPort;

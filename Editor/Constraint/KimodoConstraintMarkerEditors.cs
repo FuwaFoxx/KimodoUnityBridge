@@ -12,6 +12,48 @@ using TimelineInject;
 
 namespace KimodoBridge.Editor
 {
+    internal static class KimodoMarkerRetargetEditorFacade
+    {
+        internal static bool TrySampleMarkerFromClip(
+            AnimationClip sourceClip,
+            string markerType,
+            double sampleTime,
+            Avatar sourceAvatar,
+            Avatar explicitTargetAvatar,
+            Animator fallbackAnimator,
+            string modelName,
+            bool forceRefresh,
+            out KimodoMarkerSampleResult sample,
+            out string error)
+        {
+            sample = null;
+            error = string.Empty;
+            if (sourceClip == null)
+            {
+                error = "Source clip is null.";
+                return false;
+            }
+
+            if (!KimodoRetargetCoreUtility.IsValidHumanoid(sourceAvatar))
+            {
+                error = "Source avatar is null/invalid/non-humanoid.";
+                return false;
+            }
+
+            return KimodoRetargetToolsEditor.TrySampleMarkerFromClipWithEditorCache(
+                sourceClip,
+                markerType,
+                sampleTime,
+                sourceAvatar,
+                explicitTargetAvatar,
+                fallbackAnimator,
+                modelName,
+                forceRefresh,
+                out sample,
+                out error);
+        }
+    }
+
     [InitializeOnLoad]
     internal static class KimodoConstraintMarkerSelectionPreviewCleanup
     {
@@ -279,6 +321,18 @@ namespace KimodoBridge.Editor
         private static readonly Dictionary<int, PoseRenderCacheEntry> PoseRenderSignatures = new Dictionary<int, PoseRenderCacheEntry>();
         private static readonly Dictionary<int, string> CachedIntStrings = new Dictionary<int, string>();
 
+        private const string DefaultBridgeModelName = "Kimodo-SOMA-RP-v1";
+
+        private struct MarkerSamplingContext
+        {
+            public TimelineClip ClipRange;
+            public TrackAsset Track;
+            public Animator Animator;
+            public AnimationClip SourceClip;
+            public Avatar SourceAvatar;
+            public string ModelName;
+        }
+
         private sealed class AutoSampleCacheEntry
         {
             public AutoSampleSignatureSnapshot Snapshot;
@@ -330,16 +384,6 @@ namespace KimodoBridge.Editor
             public int[] SampledJointIndices;
         }
 
-        private struct MarkerSamplingContext
-        {
-            public TimelineClip ClipRange;
-            public TrackAsset Track;
-            public Animator Animator;
-            public AnimationClip SourceClip;
-            public Avatar SourceAvatar;
-            public string ModelName;
-        }
-
         internal static string GetCachedIntString(int value)
         {
             if (!CachedIntStrings.TryGetValue(value, out string cached))
@@ -364,23 +408,7 @@ namespace KimodoBridge.Editor
                 return false;
             }
 
-            // Prefer current marker timeline position. If the marker is temporarily outside any clip,
-            // fall back to the last sampled time so preview/edit can still recover its previous owner clip.
-            if (TryFindClipRangeByTime(marker, marker.time, out clipRange))
-            {
-                return true;
-            }
-
-            if (marker is KimodoConstraintMarkerBase kimodoMarker)
-            {
-                double hintedTime = kimodoMarker.SampleData != null ? kimodoMarker.SampleData.sampleTime : marker.time;
-                if (Math.Abs(hintedTime - marker.time) > 1e-9 && TryFindClipRangeByTime(marker, hintedTime, out clipRange))
-                {
-                    return true;
-                }
-            }
-
-            return false;
+            return TryFindClipRangeByTime(marker, marker.time, out clipRange);
         }
 
         private static bool TryFindClipRangeByTime(IMarker marker, double time, out TimelineClip clipRange)
@@ -411,22 +439,6 @@ namespace KimodoBridge.Editor
             return false;
         }
 
-        public static bool TrySampleMarkerDataFromMarker(
-            KimodoConstraintMarkerBase marker,
-            out KimodoMarkerSampleResult sampledData,
-            out string error)
-        {
-            sampledData = null;
-            error = string.Empty;
-
-            if (!TryBuildMarkerSamplingContext(marker, out MarkerSamplingContext context, out error))
-            {
-                return false;
-            }
-
-            return TrySampleMarkerDataFromMarker(marker, context, out sampledData, out error);
-        }
-
         public static bool TryUpdateAutoSampleMarkerData(KimodoConstraintMarkerBase marker, out string error)
         {
             error = string.Empty;
@@ -436,7 +448,13 @@ namespace KimodoBridge.Editor
                 return false;
             }
 
-            if (!TryBuildMarkerSamplingContext(marker, out MarkerSamplingContext context, out error))
+            if (!TryGetClipRangeForMarker(marker, out TimelineClip clipRange) || clipRange == null)
+            {
+                error = $"clip range not found at marker time {marker.time.ToString("F4", CultureInfo.InvariantCulture)}";
+                return false;
+            }
+
+            if (!TryBuildMarkerSamplingContext(marker, clipRange, out MarkerSamplingContext context, out error))
             {
                 return false;
             }
@@ -481,73 +499,6 @@ namespace KimodoBridge.Editor
             return true;
         }
 
-        private static bool TryBuildMarkerSamplingContext(
-            KimodoConstraintMarkerBase marker,
-            out MarkerSamplingContext context,
-            out string error)
-        {
-            context = default;
-            error = string.Empty;
-
-            if (marker == null)
-            {
-                error = "marker is null";
-                return false;
-            }
-
-            if (!TryGetClipRangeForMarker(marker, out TimelineClip clipRange) || clipRange == null)
-            {
-                error = "clip range not found";
-                return false;
-            }
-
-            TrackAsset track = clipRange.GetParentTrack();
-            if (track == null)
-            {
-                error = "parent track not found";
-                return false;
-            }
-
-            PlayableDirector director = TimelineEditor.inspectedDirector;
-            if (director == null)
-            {
-                error = "Timeline inspected director is null";
-                return false;
-            }
-
-            Animator animator = director.GetGenericBinding(track) as Animator;
-            if (animator == null || animator.transform == null)
-            {
-                error = "Animation track has no Animator binding.";
-                return false;
-            }
-
-            if (!KimodoMarkerSamplingUtility.TryResolveAnimationClipFromTimelineClip(clipRange, out AnimationClip sourceClip, out error))
-            {
-                return false;
-            }
-
-            string modelName = ResolveModelName(clipRange);
-            KimodoLocalAvatarUtility.AvatarResolveResult sourceAvatarResult = KimodoLocalAvatarUtility.ResolveAvatarFromGameObject(animator.gameObject);
-            Avatar sourceAvatar = sourceAvatarResult.Avatar;
-            if (sourceAvatar == null || !sourceAvatar.isValid || !sourceAvatar.isHuman)
-            {
-                error = $"Resolve source avatar failed: {sourceAvatarResult.Error}";
-                return false;
-            }
-
-            context = new MarkerSamplingContext
-            {
-                ClipRange = clipRange,
-                Track = track,
-                Animator = animator,
-                SourceClip = sourceClip,
-                SourceAvatar = sourceAvatar,
-                ModelName = modelName
-            };
-            return true;
-        }
-
         private static bool TrySampleMarkerDataFromMarker(
             KimodoConstraintMarkerBase marker,
             MarkerSamplingContext context,
@@ -558,13 +509,17 @@ namespace KimodoBridge.Editor
             error = string.Empty;
 
             double sampleTime = marker.time;
+            double localSampleTime = KimodoMarkerSamplingUtility.ClampLocalSampleTime(context.ClipRange, sampleTime);
 
-            if (!KimodoRetargetToolsEditor.TrySampleMarkerFromTimelineClipWithEditorCache(
-                    context.ClipRange,
+            if (!KimodoMarkerRetargetEditorFacade.TrySampleMarkerFromClip(
+                    context.SourceClip,
                     marker.ConstraintType,
-                    sampleTime,
+                    localSampleTime,
                     context.SourceAvatar,
+                    null,
+                    context.Animator,
                     context.ModelName,
+                    forceRefresh: false,
                     out KimodoMarkerSampleResult sample,
                     out error))
             {
@@ -641,6 +596,81 @@ namespace KimodoBridge.Editor
                 Mathf.Abs(snapshot.SourceClipFrameRate - (context.SourceClip != null ? context.SourceClip.frameRate : 0f)) <= 1e-6f &&
                 snapshot.HasRootHeading == (sample != null && sample.hasRootHeading) &&
                 StringArrayEquals(snapshot.JointNames, sample != null ? sample.jointNames : null);
+        }
+
+        private static bool TryBuildMarkerSamplingContext(
+            KimodoConstraintMarkerBase marker,
+            TimelineClip clipRange,
+            out MarkerSamplingContext context,
+            out string error)
+        {
+            context = default;
+            error = string.Empty;
+
+            if (marker == null)
+            {
+                error = "marker is null";
+                return false;
+            }
+
+            if (clipRange == null)
+            {
+                error = "clip range is null";
+                return false;
+            }
+
+            TrackAsset track = clipRange.GetParentTrack();
+            if (track == null)
+            {
+                error = "parent track not found";
+                return false;
+            }
+
+            PlayableDirector director = TimelineEditor.inspectedDirector;
+            if (director == null)
+            {
+                error = "Timeline inspected director is null.";
+                return false;
+            }
+
+            Animator animator = director.GetGenericBinding(track) as Animator;
+            if (animator == null || animator.transform == null)
+            {
+                error = "Animation track has no Animator binding.";
+                return false;
+            }
+
+            if (!KimodoMarkerSamplingUtility.TryResolveAnimationClipFromTimelineClip(clipRange, out AnimationClip sourceClip, out error))
+            {
+                return false;
+            }
+
+            KimodoLocalAvatarUtility.AvatarResolveResult sourceAvatarResult = KimodoLocalAvatarUtility.ResolveAvatarFromGameObject(animator.gameObject);
+            Avatar sourceAvatar = sourceAvatarResult.Avatar;
+            if (!KimodoRetargetCoreUtility.IsValidHumanoid(sourceAvatar))
+            {
+                error = $"Resolve source avatar failed: {sourceAvatarResult.Error}";
+                return false;
+            }
+
+            context = new MarkerSamplingContext
+            {
+                ClipRange = clipRange,
+                Track = track,
+                Animator = animator,
+                SourceClip = sourceClip,
+                SourceAvatar = sourceAvatar,
+                ModelName = ResolveModelName(clipRange)
+            };
+            return true;
+        }
+
+        private static string ResolveModelName(TimelineClip clipRange)
+        {
+            KimodoPlayableClip playableClip = clipRange != null ? clipRange.asset as KimodoPlayableClip : null;
+            return playableClip != null && !string.IsNullOrWhiteSpace(playableClip.bridgeModelName)
+                ? playableClip.bridgeModelName.Trim()
+                : DefaultBridgeModelName;
         }
 
         public static void MoveMarkerToTime(IMarker marker, double globalTime)
@@ -1067,14 +1097,6 @@ namespace KimodoBridge.Editor
                     KimodoConstraintOverrideEditWindow.ShowWindow(marker);
                 }
             }
-        }
-
-        private static string ResolveModelName(TimelineClip clipRange)
-        {
-            KimodoPlayableClip playableClip = clipRange != null ? clipRange.asset as KimodoPlayableClip : null;
-            return playableClip != null && !string.IsNullOrWhiteSpace(playableClip.bridgeModelName)
-                ? playableClip.bridgeModelName.Trim()
-                : "Kimodo-SOMA-RP-v1";
         }
 
         private static void ClearMarkerEditorCaches(KimodoConstraintMarkerBase marker)

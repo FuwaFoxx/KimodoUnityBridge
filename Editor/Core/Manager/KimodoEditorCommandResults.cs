@@ -32,5 +32,6 @@ namespace KimodoBridge.Editor
         public int Seed;
         public string MotionJsonCompact;
         public AnimationClip GeneratedClip;
+        public AnimationClip RawBoneClip;
     }
 }
