@@ -17,6 +17,7 @@ namespace KimodoBridge.Editor
         public Avatar OriginRetargetAvatar;
         public Avatar TargetRetargetAvatar;
         public bool ExportMuscleClip;
+        public KimodoCurveFilterOptions CurveFilterOptions;
         public Func<AnimationClip, bool> CanSkipRetarget;
         public string ModelsRoot = string.Empty;
         public string ComfyHost = "127.0.0.1";

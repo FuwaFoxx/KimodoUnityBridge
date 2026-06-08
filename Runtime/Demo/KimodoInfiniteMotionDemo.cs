@@ -28,12 +28,12 @@ namespace KimodoBridge
 
         [Header("Generation")]
         [SerializeField] private string defaultPrompt = "A person dancing with energetic rhythm.";
-        [SerializeField] [Min(1)] private int generationFrames = 150;
-        [SerializeField] [Min(1)] private int diffusionSteps = 100;
+        [SerializeField][Min(1)] private int generationFrames = 150;
+        [SerializeField][Min(1)] private int diffusionSteps = 100;
         [SerializeField] private bool randomSeed = true;
         [SerializeField] private int fixedSeed = 42;
-        [SerializeField] [Min(0.1f)] private float requestLeadSeconds = 1.5f;
-        [SerializeField] [Min(0.1f)] private float segmentIntervalSeconds = 5f;
+        [SerializeField][Min(0.1f)] private float requestLeadSeconds = 1.5f;
+        [SerializeField][Min(0.1f)] private float segmentIntervalSeconds = 5f;
         [SerializeField] private bool loopHint = true;
 
         [Header("Debug")]

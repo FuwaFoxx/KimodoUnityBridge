@@ -1,13 +1,11 @@
 #if UNITY_EDITOR
-using KimodoBridge;
 using Newtonsoft.Json.Linq;
 using System;
 using System.Collections.Generic;
+using TimelineInject;
 using UnityEditor;
 using UnityEditor.Animations;
 using UnityEngine;
-using UnityEngine.Timeline;
-using TimelineInject;
 
 namespace KimodoBridge.Editor
 {
@@ -89,6 +87,7 @@ namespace KimodoBridge.Editor
                 legacy = false,
                 frameRate = fps
             };
+
             BakeMotionCurvesDirect(rawClip, data, fps, frameCount);
             KimodoEditorClipUtility.CopyClipData(rawClip, targetClip, forceNoLoopKeepY: true);
             UnityEngine.Object.DestroyImmediate(rawClip);
@@ -303,6 +302,83 @@ namespace KimodoBridge.Editor
                 return TryBuildMarkerSampleResultFromBoneSample(
                     targetSample,
                     targetCache,
+                    modelName,
+                    markerType,
+                    sampleTime,
+                    out sample,
+                    out error);
+            }
+            finally
+            {
+                targetCache?.Dispose();
+            }
+        }
+
+        internal static bool TrySampleMarkerForClip(
+            AnimationClip sourceClip,
+            string markerType,
+            double sampleTime,
+            Avatar sourceAvatar,
+            Avatar explicitTargetAvatar,
+            Animator fallbackAnimator,
+            string modelName,
+            bool forceRefresh,
+            out KimodoMarkerSampleResult sample,
+            out string error)
+        {
+            sample = null;
+            error = string.Empty;
+
+            if (sourceClip == null)
+            {
+                error = "Source clip is null.";
+                return false;
+            }
+
+            if (!KimodoRetargetCoreUtility.IsValidHumanoid(sourceAvatar))
+            {
+                error = "Source avatar is null/invalid/non-humanoid.";
+                return false;
+            }
+
+            if (!TryResolveEditorTargetAvatar(explicitTargetAvatar, fallbackAnimator, modelName, out Avatar targetAvatar, out error))
+            {
+                return false;
+            }
+
+            if (!TryGetOrCreateEditorBoneClip(
+                    sourceClip,
+                    sourceAvatar,
+                    targetAvatar,
+                    forceRefresh,
+                    out AnimationClip targetClip,
+                    out _,
+                    out error))
+            {
+                return false;
+            }
+
+            SkeletonCache targetCache = null;
+            try
+            {
+                if (!KimodoRetargetAvatarUtility.TryBuildSkeletonCache(targetAvatar, "KimodoMarkerEditorBoneCacheSample", out targetCache, out error))
+                {
+                    return false;
+                }
+
+                if (!KimodoRetargetSamplingUtility.SampleBoneClipToBoneSample(
+                        targetClip,
+                        targetCache,
+                        (float)Math.Max(0.0, sampleTime),
+                        out BoneSample targetSample,
+                        out error))
+                {
+                    return false;
+                }
+
+
+                return TryBuildMarkerSampleResultFromBoneSampleDirect(
+                    targetSample,
                     modelName,
                     markerType,
                     sampleTime,
@@ -539,6 +615,151 @@ namespace KimodoBridge.Editor
                 out error);
         }
 
+        private static bool TryBuildMarkerSampleResultFromBoneSampleDirect(
+            BoneSample sample,
+            string modelName,
+            string markerType,
+            double sampleTime,
+            out KimodoMarkerSampleResult result,
+            out string error)
+        {
+            result = null;
+            error = string.Empty;
+
+            if (sample == null || !sample.IsValid)
+            {
+                error = "Bone sample is invalid.";
+                return false;
+            }
+
+            KimodoRigProfileDatabase.ResolveProfile(modelName, out KimodoConstraintRigType rigType, out string[] jointNames, out int[] parentIndices);
+            if (jointNames == null || parentIndices == null || jointNames.Length == 0 || jointNames.Length != parentIndices.Length)
+            {
+                error = $"Profile joint layout not found for '{modelName}'.";
+                return false;
+            }
+
+            if (sample.boneNames == null || sample.localPositions == null || sample.localRotations == null)
+            {
+                error = "Bone sample payload is incomplete.";
+                return false;
+            }
+
+            var boneIndexByName = new Dictionary<string, int>(sample.boneNames.Length, StringComparer.OrdinalIgnoreCase);
+            for (int i = 0; i < sample.boneNames.Length; i++)
+            {
+                string bonePath = sample.boneNames[i];
+                string boneName = ExtractBoneNameFromPath(bonePath);
+                if (string.IsNullOrWhiteSpace(boneName))
+                {
+                    continue;
+                }
+
+                if (boneIndexByName.ContainsKey(boneName))
+                {
+                    error = $"Duplicate sampled bone name '{boneName}' was found while building marker sample result.";
+                    return false;
+                }
+
+                boneIndexByName.Add(boneName, i);
+            }
+
+            if (!boneIndexByName.TryGetValue(jointNames[0], out int rootIndex))
+            {
+                error = $"Profile root joint '{jointNames[0]}' was not found in sampled bone data.";
+                return false;
+            }
+
+            int sampleRootIndex = 0;
+            if (sample.localPositions.Length <= sampleRootIndex || sample.localRotations.Length <= sampleRootIndex)
+            {
+                error = "Bone sample root transform is missing.";
+                return false;
+            }
+
+            int jointCount = jointNames.Length;
+            var worldRotations = new Quaternion[jointCount];
+            var worldPositions = new Vector3[jointCount];
+            var localAxisAngles = new List<Vector3>(jointCount);
+            var sampledJointIndices = new List<int>(jointCount);
+
+            Quaternion profileRootWorldRotation =
+                sample.localRotations[sampleRootIndex] *
+                sample.localRotations[rootIndex];
+            Vector3 profileRootWorldPosition =
+                sample.localPositions[sampleRootIndex] +
+                sample.localRotations[sampleRootIndex] * sample.localPositions[rootIndex];
+
+            Vector3 rootPosition = profileRootWorldPosition;
+            Vector3 forward = profileRootWorldRotation * Vector3.forward;
+            Vector2 rootHeading = new Vector2(forward.x, forward.z);
+            if (rootHeading.sqrMagnitude <= 1e-8f)
+            {
+                rootHeading = Vector2.right;
+            }
+            else
+            {
+                rootHeading.Normalize();
+            }
+
+            for (int i = 0; i < jointCount; i++)
+            {
+                string jointName = jointNames[i];
+                if (!boneIndexByName.TryGetValue(jointName, out int boneIndex))
+                {
+                    error = $"Profile joint '{jointName}' was not found in sampled bone data.";
+                    return false;
+                }
+
+                Quaternion localRotation = sample.localRotations[boneIndex];
+                Vector3 localPosition = sample.localPositions[boneIndex];
+                int parentIndex = parentIndices[i];
+                if (i == 0)
+                {
+                    worldRotations[i] = profileRootWorldRotation;
+                    worldPositions[i] = profileRootWorldPosition;
+                }
+                else
+                {
+                    worldRotations[i] = worldRotations[parentIndex] * localRotation;
+                    worldPositions[i] = worldPositions[parentIndex] + worldRotations[parentIndex] * localPosition;
+                }
+
+                Quaternion profileLocalRotation = parentIndex < 0
+                    ? worldRotations[i]
+                    : Quaternion.Inverse(worldRotations[parentIndex]) * worldRotations[i];
+                localAxisAngles.Add(KimodoRuntimeUtility.QuaternionToAxisAngleVector(profileLocalRotation));
+                sampledJointIndices.Add(i);
+            }
+
+            result = new KimodoMarkerSampleResult
+            {
+                constraintType = markerType ?? string.Empty,
+                sampleTime = sampleTime,
+                rigType = rigType,
+                hasRootHeading = true,
+                rootPosition = rootPosition,
+                rootHeading = rootHeading,
+                jointNames = new List<string>(jointNames),
+                localAxisAngles = localAxisAngles,
+                sampledJointIndices = sampledJointIndices
+            };
+            return true;
+        }
+
+        private static string ExtractBoneNameFromPath(string bonePath)
+        {
+            if (string.IsNullOrWhiteSpace(bonePath))
+            {
+                return string.Empty;
+            }
+
+            int separatorIndex = bonePath.LastIndexOf('/');
+            return separatorIndex >= 0 && separatorIndex + 1 < bonePath.Length
+                ? bonePath.Substring(separatorIndex + 1)
+                : bonePath;
+        }
+
         private static string NormalizeModelName(string modelName)
         {
             return string.IsNullOrWhiteSpace(modelName)
@@ -645,7 +866,7 @@ namespace KimodoBridge.Editor
 
                 HashSet<string> allowedPaths = BuildAllowedBindingPaths(sourceClip);
                 filteredClip = BuildFilteredRecordedClip(recordedClip, allowedPaths, targetClip.name, effectiveFps);
-                KimodoEditorClipUtility.CopyClipData(filteredClip, targetClip, forceNoLoopKeepY: true);
+                CopyFilteredClipUsingSourceBindings(sourceClip, filteredClip, targetClip, forceNoLoopKeepY: true);
 
                 if ((options ?? new KimodoCurveFilterOptions()).ensureQuaternionContinuity)
                 {
@@ -770,6 +991,68 @@ namespace KimodoBridge.Editor
             return output;
         }
 
+        private static void CopyFilteredClipUsingSourceBindings(
+            AnimationClip sourceClip,
+            AnimationClip filteredClip,
+            AnimationClip targetClip,
+            bool forceNoLoopKeepY)
+        {
+            if (sourceClip == null || filteredClip == null || targetClip == null)
+            {
+                return;
+            }
+
+            targetClip.ClearCurves();
+            targetClip.frameRate = filteredClip.frameRate > 0f
+                ? filteredClip.frameRate
+                : (sourceClip.frameRate > 0f ? sourceClip.frameRate : targetClip.frameRate);
+
+            if (forceNoLoopKeepY)
+            {
+                AnimationUtility.SetAnimationClipSettings(
+                    targetClip,
+                    new AnimationClipSettings
+                    {
+                        loopTime = false,
+                        keepOriginalPositionY = true
+                    });
+            }
+            else
+            {
+                AnimationUtility.SetAnimationClipSettings(targetClip, AnimationUtility.GetAnimationClipSettings(filteredClip));
+            }
+
+            EditorCurveBinding[] bindings = AnimationUtility.GetCurveBindings(sourceClip);
+            for (int i = 0; i < bindings.Length; i++)
+            {
+                EditorCurveBinding binding = bindings[i];
+                AnimationCurve curve = AnimationUtility.GetEditorCurve(filteredClip, binding) ??
+                    AnimationUtility.GetEditorCurve(sourceClip, binding);
+                if (curve != null)
+                {
+                    targetClip.SetCurve(binding.path, binding.type, binding.propertyName, curve);
+                }
+            }
+
+            EditorCurveBinding[] objectBindings = AnimationUtility.GetObjectReferenceCurveBindings(sourceClip);
+            for (int i = 0; i < objectBindings.Length; i++)
+            {
+                EditorCurveBinding binding = objectBindings[i];
+                ObjectReferenceKeyframe[] curve = AnimationUtility.GetObjectReferenceCurve(filteredClip, binding) ??
+                    AnimationUtility.GetObjectReferenceCurve(sourceClip, binding);
+                if (curve != null)
+                {
+                    AnimationUtility.SetObjectReferenceCurve(targetClip, binding, curve);
+                }
+            }
+
+            AnimationEvent[] events = AnimationUtility.GetAnimationEvents(sourceClip);
+            if (events != null)
+            {
+                AnimationUtility.SetAnimationEvents(targetClip, events);
+            }
+        }
+
         public static bool TryFilterClipInPlace(
             AnimationClip clip,
             Avatar samplerAvatar,
@@ -782,6 +1065,8 @@ namespace KimodoBridge.Editor
                 error = "Clip is null.";
                 return false;
             }
+
+            List<PreservedAnimatorCurve> preservedRootMotionCurves = CapturePreservedRootMotionAnimatorCurves(clip);
 
             var temp = new AnimationClip
             {
@@ -796,8 +1081,89 @@ namespace KimodoBridge.Editor
             }
 
             KimodoEditorClipUtility.CopyClipData(temp, clip, forceNoLoopKeepY: true);
+            RestorePreservedAnimatorCurves(clip, preservedRootMotionCurves);
             UnityEngine.Object.DestroyImmediate(temp);
             return true;
+        }
+
+        private static List<PreservedAnimatorCurve> CapturePreservedRootMotionAnimatorCurves(AnimationClip clip)
+        {
+            var preserved = new List<PreservedAnimatorCurve>();
+            if (clip == null)
+            {
+                return preserved;
+            }
+
+            EditorCurveBinding[] bindings = AnimationUtility.GetCurveBindings(clip);
+            for (int i = 0; i < bindings.Length; i++)
+            {
+                EditorCurveBinding binding = bindings[i];
+                if (binding.type != typeof(Animator) || !ShouldPreserveRootMotionAnimatorProperty(binding.propertyName))
+                {
+                    continue;
+                }
+
+                AnimationCurve curve = AnimationUtility.GetEditorCurve(clip, binding);
+                if (curve == null)
+                {
+                    continue;
+                }
+
+                preserved.Add(new PreservedAnimatorCurve
+                {
+                    path = binding.path,
+                    propertyName = binding.propertyName,
+                    curve = new AnimationCurve(curve.keys)
+                });
+            }
+
+            return preserved;
+        }
+
+        private static void RestorePreservedAnimatorCurves(
+            AnimationClip clip,
+            List<PreservedAnimatorCurve> preservedCurves)
+        {
+            if (clip == null || preservedCurves == null || preservedCurves.Count == 0)
+            {
+                return;
+            }
+
+            for (int i = 0; i < preservedCurves.Count; i++)
+            {
+                PreservedAnimatorCurve preserved = preservedCurves[i];
+                if (preserved == null || preserved.curve == null || string.IsNullOrWhiteSpace(preserved.propertyName))
+                {
+                    continue;
+                }
+
+                clip.SetCurve(
+                    preserved.path ?? string.Empty,
+                    typeof(Animator),
+                    preserved.propertyName,
+                    preserved.curve);
+            }
+        }
+
+        private static bool ShouldPreserveRootMotionAnimatorProperty(string propertyName)
+        {
+            if (string.IsNullOrWhiteSpace(propertyName))
+            {
+                return false;
+            }
+
+            return propertyName.StartsWith("MotionT.", StringComparison.Ordinal) ||
+                propertyName.StartsWith("MotionQ.", StringComparison.Ordinal) ||
+                propertyName.StartsWith("RootT.", StringComparison.Ordinal) ||
+                propertyName.StartsWith("RootQ.", StringComparison.Ordinal);
+        }
+
+        [Serializable]
+        private sealed class PreservedAnimatorCurve
+        {
+            public string path;
+            public string propertyName;
+            public AnimationCurve curve;
         }
 
         private static HashSet<string> BuildAllowedBindingPaths(AnimationClip sourceClip)

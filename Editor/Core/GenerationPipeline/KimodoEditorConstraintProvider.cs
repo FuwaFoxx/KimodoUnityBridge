@@ -4,7 +4,6 @@ using UnityEditor.Timeline;
 using UnityEngine;
 using UnityEngine.Playables;
 using UnityEngine.Timeline;
-using TimelineInject;
 
 namespace KimodoBridge.Editor
 {

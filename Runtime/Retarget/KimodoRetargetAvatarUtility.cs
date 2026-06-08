@@ -1,7 +1,7 @@
 using System;
 using System.Collections.Generic;
-using UnityEngine;
 using TimelineInject;
+using UnityEngine;
 
 namespace KimodoBridge
 {
@@ -225,122 +225,6 @@ namespace KimodoBridge
             return transforms;
         }
 
-        public static Dictionary<string, Transform> BuildPathMap(Transform current, Transform root, string rootBoneName)
-        {
-            var map = new Dictionary<string, Transform>(StringComparer.Ordinal);
-            if (current == null || root == null)
-            {
-                return map;
-            }
-
-            Transform[] all = current.GetComponentsInChildren<Transform>(true);
-            for (int i = 0; i < all.Length; i++)
-            {
-                Transform t = all[i];
-                string path = CalculateTransformPath(t, root, rootBoneName);
-                if (string.IsNullOrEmpty(path))
-                {
-                    continue;
-                }
-
-                if (!map.ContainsKey(path))
-                {
-                    map.Add(path, t);
-                }
-            }
-
-            return map;
-        }
-
-        public static BoneSample CaptureBoneSample(Transform root, string[] boneNames, string rootBoneName)
-        {
-            var boneMap = BuildPathMap(root, root, rootBoneName);
-            var frame = new BoneSample
-            {
-                boneNames = boneNames,
-                localPositions = new Vector3[boneNames.Length],
-                localRotations = new Quaternion[boneNames.Length]
-            };
-
-            for (int i = 0; i < boneNames.Length; i++)
-            {
-                string path = boneNames[i];
-                if (!boneMap.TryGetValue(path, out Transform t) || t == null)
-                {
-                    frame.localPositions[i] = Vector3.zero;
-                    frame.localRotations[i] = Quaternion.identity;
-                    continue;
-                }
-
-                frame.localPositions[i] = t.localPosition;
-                frame.localRotations[i] = t.localRotation;
-            }
-
-            return frame;
-        }
-
-        public static bool TryApplyBoneSample(
-            BoneSample sample,
-            Transform[] boneTransforms,
-            out string error)
-        {
-            error = string.Empty;
-
-            if (sample == null || sample.boneNames == null || sample.localPositions == null || sample.localRotations == null)
-            {
-                error = "Bone sample is invalid.";
-                return false;
-            }
-
-            if (boneTransforms == null || boneTransforms.Length != sample.boneNames.Length)
-            {
-                error = "Bone transform mapping does not match bone sample.";
-                return false;
-            }
-
-            for (int i = 0; i < boneTransforms.Length; i++)
-            {
-                Transform bone = boneTransforms[i];
-                if (bone == null)
-                {
-                    continue;
-                }
-
-                bone.localPosition = sample.localPositions[i];
-                bone.localRotation = sample.localRotations[i];
-            }
-
-            return true;
-        }
-
-        public static bool TryApplyBoneSample(
-            BoneSample sample,
-            Transform root,
-            string rootBoneName,
-            ref Transform[] boneTransforms,
-            out string error)
-        {
-            error = string.Empty;
-
-            if (root == null)
-            {
-                error = "Target root is null.";
-                return false;
-            }
-
-            if (sample == null || sample.boneNames == null)
-            {
-                error = "Bone sample is invalid.";
-                return false;
-            }
-
-            if (boneTransforms == null || boneTransforms.Length != sample.boneNames.Length)
-            {
-                boneTransforms = BuildBoneTransforms(root, sample.boneNames, rootBoneName);
-            }
-
-            return TryApplyBoneSample(sample, boneTransforms, out error);
-        }
 
         public static Transform FindByPath(Transform root, string path, string rootBoneName)
         {

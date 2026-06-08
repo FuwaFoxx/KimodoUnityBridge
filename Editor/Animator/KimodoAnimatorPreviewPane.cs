@@ -5,7 +5,6 @@ using TimelineInject;
 using UnityEditor;
 using UnityEditor.Animations;
 using UnityEngine;
-using UnityEngine.Timeline;
 
 namespace KimodoBridge.Editor
 {
@@ -390,7 +389,7 @@ namespace KimodoBridge.Editor
             double endConstraintTime = ResolveConstraintEndSampleTimeSeconds(generatedFrameCount);
 
             var samples = new List<KimodoMarkerSampleResult>(2);
-            if (!KimodoMarkerRetargetEditorFacade.TrySampleMarkerFromClip(
+            if (!KimodoRetargetToolsEditor.TrySampleMarkerForClip(
                     beginClip,
                     "fullbody",
                     ResolveClipSampleTime(beginClip, beginNormalizedTime),
@@ -404,7 +403,7 @@ namespace KimodoBridge.Editor
             {
                 return false;
             }
-            if (!KimodoMarkerRetargetEditorFacade.TrySampleMarkerFromClip(
+            if (!KimodoRetargetToolsEditor.TrySampleMarkerForClip(
                     endClip,
                     "fullbody",
                     ResolveClipSampleTime(endClip, endNormalizedTime),
@@ -781,7 +780,7 @@ namespace KimodoBridge.Editor
             previewMode = PreviewMode.Generated;
             avatarPreviewCore?.RestartFromZeroAndPlay();
         }
-        
+
 
         private bool TryPreparePreviewSource(
             AnimationClip sourceClip,

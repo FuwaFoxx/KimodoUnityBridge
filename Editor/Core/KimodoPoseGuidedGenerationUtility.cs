@@ -1,12 +1,10 @@
-using KimodoBridge;
 using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Threading;
 using System.Threading.Tasks;
-using UnityEngine;
-using UnityEngine.Timeline;
 using TimelineInject;
+using UnityEngine;
 
 namespace KimodoBridge.Editor
 {

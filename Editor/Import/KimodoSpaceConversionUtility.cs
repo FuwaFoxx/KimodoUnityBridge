@@ -1,7 +1,6 @@
 using System.Collections.Generic;
-using UnityEngine;
-using UnityEngine.Timeline;
 using TimelineInject;
+using UnityEngine;
 
 namespace KimodoBridge.Editor
 {

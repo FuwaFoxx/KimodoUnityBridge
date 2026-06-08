@@ -1,4 +1,3 @@
-using UnityEngine.Timeline;
 using TimelineInject;
 
 namespace KimodoBridge

@@ -1,5 +1,3 @@
-using KimodoBridge;
-using KimodoBridge.Editor;
 using NUnit.Framework;
 using System;
 using System.IO;

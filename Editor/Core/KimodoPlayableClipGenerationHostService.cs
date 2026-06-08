@@ -63,6 +63,7 @@ namespace KimodoBridge.Editor
                 OriginRetargetAvatar = originRetargetAvatar,
                 TargetRetargetAvatar = targetRetargetAvatar,
                 ExportMuscleClip = exportMuscleClip,
+                CurveFilterOptions = clip.curveFilterOptions,
                 CanSkipRetarget = generatedClip =>
                     bindingObject != null &&
                     KimodoEditorClipUtility.CanApplyClipDirectlyToProfileSkeleton(generatedClip, bindingObject, resolvedModelName, out _),

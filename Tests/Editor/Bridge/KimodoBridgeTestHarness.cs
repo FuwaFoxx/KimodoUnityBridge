@@ -1,5 +1,3 @@
-using KimodoBridge;
-using KimodoBridge.Editor;
 using Newtonsoft.Json.Linq;
 using NUnit.Framework;
 using System;

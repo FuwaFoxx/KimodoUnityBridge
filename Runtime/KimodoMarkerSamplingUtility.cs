@@ -1,8 +1,8 @@
 using System;
 using System.Collections.Generic;
+using TimelineInject;
 using UnityEngine;
 using UnityEngine.Timeline;
-using TimelineInject;
 
 namespace KimodoBridge
 {

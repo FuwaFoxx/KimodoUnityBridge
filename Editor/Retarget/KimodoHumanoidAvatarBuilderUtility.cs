@@ -1,7 +1,7 @@
 using System;
+using TimelineInject;
 using UnityEditor;
 using UnityEngine;
-using TimelineInject;
 
 namespace KimodoBridge.Editor
 {

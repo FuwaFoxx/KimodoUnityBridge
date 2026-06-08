@@ -7,6 +7,8 @@ namespace KimodoBridge.Editor
 {
     internal sealed class KimodoAnimatorApplyService
     {
+        private static readonly Vector3 InsertedStateOffset = new Vector3(0f, 80f, 0f);
+
         internal sealed class TransitionApplyContext
         {
             public AnimatorController Controller;
@@ -171,7 +173,7 @@ namespace KimodoBridge.Editor
                 AnimatorStateTransition original = context.OriginalTransition;
 
                 string newStateName = EnsureUniqueStateName(sm, context.NewStateName);
-                AnimatorState newState = sm.AddState(newStateName);
+                AnimatorState newState = sm.AddState(newStateName, ResolveInsertedStatePosition(sm, from));
                 newState.motion = context.GeneratedClip;
 
                 bool hasExitTime = original.hasExitTime;
@@ -228,6 +230,52 @@ namespace KimodoBridge.Editor
                 AnimatorCondition c = conditions[i];
                 dst.AddCondition(c.mode, c.threshold, c.parameter);
             }
+        }
+
+        private static Vector3 ResolveInsertedStatePosition(AnimatorStateMachine stateMachine, AnimatorState fromState)
+        {
+            if (stateMachine == null)
+            {
+                return InsertedStateOffset;
+            }
+
+            ChildAnimatorState[] states = stateMachine.states;
+            Vector3 basePosition = ResolveStatePosition(states, fromState);
+            Vector3 candidate = basePosition + InsertedStateOffset;
+            for (int i = 0; i < states.Length; i++)
+            {
+                AnimatorState state = states[i].state;
+                if (state == null || ReferenceEquals(state, fromState))
+                {
+                    continue;
+                }
+
+                if (Vector3.Distance(states[i].position, candidate) < 1f)
+                {
+                    candidate += InsertedStateOffset;
+                    i = -1;
+                }
+            }
+
+            return candidate;
+        }
+
+        private static Vector3 ResolveStatePosition(ChildAnimatorState[] states, AnimatorState targetState)
+        {
+            if (states == null || targetState == null)
+            {
+                return Vector3.zero;
+            }
+
+            for (int i = 0; i < states.Length; i++)
+            {
+                if (ReferenceEquals(states[i].state, targetState))
+                {
+                    return states[i].position;
+                }
+            }
+
+            return Vector3.zero;
         }
 
         private static string EnsureUniqueStateName(AnimatorStateMachine sm, string preferred)

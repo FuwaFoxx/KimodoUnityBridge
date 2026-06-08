@@ -1,11 +1,10 @@
-using KimodoBridge;
 using System;
 using System.Collections.Generic;
+using TimelineInject;
 using UnityEditor.Timeline;
 using UnityEngine;
 using UnityEngine.Playables;
 using UnityEngine.Timeline;
-using TimelineInject;
 
 namespace KimodoBridge.Editor
 {
@@ -157,7 +156,7 @@ namespace KimodoBridge.Editor
                 return false;
             }
 
-            if (!KimodoMarkerRetargetEditorFacade.TrySampleMarkerFromClip(
+            if (!KimodoRetargetToolsEditor.TrySampleMarkerForClip(
                     resolvedClip,
                     markerType,
                     timelineTime,

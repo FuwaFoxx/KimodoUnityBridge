@@ -1,4 +1,3 @@
-using KimodoBridge;
 using System;
 using System.IO;
 using System.Threading.Tasks;
@@ -55,6 +54,7 @@ namespace KimodoBridge.Editor
 
             if (request.CanSkipRetarget != null && request.CanSkipRetarget(request.TargetClip))
             {
+                TryFilterGeneratedBoneClip(request.TargetClip, request.TargetRetargetAvatar, request.CurveFilterOptions);
                 KimodoEditorClipWritebackService.FlushWritebackAssets();
                 request.Progress?.Invoke(KimodoGeneratePipelineStage.Retarget, "Skipping retarget: binding hierarchy already matches clip bindings.");
                 return Complete(request, prompt, motionJson, request.TargetClip, rawBoneClip);
@@ -106,6 +106,8 @@ namespace KimodoBridge.Editor
                 EditorUtility.SetDirty(retargetClip);
             }
 
+            TryFilterGeneratedBoneClip(request.TargetClip, request.TargetRetargetAvatar, request.CurveFilterOptions);
+
             KimodoEditorClipWritebackService.FlushWritebackAssets();
 
             return Complete(request, prompt, motionJson, request.TargetClip, rawBoneClip);
@@ -147,6 +149,31 @@ namespace KimodoBridge.Editor
             EditorUtility.SetDirty(rawBoneClip);
             Debug.Log($"[Kimodo][Generate] Wrote raw Kimodo bone clip: '{AssetDatabase.GetAssetPath(rawBoneClip)}'.");
             return rawBoneClip;
+        }
+
+        private static void TryFilterGeneratedBoneClip(
+            AnimationClip clip,
+            Avatar samplerAvatar,
+            KimodoCurveFilterOptions options)
+        {
+            if (clip == null || options == null || !options.enabled)
+            {
+                return;
+            }
+
+            if (!KimodoRetargetCoreUtility.IsValidHumanoid(samplerAvatar))
+            {
+                return;
+            }
+
+            if (!KimodoRetargetToolsEditor.TryFilterClipInPlace(clip, samplerAvatar, options, out string filterError))
+            {
+                throw new InvalidOperationException(string.IsNullOrWhiteSpace(filterError)
+                    ? "Curve filter failed."
+                    : filterError);
+            }
+
+            EditorUtility.SetDirty(clip);
         }
 
         private static async Task<string> GenerateMotionJsonAsync(KimodoEditorGenerateRequest request, string prompt, string modelName)

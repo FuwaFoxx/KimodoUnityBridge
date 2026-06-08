@@ -1,13 +1,11 @@
-using KimodoBridge;
-using KimodoBridge.Editor;
 using System;
 using System.Runtime.ExceptionServices;
 using System.Threading;
 using System.Threading.Tasks;
+using TimelineInject;
 using UnityEditor;
 using UnityEditor.Animations;
 using UnityEngine;
-using TimelineInject;
 
 namespace KimodoBridge.Editor
 {
@@ -471,6 +469,7 @@ namespace KimodoBridge.Editor
                 OriginRetargetAvatar = originRetargetAvatar,
                 TargetRetargetAvatar = explicitRetargetAvatar,
                 ExportMuscleClip = true,
+                CurveFilterOptions = null,
                 CanSkipRetarget = generatedClip =>
                     previewPane != null &&
                     previewPane.PreviewAvatarRoot != null &&

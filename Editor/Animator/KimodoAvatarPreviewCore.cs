@@ -175,15 +175,11 @@ namespace KimodoBridge.Editor
             {
                 avatarPreview.timeControl.currentTime = windowStartTime;
                 avatarPreview.timeControl.playing = false;
-                if (!string.IsNullOrEmpty(activeStateName))
+                if (!ApplyAbsolutePreviewTime(renderAnimator, avatarPreview.timeControl.currentTime))
                 {
-                    AnimationClipSettings settings = AnimationUtility.GetAnimationClipSettings(activeClip);
-                    float denom = Mathf.Max(0.0001f, settings.stopTime - settings.startTime);
-                    float normalized = (avatarPreview.timeControl.currentTime - settings.startTime) / denom;
-                    normalized = Mathf.Clamp01(normalized);
-                    renderAnimator.Play(activeStateName, 0, normalized);
-                    renderAnimator.Update(0f);
+                    return false;
                 }
+
                 lastAppliedTime = avatarPreview.timeControl.currentTime;
                 restartRequested = false;
                 needsRepaint = true;
@@ -203,27 +199,24 @@ namespace KimodoBridge.Editor
                 return needsRepaint || hasPendingManual || isScrubbing;
             }
 
-            if (transitionModeActive)
+            bool canAdvanceIncrementally =
+                avatarPreview.timeControl.playing &&
+                !isScrubbing &&
+                !hasPendingManual &&
+                !wrapped &&
+                !float.IsNaN(lastAppliedTime) &&
+                currentTime >= lastAppliedTime;
+
+            if (canAdvanceIncrementally)
             {
-                if (wrapped)
-                {
-                    AnimationClipSettings settings = AnimationUtility.GetAnimationClipSettings(activeClip);
-                    float denom = Mathf.Max(0.0001f, settings.stopTime - settings.startTime);
-                    float normalizedStart = (windowStartTime - settings.startTime) / denom;
-                    normalizedStart = Mathf.Clamp01(normalizedStart);
-                    renderAnimator.Play(activeStateName, 0, normalizedStart);
-                    renderAnimator.Update(0f);
-                }
                 renderAnimator.Update(avatarPreview.timeControl.playing ? avatarPreview.timeControl.deltaTime : 0f);
             }
             else
             {
-                AnimationClipSettings settings = AnimationUtility.GetAnimationClipSettings(activeClip);
-                float denom = Mathf.Max(0.0001f, settings.stopTime - settings.startTime);
-                float normalized = (currentTime - settings.startTime) / denom;
-                normalized = Mathf.Clamp01(normalized);
-                renderAnimator.Play(activeStateName, 0, normalized);
-                renderAnimator.Update(avatarPreview.timeControl.playing ? avatarPreview.timeControl.deltaTime : 0f);
+                if (!ApplyAbsolutePreviewTime(renderAnimator, currentTime))
+                {
+                    return false;
+                }
             }
 
             lastAppliedTime = currentTime;
@@ -315,6 +308,35 @@ namespace KimodoBridge.Editor
             avatarPreview.timeControl.stopTime = windowStopTime;
             avatarPreview.timeControl.currentTime = windowStartTime;
             avatarPreview.timeControl.loop = true;
+        }
+
+        private bool ApplyAbsolutePreviewTime(Animator animator, float absoluteTime)
+        {
+            if (animator == null || string.IsNullOrEmpty(activeStateName) || activeClip == null)
+            {
+                return false;
+            }
+
+            float startNormalized = ComputeClipNormalizedTime(windowStartTime);
+            float elapsed = Mathf.Max(0f, absoluteTime - windowStartTime);
+
+            animator.Rebind();
+            animator.Update(0f);
+            animator.Play(activeStateName, 0, startNormalized);
+            animator.Update(0f);
+            if (elapsed > 0f)
+            {
+                animator.Update(elapsed);
+            }
+
+            return true;
+        }
+
+        private float ComputeClipNormalizedTime(float absoluteTime)
+        {
+            AnimationClipSettings settings = AnimationUtility.GetAnimationClipSettings(activeClip);
+            float denom = Mathf.Max(0.0001f, settings.stopTime - settings.startTime);
+            return Mathf.Clamp01((absoluteTime - settings.startTime) / denom);
         }
 
         private bool EnsurePreviewController()

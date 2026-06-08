@@ -1,14 +1,12 @@
-using KimodoBridge;
-using KimodoBridge.Editor;
 using System;
 using System.Collections.Generic;
 using System.Globalization;
+using TimelineInject;
 using UnityEditor;
 using UnityEditor.Timeline;
 using UnityEngine;
 using UnityEngine.Playables;
 using UnityEngine.Timeline;
-using TimelineInject;
 
 namespace KimodoBridge.Editor
 {
@@ -511,7 +509,7 @@ namespace KimodoBridge.Editor
             double sampleTime = marker.time;
             double localSampleTime = KimodoMarkerSamplingUtility.ClampLocalSampleTime(context.ClipRange, sampleTime);
 
-            if (!KimodoMarkerRetargetEditorFacade.TrySampleMarkerFromClip(
+            if (!KimodoRetargetToolsEditor.TrySampleMarkerForClip(
                     context.SourceClip,
                     marker.ConstraintType,
                     localSampleTime,

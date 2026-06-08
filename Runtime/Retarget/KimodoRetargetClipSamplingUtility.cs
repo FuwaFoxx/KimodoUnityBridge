@@ -21,6 +21,8 @@ namespace KimodoBridge
             public AnimationClipPlayable clipPlayable;
             public bool restoreAnimatorAvatar;
             public Avatar originalAnimatorAvatar;
+            public float evaluatedTime;
+            public bool hasEvaluatedTime;
 
             public bool IsReady =>
                 cache != null &&
@@ -164,7 +166,9 @@ namespace KimodoBridge
                     graph = graph,
                     clipPlayable = clipPlayable,
                     restoreAnimatorAvatar = restoreAnimatorAvatar,
-                    originalAnimatorAvatar = originalAnimatorAvatar
+                    originalAnimatorAvatar = originalAnimatorAvatar,
+                    evaluatedTime = 0f,
+                    hasEvaluatedTime = false
                 };
                 return true;
             }
@@ -203,6 +207,44 @@ namespace KimodoBridge
             }
         }
 
+        internal static void PrepareClipSamplingContext(ClipSamplingContext context)
+        {
+            if (context == null)
+            {
+                return;
+            }
+
+            ResetSkeletonCachePose(context.cache);
+            context.evaluatedTime = 0f;
+            context.hasEvaluatedTime = false;
+        }
+
+        internal static bool TryBuildPreparedClipSamplingContext(
+            AnimationClip clip,
+            SkeletonCache cache,
+            string rootName,
+            ClipSamplingMode samplingMode,
+            out ClipSamplingContext context,
+            out string error)
+        {
+            context = null;
+            error = string.Empty;
+
+            if (!TryBuildClipSamplingContext(
+                    clip,
+                    cache,
+                    rootName,
+                    samplingMode,
+                    out context,
+                    out error))
+            {
+                return false;
+            }
+
+            PrepareClipSamplingContext(context);
+            return true;
+        }
+
         internal static bool TryEvaluateClipSamplingContext(ClipSamplingContext context, float sampleTime, out string error)
         {
             error = string.Empty;
@@ -215,8 +257,20 @@ namespace KimodoBridge
 
             try
             {
-                context.clipPlayable.SetTime(Mathf.Max(0f, sampleTime));
-                context.graph.Evaluate(0f);
+                float targetTime = Mathf.Max(0f, sampleTime);
+                if (context.hasEvaluatedTime && targetTime < context.evaluatedTime)
+                {
+                    error = $"Clip sampling context does not support backward evaluation: previous={context.evaluatedTime:F6}, target={targetTime:F6}. Rebuild the context before sampling an earlier time.";
+                    return false;
+                }
+
+                float deltaTime = context.hasEvaluatedTime
+                    ? targetTime - context.evaluatedTime
+                    : targetTime;
+
+                context.graph.Evaluate(deltaTime);
+                context.evaluatedTime = targetTime;
+                context.hasEvaluatedTime = true;
                 return true;
             }
             catch (Exception ex)
@@ -485,7 +539,7 @@ namespace KimodoBridge
                 return false;
             }
 
-            if (!KimodoRetargetClipSamplingUtility.TryBuildClipSamplingContext(
+            if (!KimodoRetargetClipSamplingUtility.TryBuildPreparedClipSamplingContext(
                     sourceHumanoidClip,
                     targetCache,
                     "KimodoRetargetTools_TargetHumanoidSample",
@@ -498,7 +552,6 @@ namespace KimodoBridge
 
             try
             {
-                KimodoRetargetClipSamplingUtility.ResetSkeletonCachePose(context.cache);
                 if (!TrySampleBoneClipToBoneSampleInternal(context, sampleTime, out targetSample, out error))
                 {
                     return false;
@@ -668,7 +721,7 @@ namespace KimodoBridge
             sample = default;
             error = string.Empty;
 
-            if (!KimodoRetargetClipSamplingUtility.TryBuildClipSamplingContext(
+            if (!KimodoRetargetClipSamplingUtility.TryBuildPreparedClipSamplingContext(
                     clip,
                     cache,
                     rootName,
@@ -681,7 +734,6 @@ namespace KimodoBridge
 
             try
             {
-                KimodoRetargetClipSamplingUtility.ResetSkeletonCachePose(context.cache);
                 return sampleCallback(context, sampleTime, out sample, out error);
             }
             finally
@@ -705,7 +757,7 @@ namespace KimodoBridge
             samples = null;
             error = string.Empty;
 
-            if (!KimodoRetargetClipSamplingUtility.TryBuildClipSamplingContext(
+            if (!KimodoRetargetClipSamplingUtility.TryBuildPreparedClipSamplingContext(
                     clip,
                     cache,
                     rootName,
@@ -718,7 +770,6 @@ namespace KimodoBridge
 
             try
             {
-                KimodoRetargetClipSamplingUtility.ResetSkeletonCachePose(context.cache);
                 samples = new TSample[frameCount];
                 for (int frame = 0; frame < frameCount; frame++)
                 {
