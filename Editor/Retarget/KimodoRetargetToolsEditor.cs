@@ -124,6 +124,7 @@ namespace KimodoBridge.Editor
                     KimodoEditorClipUtility.CopyClipData(muscleClip, targetClip, forceNoLoopKeepY: true);
                 }
 
+                KimodoEditorClipUtility.ApplyMuscleClipSettings(targetClip);
                 targetClip.legacy = false;
                 targetClip.frameRate = muscleFrameRate > 0f
                     ? muscleFrameRate
@@ -404,6 +405,7 @@ namespace KimodoBridge.Editor
                     return false;
                 }
 
+                KimodoEditorClipUtility.ApplyMuscleClipSettings(writableClip);
                 if (!KimodoRetargetCoreUtility.WriteMuscleSampleToMuscleClip(samples, writableClip, out error))
                 {
                     return false;

@@ -370,7 +370,7 @@ namespace KimodoBridge
                 HumanPose bindPose = cache.bindHumanPose;
                 cache.rootBodyCorrectionRotation = Quaternion.identity;
                 cache.rootBodyCorrectionPosition = bindPose.bodyPosition - firstPose.bodyPosition;
-                cache.hasRootBodyCorrection = true;
+                cache.hasRootBodyCorrection = false;
             }
             catch
             {

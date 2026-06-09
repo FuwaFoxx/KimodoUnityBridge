@@ -64,7 +64,6 @@ namespace KimodoBridge
             }
 
             int humanId = (int)bone;
-            float humanScaleLimit = Mathf.Max(1e-6f, humanScale);
             Quaternion postRotation = AvatarRuntimeAccess.GetAvatarPostRotationOrIdentity(cache.avatar, humanId);
             Quaternion worldGoalRotation = transform.rotation * postRotation;
             Vector3 worldGoalPosition = transform.position;
@@ -81,9 +80,9 @@ namespace KimodoBridge
             }
 
             Quaternion inverseBodyRotation = Quaternion.Inverse(bodyRotation);
-            goalPosition = inverseBodyRotation * (worldGoalPosition - bodyPosition);
+            goalPosition = inverseBodyRotation * (worldGoalPosition - bodyPosition*humanScale);
             goalRotation = inverseBodyRotation * worldGoalRotation;
-            goalPosition /= humanScaleLimit;
+            goalPosition= goalPosition / humanScale;
             return true;
         }
 

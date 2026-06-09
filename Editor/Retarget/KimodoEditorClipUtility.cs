@@ -6,6 +6,21 @@ namespace KimodoBridge.Editor
 {
     internal static class KimodoEditorClipUtility
     {
+        internal static void ApplyMuscleClipSettings(AnimationClip clip)
+        {
+            if (clip == null)
+            {
+                return;
+            }
+
+            AnimationClipSettings settings = AnimationUtility.GetAnimationClipSettings(clip);
+            settings.loopTime = false;
+            settings.keepOriginalOrientation = true;
+            settings.keepOriginalPositionY = true;
+            settings.keepOriginalPositionXZ = true;
+            AnimationUtility.SetAnimationClipSettings(clip, settings);
+        }
+
         public static bool CanApplyClipDirectlyToProfileSkeleton(
             AnimationClip clip,
             GameObject bindingObject,
