@@ -209,6 +209,18 @@ namespace KimodoBridge
                 joints = ResolveJointTransforms(jointNames, root, animator);
             }
 
+            if (jointNames == null || parentIndices == null || joints == null)
+            {
+                error = "Profile skeleton data is incomplete.";
+                return false;
+            }
+
+            if (jointNames.Length != parentIndices.Length || jointNames.Length != joints.Length)
+            {
+                error = $"Profile skeleton data length mismatch: names={jointNames.Length}, parents={parentIndices.Length}, joints={joints.Length}.";
+                return false;
+            }
+
             string rootJointName = jointNames != null && jointNames.Length > 0 ? jointNames[0] : "Hips";
             Transform pelvis = joints != null && joints.Length > 0 && joints[0] != null
                 ? joints[0]
@@ -251,26 +263,9 @@ namespace KimodoBridge
                     continue;
                 }
 
-                string jointName = jointNames != null && i < jointNames.Length ? jointNames[i] : string.Empty;
-                string normalized = string.IsNullOrWhiteSpace(jointName) ? string.Empty : jointName.Trim().ToLowerInvariant();
-                bool useWorldRotation = normalized == "hips"
-                    || normalized == "pelvis"
-                    || normalized == "left_hip"
-                    || normalized == "right_hip"
-                    || normalized == "left_hip_pitch_skel"
-                    || normalized == "right_hip_pitch_skel";
-
-                Quaternion local;
-                if (useWorldRotation)
-                {
-                    local = worldRots[i];
-                }
-                else
-                {
-                    local = parent >= 0 && parent < worldRots.Length
-                        ? Quaternion.Inverse(worldRots[parent]) * worldRots[i]
-                        : worldRots[i];
-                }
+                Quaternion local = parent >= 0 && parent < worldRots.Length
+                    ? Quaternion.Inverse(worldRots[parent]) * worldRots[i]
+                    : worldRots[i];
                 unityLocalAxisAngles.Add(KimodoRuntimeUtility.QuaternionToAxisAngleVector(local));
                 sampledJointIndices.Add(i);
             }

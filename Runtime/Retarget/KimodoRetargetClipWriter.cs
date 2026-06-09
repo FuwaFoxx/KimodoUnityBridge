@@ -60,7 +60,7 @@ namespace KimodoBridge
                     continue;
                 }
 
-                float time = (frame - 1f) / frameRate;
+                float time = frame / frameRate;
                 HumanPose pose = sample.pose;
                 EnsureHumanPoseMuscles(ref pose);
 
@@ -164,7 +164,7 @@ namespace KimodoBridge
                             continue;
                         }
 
-                        float time = (frame - 1f) / frameRate;
+                        float time = frame / frameRate;
                         Vector3 rootPosition = sample.localPositions[0];
                         Quaternion rootRotation = sample.localRotations[0];
                         rootTx.AddKey(time, rootPosition.x);
@@ -195,7 +195,7 @@ namespace KimodoBridge
                         continue;
                     }
 
-                    float time = (frame - 1f) / frameRate;
+                    float time = frame / frameRate;
                     Vector3 localPosition = sample.localPositions[i];
                     Quaternion localRotation = sample.localRotations[i];
                     posX.AddKey(time, localPosition.x);

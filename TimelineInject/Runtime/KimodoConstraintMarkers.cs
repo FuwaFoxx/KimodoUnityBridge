@@ -31,7 +31,7 @@ namespace TimelineInject
 
     public enum KimodoConstraintRigType
     {
-        Soma30 = 0,
+        Soma77 = 0,
         G1 = 1,
         Smplx = 2,
         Unknown = 3
@@ -42,7 +42,7 @@ namespace TimelineInject
     {
         public string constraintType = string.Empty;
         public double sampleTime;
-        public KimodoConstraintRigType rigType = KimodoConstraintRigType.Soma30;
+        public KimodoConstraintRigType rigType = KimodoConstraintRigType.Soma77;
         public bool hasRootHeading = true;
         public Vector3 rootPosition;
         public Vector2 rootHeading = Vector2.right;

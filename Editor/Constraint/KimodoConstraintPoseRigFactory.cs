@@ -238,7 +238,7 @@ namespace KimodoBridge.Editor
                     return left
                         ? new[] { "left_foot", "left_ankle" }
                         : new[] { "right_foot", "right_ankle" };
-                case KimodoConstraintRigType.Soma30:
+                case KimodoConstraintRigType.Soma77:
                 default:
                     return left
                         ? new[] { "LeftFoot", "LeftToeBase", "LeftShin" }
@@ -275,9 +275,9 @@ namespace KimodoBridge.Editor
                 case KimodoConstraintRigType.G1:
                     fileName = "G1.fbx";
                     break;
-                case KimodoConstraintRigType.Soma30:
+                case KimodoConstraintRigType.Soma77:
                 default:
-                    fileName = "SOMA30.fbx";
+                    fileName = "SOMA77.fbx";
                     break;
             }
 

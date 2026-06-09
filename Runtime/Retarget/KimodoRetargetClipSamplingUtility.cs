@@ -74,6 +74,23 @@ namespace KimodoBridge
                 cache.bindLocalPositions[i] = bone.localPosition;
                 cache.bindLocalRotations[i] = bone.localRotation;
             }
+
+            if (cache.poseHandler != null)
+            {
+                try
+                {
+                    var bindPose = new HumanPose();
+                    cache.poseHandler.GetHumanPose(ref bindPose);
+                    KimodoRetargetClipWriter.EnsureHumanPoseMuscles(ref bindPose);
+                    cache.bindHumanPose = bindPose;
+                    cache.hasBindHumanPose = true;
+                }
+                catch
+                {
+                    cache.bindHumanPose = default;
+                    cache.hasBindHumanPose = false;
+                }
+            }
         }
 
         internal static void ResetSkeletonCachePose(SkeletonCache cache)
@@ -127,11 +144,6 @@ namespace KimodoBridge
                 : KimodoPlayableClip.FIXED_FRAME_RATE;
         }
 
-        internal static float ResolvePreRollSeconds(float frameRate)
-        {
-            return 1f / Mathf.Max(1f, frameRate);
-        }
-
         internal static bool TryBuildClipSamplingContext(
             AnimationClip clip,
             SkeletonCache cache,
@@ -172,11 +184,12 @@ namespace KimodoBridge
                 AnimationPlayableOutput output = AnimationPlayableOutput.Create(graph, rootName + "Output", cache.animator);
                 output.SetSourcePlayable(clipPlayable);
 
-                float seedTime = ResolveSeedTime(clip);
-                clipPlayable.SetTime(seedTime);
+                clipPlayable.SetTime(0f);
                 graph.Play();
-
                 graph.Evaluate(0f);
+
+                InitializeRootBodyCorrection(cache);
+
 
                 context = new ClipSamplingContext
                 {
@@ -185,8 +198,8 @@ namespace KimodoBridge
                     clipPlayable = clipPlayable,
                     restoreAnimatorAvatar = restoreAnimatorAvatar,
                     originalAnimatorAvatar = originalAnimatorAvatar,
-                    evaluatedTime = seedTime,
-                    hasEvaluatedTime = true,
+                    evaluatedTime = 0f,
+                    hasEvaluatedTime = false,
                     frameRate = ResolveFrameRate(clip)
                 };
                 return true;
@@ -224,11 +237,13 @@ namespace KimodoBridge
             {
                 RestoreAnimatorAfterClipSampling(context.cache, context.originalAnimatorAvatar);
             }
-        }
 
-        internal static float ResolveSeedTime(AnimationClip clip)
-        {
-            return -ResolvePreRollSeconds(ResolveFrameRate(clip));
+            if (context.cache != null)
+            {
+                context.cache.rootBodyCorrectionRotation = Quaternion.identity;
+                context.cache.rootBodyCorrectionPosition = Vector3.zero;
+                context.cache.hasRootBodyCorrection = false;
+            }
         }
 
         internal static bool TryEvaluateClipSamplingContext(ClipSamplingContext context, float sampleTime, out string error)
@@ -328,6 +343,62 @@ namespace KimodoBridge
             {
                 cache.humanScale = Mathf.Max(1e-6f, animator.humanScale);
             }
+        }
+
+        private static void InitializeRootBodyCorrection(SkeletonCache cache)
+        {
+            if (cache == null)
+            {
+                return;
+            }
+
+            cache.rootBodyCorrectionRotation = Quaternion.identity;
+            cache.rootBodyCorrectionPosition = Vector3.zero;
+            cache.hasRootBodyCorrection = false;
+
+            if (!cache.hasBindHumanPose || cache.poseHandler == null)
+            {
+                return;
+            }
+
+            try
+            {
+                var firstPose = new HumanPose();
+                cache.poseHandler.GetHumanPose(ref firstPose);
+                KimodoRetargetClipWriter.EnsureHumanPoseMuscles(ref firstPose);
+
+                HumanPose bindPose = cache.bindHumanPose;
+                cache.rootBodyCorrectionRotation = Quaternion.identity;
+                cache.rootBodyCorrectionPosition = bindPose.bodyPosition - firstPose.bodyPosition;
+                cache.hasRootBodyCorrection = true;
+            }
+            catch
+            {
+                cache.rootBodyCorrectionRotation = Quaternion.identity;
+                cache.rootBodyCorrectionPosition = Vector3.zero;
+                cache.hasRootBodyCorrection = false;
+            }
+        }
+
+        internal static Quaternion NormalizeSafe(Quaternion rotation)
+        {
+            float magnitude = Mathf.Sqrt(
+                rotation.x * rotation.x +
+                rotation.y * rotation.y +
+                rotation.z * rotation.z +
+                rotation.w * rotation.w);
+
+            if (magnitude <= 1e-8f)
+            {
+                return Quaternion.identity;
+            }
+
+            float invMagnitude = 1f / magnitude;
+            return new Quaternion(
+                rotation.x * invMagnitude,
+                rotation.y * invMagnitude,
+                rotation.z * invMagnitude,
+                rotation.w * invMagnitude);
         }
     }
     internal static class KimodoRetargetSamplingUtility
@@ -595,6 +666,7 @@ namespace KimodoBridge
                 var pose = new HumanPose();
                 cache.poseHandler.GetHumanPose(ref pose);
                 KimodoRetargetClipWriter.EnsureHumanPoseMuscles(ref pose);
+                NormalizeHumanPoseToBindReference(cache, ref pose);
                 sample = KimodoRetargetHumanoidIkUtility.BuildMuscleSampleFromPose(cache, pose);
                 return sample != null;
             }
@@ -603,6 +675,16 @@ namespace KimodoBridge
                 error = ex.Message;
                 return false;
             }
+        }
+
+        private static void NormalizeHumanPoseToBindReference(SkeletonCache cache, ref HumanPose pose)
+        {
+            if (cache == null || !cache.hasRootBodyCorrection)
+            {
+                return;
+            }
+
+            pose.bodyPosition += cache.rootBodyCorrectionPosition;
         }
 
         internal static bool TryCreateTransientMuscleClip(
@@ -707,23 +789,17 @@ namespace KimodoBridge
 
             try
             {
-                samples = new TSample[frameCount + 1];
-                if (!TryBuildSeedSample(context, out TSample seedSample, out error))
-                {
-                    return false;
-                }
-
-                samples[0] = cloneSample(seedSample);
-
+                samples = new TSample[frameCount];
+                float frameRate = KimodoRetargetClipSamplingUtility.ResolveFrameRate(clip);
                 for (int frame = 0; frame < frameCount; frame++)
                 {
-                    float time = FrameToTime(frame, frameCount, duration);
+                    float time = frame / frameRate;
                     if (!sampleCallback(context, time, out TSample sample, out error))
                     {
                         return false;
                     }
 
-                    samples[frame + 1] = cloneSample(sample);
+                    samples[frame] = cloneSample(sample);
                 }
 
                 return true;
@@ -731,71 +807,6 @@ namespace KimodoBridge
             finally
             {
                 KimodoRetargetClipSamplingUtility.DestroyClipSamplingContext(context);
-            }
-        }
-
-        private static bool TryBuildSeedSample<TSample>(
-            KimodoRetargetClipSamplingUtility.ClipSamplingContext context,
-            out TSample seedSample,
-            out string error)
-        {
-            seedSample = default;
-            error = string.Empty;
-
-            if (context == null || context.cache == null)
-            {
-                error = "Seed sample context is not initialized.";
-                return false;
-            }
-
-            if (typeof(TSample) == typeof(BoneSample))
-            {
-                BoneSample boneSeed = CaptureBoneSample(context.cache);
-                if (boneSeed == null)
-                {
-                    error = "Failed to capture seed bone sample.";
-                    return false;
-                }
-
-                seedSample = (TSample)(object)boneSeed;
-                return true;
-            }
-
-            if (typeof(TSample) != typeof(MuscleSample))
-            {
-                error = "Unsupported seed sample type.";
-                return false;
-            }
-
-            if (TryCaptureMuscleSample(context.cache, out MuscleSample muscleSeed, out error))
-            {
-                seedSample = (TSample)(object)muscleSeed;
-                return true;
-            }
-
-            string firstError = error;
-            try
-            {
-                KimodoRetargetClipSamplingUtility.ResetSkeletonCachePose(context.cache);
-                if (TryCaptureMuscleSample(context.cache, out muscleSeed, out error))
-                {
-                    seedSample = (TSample)(object)muscleSeed;
-                    return true;
-                }
-
-                error = string.IsNullOrWhiteSpace(firstError)
-                    ? error
-                    : string.IsNullOrWhiteSpace(error)
-                        ? firstError
-                        : $"{firstError}; {error}";
-                return false;
-            }
-            catch (Exception ex)
-            {
-                error = string.IsNullOrWhiteSpace(error)
-                    ? $"Seed sample fallback failed: {ex.Message}"
-                    : $"{error}; seed sample fallback failed: {ex.Message}";
-                return false;
             }
         }
 
@@ -910,17 +921,6 @@ namespace KimodoBridge
             };
         }
 
-
-        private static float FrameToTime(int frame, int frameCount, float duration)
-        {
-            if (frameCount <= 1 || duration <= 0f)
-            {
-                return 0f;
-            }
-
-            float normalized = frame / Mathf.Max(1f, frameCount - 1f);
-            return Mathf.Clamp01(normalized) * duration;
-        }
 
     }
 }

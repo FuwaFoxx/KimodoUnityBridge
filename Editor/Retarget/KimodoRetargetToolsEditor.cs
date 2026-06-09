@@ -348,6 +348,13 @@ namespace KimodoBridge.Editor
                 return false;
             }
 
+            if (sourceClip.isHumanMotion)
+            {
+                muscleClip = sourceClip;
+                frameRate = sourceClip.frameRate > 0f ? sourceClip.frameRate : KimodoPlayableClip.FIXED_FRAME_RATE;
+                return true;
+            }
+
             string cacheName = BuildNamedCacheName(sourceClip, MuscleCacheType, null);
             if (forceRefresh && !KimodoEditorClipWritebackService.TryInvalidateNamedClipCache(cacheName, out error))
             {
@@ -1117,7 +1124,6 @@ namespace KimodoBridge.Editor
 
             int rootJoint = FindRootJointIndex(data, jointCount);
             string[] jointPaths = BuildJointPaths(data, jointCount);
-            Vector3 pelvisPosition = ResolveProfilePelvisPosition(profileAvatar);
 
             for (int joint = 0; joint < jointCount; joint++)
             {
@@ -1128,10 +1134,6 @@ namespace KimodoBridge.Editor
                     AnimationCurve px = new AnimationCurve();
                     AnimationCurve py = new AnimationCurve();
                     AnimationCurve pz = new AnimationCurve();
-                    float seedTime = -1f / Mathf.Max(1f, fps);
-                    px.AddKey(seedTime, pelvisPosition.x);
-                    py.AddKey(seedTime, pelvisPosition.y);
-                    pz.AddKey(seedTime, pelvisPosition.z);
 
                     for (int f = 0; f < frameCount; f++)
                     {
@@ -1153,11 +1155,6 @@ namespace KimodoBridge.Editor
                     AnimationCurve qy = new AnimationCurve();
                     AnimationCurve qz = new AnimationCurve();
                     AnimationCurve qw = new AnimationCurve();
-                    float seedTime = -1f / Mathf.Max(1f, fps);
-                    qx.AddKey(seedTime, 0f);
-                    qy.AddKey(seedTime, 0f);
-                    qz.AddKey(seedTime, 0f);
-                    qw.AddKey(seedTime, 1f);
 
                     for (int f = 0; f < frameCount; f++)
                     {

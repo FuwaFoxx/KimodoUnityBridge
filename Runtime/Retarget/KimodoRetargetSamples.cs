@@ -42,6 +42,11 @@ namespace KimodoBridge
         public Animator animator;
         public HumanPoseHandler poseHandler;
         public float humanScale;
+        public HumanPose bindHumanPose;
+        public bool hasBindHumanPose;
+        public Quaternion rootBodyCorrectionRotation;
+        public Vector3 rootBodyCorrectionPosition;
+        public bool hasRootBodyCorrection;
         public string[] bonePaths;
         public Transform[] boneTransforms;
         public Vector3[] bindLocalPositions;
@@ -79,6 +84,11 @@ namespace KimodoBridge
             animator = null;
             poseHandler = null;
             humanScale = 0f;
+            bindHumanPose = default;
+            hasBindHumanPose = false;
+            rootBodyCorrectionRotation = Quaternion.identity;
+            rootBodyCorrectionPosition = Vector3.zero;
+            hasRootBodyCorrection = false;
             bonePaths = null;
             boneTransforms = null;
             bindLocalPositions = null;
