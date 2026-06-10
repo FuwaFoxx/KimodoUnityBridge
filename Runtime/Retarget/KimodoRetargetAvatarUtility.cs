@@ -182,7 +182,7 @@ namespace KimodoBridge
             return "Hips";
         }
 
-        public static bool TryBuildBoneNameTable(Transform root, string rootBoneName, out string[] boneNames, out string error)
+        public static bool TryBuildBoneNameTable(Transform root, string canonicalRootBoneName, out string[] boneNames, out string error)
         {
             error = string.Empty;
             boneNames = null;
@@ -196,7 +196,7 @@ namespace KimodoBridge
             var names = new List<string>(all.Length);
             for (int i = 0; i < all.Length; i++)
             {
-                string path = CalculateTransformPath(all[i], root, rootBoneName);
+                string path = CalculateTransformPath(all[i], root, canonicalRootBoneName);
                 if (string.IsNullOrEmpty(path))
                 {
                     continue;
@@ -209,7 +209,7 @@ namespace KimodoBridge
             return true;
         }
 
-        public static Transform[] BuildBoneTransforms(Transform root, string[] bonePaths, string rootBoneName)
+        public static Transform[] BuildBoneTransforms(Transform root, string[] bonePaths, string canonicalRootBoneName)
         {
             if (bonePaths == null)
             {
@@ -219,21 +219,21 @@ namespace KimodoBridge
             var transforms = new Transform[bonePaths.Length];
             for (int i = 0; i < bonePaths.Length; i++)
             {
-                transforms[i] = FindByPath(root, bonePaths[i], rootBoneName);
+                transforms[i] = FindByPath(root, bonePaths[i], canonicalRootBoneName);
             }
 
             return transforms;
         }
 
 
-        public static Transform FindByPath(Transform root, string path, string rootBoneName)
+        public static Transform FindByPath(Transform root, string path, string canonicalRootBoneName)
         {
             if (root == null || string.IsNullOrEmpty(path))
             {
                 return null;
             }
 
-            if (string.Equals(root.name, path, StringComparison.Ordinal) || string.Equals(rootBoneName, path, StringComparison.Ordinal))
+            if (string.Equals(root.name, path, StringComparison.Ordinal) || string.Equals(canonicalRootBoneName, path, StringComparison.Ordinal))
             {
                 return root;
             }
@@ -247,7 +247,7 @@ namespace KimodoBridge
                     return null;
                 }
 
-                if (i == 0 && (string.Equals(current.name, segments[i], StringComparison.Ordinal) || string.Equals(rootBoneName, segments[i], StringComparison.Ordinal)))
+                if (i == 0 && (string.Equals(current.name, segments[i], StringComparison.Ordinal) || string.Equals(canonicalRootBoneName, segments[i], StringComparison.Ordinal)))
                 {
                     continue;
                 }
@@ -284,7 +284,109 @@ namespace KimodoBridge
             return null;
         }
 
-        public static string CalculateTransformPath(Transform target, Transform root, string rootBoneName)
+        public static bool TryFindUniqueTransformByName(
+            Transform root,
+            string name,
+            out Transform result,
+            out bool ambiguous)
+        {
+            result = null;
+            ambiguous = false;
+            if (root == null || string.IsNullOrWhiteSpace(name))
+            {
+                return false;
+            }
+
+            Transform[] all = root.GetComponentsInChildren<Transform>(true);
+            for (int i = 0; i < all.Length; i++)
+            {
+                Transform candidate = all[i];
+                if (candidate == null || !string.Equals(candidate.name, name, StringComparison.OrdinalIgnoreCase))
+                {
+                    continue;
+                }
+
+                if (result != null && result != candidate)
+                {
+                    result = null;
+                    ambiguous = true;
+                    return false;
+                }
+
+                result = candidate;
+            }
+
+            return result != null;
+        }
+
+        public static bool TryGetProfileRootJointTransform(
+            Dictionary<string, Transform> nameMap,
+            string modelName,
+            out Transform profileRootJoint)
+        {
+            profileRootJoint = null;
+            if (nameMap == null)
+            {
+                return false;
+            }
+
+            string profileRootJointName = KimodoRigProfileDatabase.GetProfileRootJointNameForModel(modelName);
+            if (string.IsNullOrWhiteSpace(profileRootJointName))
+            {
+                return false;
+            }
+
+            return nameMap.TryGetValue(profileRootJointName, out profileRootJoint) && profileRootJoint != null;
+        }
+
+        public static bool TryApplyMarkerSampleToTransformMap(
+            TimelineInject.KimodoMarkerSampleResult sample,
+            string modelName,
+            Transform root,
+            Dictionary<string, Transform> nameMap,
+            out string error)
+        {
+            error = string.Empty;
+
+            if (sample == null || root == null || nameMap == null)
+            {
+                error = "invalid sample or transform map";
+                return false;
+            }
+
+            string[] modelJointNames = KimodoRigProfileDatabase.GetJointNamesForModel(modelName);
+            if (modelJointNames == null || modelJointNames.Length == 0)
+            {
+                error = $"model joint layout not found for '{modelName}'";
+                return false;
+            }
+
+            root.position = sample.unityRootPos;
+            root.rotation = sample.unityRootRot;
+
+            int count = sample.localAxisAngles != null ? sample.localAxisAngles.Count : 0;
+            int applyCount = Mathf.Min(modelJointNames.Length, count);
+            for (int i = 0; i < applyCount; i++)
+            {
+                string jointName = modelJointNames[i];
+                if (!nameMap.TryGetValue(jointName, out Transform t) || t == null)
+                {
+                    error = $"joint '{jointName}' missing on pose rig";
+                    return false;
+                }
+
+                t.localRotation = AxisAngleToQuaternion(sample.localAxisAngles[i]);
+            }
+
+            if (TryGetProfileRootJointTransform(nameMap, modelName, out Transform profileRootJoint))
+            {
+                profileRootJoint.position = sample.kimodoRootPosition;
+            }
+
+            return true;
+        }
+
+        public static string CalculateTransformPath(Transform target, Transform root, string canonicalRootBoneName)
         {
             if (target == null || root == null)
             {
@@ -293,7 +395,7 @@ namespace KimodoBridge
 
             if (target == root)
             {
-                return string.IsNullOrWhiteSpace(rootBoneName) ? target.name : rootBoneName;
+                return string.IsNullOrWhiteSpace(canonicalRootBoneName) ? target.name : canonicalRootBoneName;
             }
 
             var names = new List<string>();
@@ -311,6 +413,18 @@ namespace KimodoBridge
 
             names.Reverse();
             return string.Join("/", names);
+        }
+
+        private static Quaternion AxisAngleToQuaternion(Vector3 axisAngle)
+        {
+            float angleRad = axisAngle.magnitude;
+            if (angleRad <= 1e-8f)
+            {
+                return Quaternion.identity;
+            }
+
+            Vector3 axis = axisAngle / angleRad;
+            return Quaternion.AngleAxis(angleRad * Mathf.Rad2Deg, axis);
         }
 
         private static int FindSkeletonRootIndex(SkeletonBone[] skeleton)

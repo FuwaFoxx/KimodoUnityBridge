@@ -191,7 +191,7 @@ namespace KimodoBridge.Editor
             using (new EditorGUI.DisabledScope(!marker.useOverride))
             {
                 DrawPropertyIfExists(so, "sampleData.sampleTime");
-                DrawPropertyIfExists(so, "sampleData.rootPosition");
+                DrawPropertyIfExists(so, "sampleData.kimodoRootPosition");
                 DrawPropertyIfExists(so, "sampleData.localAxisAngles");
                 SerializedProperty includeHeadingProp = so.FindProperty("sampleData.hasRootHeading");
                 if (includeHeadingProp != null)

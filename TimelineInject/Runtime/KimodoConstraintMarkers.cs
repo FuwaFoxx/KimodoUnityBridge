@@ -44,8 +44,10 @@ namespace TimelineInject
         public double sampleTime;
         public KimodoConstraintRigType rigType = KimodoConstraintRigType.Soma77;
         public bool hasRootHeading = true;
-        public Vector3 rootPosition;
+        public Vector3 kimodoRootPosition;
         public Vector2 rootHeading = Vector2.right;
+        public Vector3 unityRootPos;
+        public Quaternion unityRootRot = Quaternion.identity;
         public List<string> jointNames = new List<string>();
         public List<Vector3> localAxisAngles = new List<Vector3>();
         public List<int> sampledJointIndices = new List<int>();
@@ -58,8 +60,10 @@ namespace TimelineInject
                 sampleTime = sampleTime,
                 rigType = rigType,
                 hasRootHeading = hasRootHeading,
-                rootPosition = rootPosition,
+                kimodoRootPosition = kimodoRootPosition,
                 rootHeading = rootHeading,
+                unityRootPos = unityRootPos,
+                unityRootRot = unityRootRot,
                 jointNames = jointNames != null ? new List<string>(jointNames) : new List<string>(),
                 localAxisAngles = localAxisAngles != null ? new List<Vector3>(localAxisAngles) : new List<Vector3>(),
                 sampledJointIndices = sampledJointIndices != null ? new List<int>(sampledJointIndices) : new List<int>()

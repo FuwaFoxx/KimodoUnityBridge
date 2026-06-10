@@ -1,3 +1,4 @@
+using System;
 using TimelineInject;
 
 namespace KimodoBridge
@@ -110,7 +111,13 @@ namespace KimodoBridge
             return CloneInts(parentIndices);
         }
 
+        [Obsolete("Use GetProfileRootJointNameForModel instead.")]
         public static string GetRootJointNameForModel(string modelName)
+        {
+            return GetProfileRootJointNameForModel(modelName);
+        }
+
+        public static string GetProfileRootJointNameForModel(string modelName)
         {
             ResolveProfile(modelName, out _, out string[] jointNames, out _);
             return jointNames != null && jointNames.Length > 0 ? jointNames[0] : string.Empty;

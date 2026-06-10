@@ -38,7 +38,7 @@ namespace KimodoBridge
                     return false;
                 }
 
-                if (!TryFindUniqueTransformByName(root, jointName, out jointTransforms[i], out bool ambiguous))
+                if (!KimodoRetargetAvatarUtility.TryFindUniqueTransformByName(root, jointName, out jointTransforms[i], out bool ambiguous))
                 {
                     error = ambiguous
                         ? $"Profile joint '{jointName}' matches multiple transforms under '{root.name}'."
@@ -49,41 +49,6 @@ namespace KimodoBridge
             }
 
             return true;
-        }
-
-        private static bool TryFindUniqueTransformByName(
-            Transform root,
-            string jointName,
-            out Transform result,
-            out bool ambiguous)
-        {
-            result = null;
-            ambiguous = false;
-            if (root == null || string.IsNullOrWhiteSpace(jointName))
-            {
-                return false;
-            }
-
-            Transform[] all = root.GetComponentsInChildren<Transform>(true);
-            for (int i = 0; i < all.Length; i++)
-            {
-                Transform candidate = all[i];
-                if (candidate == null || !string.Equals(candidate.name, jointName, StringComparison.OrdinalIgnoreCase))
-                {
-                    continue;
-                }
-
-                if (result != null && result != candidate)
-                {
-                    result = null;
-                    ambiguous = true;
-                    return false;
-                }
-
-                result = candidate;
-            }
-
-            return result != null;
         }
     }
 }

@@ -40,7 +40,7 @@ namespace KimodoBridge.Editor
             {
                 rootObject = UnityEngine.Object.Instantiate(prefab);
                 rootObject.name = $"__KimodoPoseCache_{clipId}_{animatorId}_{rigType}";
-                rootObject.hideFlags = HideFlags.HideInHierarchy | HideFlags.DontSave;
+                rootObject.hideFlags = HideFlags.HideInHierarchy | HideFlags.NotEditable | HideFlags.DontSave;
                 rootObject.SetActive(false);
 
                 Transform root = rootObject.transform;
@@ -58,6 +58,7 @@ namespace KimodoBridge.Editor
                 }
 
                 generatedMaterials = ConfigurePreviewMeshAppearance(rootObject);
+                rootObject.hideFlags = HideFlags.HideInHierarchy | HideFlags.NotEditable | HideFlags.DontSave;
                 instance = new PoseRigInstance
                 {
                     Root = rootObject,
@@ -122,47 +123,12 @@ namespace KimodoBridge.Editor
             PoseRigInstance instance,
             out string error)
         {
-            error = string.Empty;
-            if (sample == null || instance == null || instance.Root == null || instance.NameMap == null)
-            {
-                error = "invalid sample or pose rig instance";
-                return false;
-            }
-
-            string[] modelJointNames = KimodoRigProfileDatabase.GetJointNamesForModel(modelName);
-            if (modelJointNames == null || modelJointNames.Length == 0)
-            {
-                error = $"model joint layout not found for '{modelName}'";
-                return false;
-            }
-
-            int count = sample.localAxisAngles != null ? sample.localAxisAngles.Count : 0;
-            int applyCount = Mathf.Min(modelJointNames.Length, count);
-            for (int i = 0; i < applyCount; i++)
-            {
-                string jointName = modelJointNames[i];
-                if (!instance.NameMap.TryGetValue(jointName, out Transform t) || t == null)
-                {
-                    error = $"joint '{jointName}' missing on pose rig";
-                    return false;
-                }
-
-                t.localRotation = AxisAngleToQuaternion(sample.localAxisAngles[i]);
-            }
-
-            string rootJointName = KimodoRigProfileDatabase.GetRootJointNameForModel(modelName);
-            if (!string.IsNullOrWhiteSpace(rootJointName) &&
-                instance.NameMap.TryGetValue(rootJointName, out Transform rootJoint) &&
-                rootJoint != null)
-            {
-                rootJoint.position = sample.rootPosition;
-            }
-            else
-            {
-                instance.Root.transform.position = sample.rootPosition;
-            }
-
-            return true;
+            return KimodoRetargetAvatarUtility.TryApplyMarkerSampleToTransformMap(
+                sample,
+                modelName,
+                instance != null ? instance.Root != null ? instance.Root.transform : null : null,
+                instance != null ? instance.NameMap : null,
+                out error);
         }
 
         internal static bool TryResolveFootWorldPositions(
@@ -244,18 +210,6 @@ namespace KimodoBridge.Editor
                         ? new[] { "LeftFoot", "LeftToeBase", "LeftShin" }
                         : new[] { "RightFoot", "RightToeBase", "RightShin" };
             }
-        }
-
-        private static Quaternion AxisAngleToQuaternion(Vector3 axisAngle)
-        {
-            float angleRad = axisAngle.magnitude;
-            if (angleRad <= 1e-8f)
-            {
-                return Quaternion.identity;
-            }
-
-            Vector3 axis = axisAngle / angleRad;
-            return Quaternion.AngleAxis(angleRad * Mathf.Rad2Deg, axis);
         }
 
         private static GameObject LoadRigPrefab(KimodoConstraintRigType rigType)

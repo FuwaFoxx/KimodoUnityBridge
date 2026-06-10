@@ -427,8 +427,8 @@ namespace KimodoBridge.Editor
             }
 
             entry.Root.gameObject.hideFlags = selectable
-                ? HideFlags.DontSave
-                : (HideFlags.HideInHierarchy | HideFlags.DontSave);
+                ? HideFlags.NotEditable | HideFlags.DontSave
+                : HideFlags.HideInHierarchy | HideFlags.NotEditable | HideFlags.DontSave;
         }
 
         private static void ApplyEntryState(PoseCacheEntry entry, bool visible, bool selectable)
@@ -529,57 +529,12 @@ namespace KimodoBridge.Editor
 
         private static bool ApplySampleToRig(KimodoMarkerSampleResult sample, string modelName, PoseCacheEntry entry, out string error)
         {
-            error = string.Empty;
-            if (sample == null || entry == null || entry.Root == null || entry.NameMap == null)
-            {
-                error = "invalid sample or pose cache entry";
-                return false;
-            }
-
-            string[] modelJointNames = KimodoRigProfileDatabase.GetJointNamesForModel(modelName);
-            if (modelJointNames == null || modelJointNames.Length == 0)
-            {
-                error = $"model joint layout not found for '{modelName}'";
-                return false;
-            }
-
-            int count = sample.localAxisAngles != null ? sample.localAxisAngles.Count : 0;
-            int applyCount = Mathf.Min(modelJointNames.Length, count);
-            for (int i = 0; i < applyCount; i++)
-            {
-                string jointName = modelJointNames[i];
-                if (!entry.NameMap.TryGetValue(jointName, out Transform t) || t == null)
-                {
-                    error = $"joint '{jointName}' missing on pose rig";
-                    return false;
-                }
-
-                t.localRotation = AxisAngleToQuaternion(sample.localAxisAngles[i]);
-            }
-
-            string rootJointName = KimodoRigProfileDatabase.GetRootJointNameForModel(modelName);
-            if (!string.IsNullOrWhiteSpace(rootJointName) && entry.NameMap.TryGetValue(rootJointName, out Transform rootJoint) && rootJoint != null)
-            {
-                rootJoint.position = sample.rootPosition;
-            }
-            else
-            {
-                entry.Root.position = sample.rootPosition;
-            }
-
-            return true;
-        }
-
-        private static Quaternion AxisAngleToQuaternion(Vector3 axisAngle)
-        {
-            float angleRad = axisAngle.magnitude;
-            if (angleRad <= 1e-8f)
-            {
-                return Quaternion.identity;
-            }
-
-            Vector3 axis = axisAngle / angleRad;
-            return Quaternion.AngleAxis(angleRad * Mathf.Rad2Deg, axis);
+            return KimodoRetargetAvatarUtility.TryApplyMarkerSampleToTransformMap(
+                sample,
+                modelName,
+                entry != null ? entry.Root : null,
+                entry != null ? entry.NameMap : null,
+                out error);
         }
 
         private static string BuildContextKey(int clipId, int animatorId)

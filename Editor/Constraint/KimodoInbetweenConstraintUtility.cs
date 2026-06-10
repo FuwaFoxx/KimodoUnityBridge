@@ -55,18 +55,18 @@ namespace KimodoBridge.Editor
 
             if (enableInbetweenInterpolation)
             {
-                if (!TryAddAutoInbetweenSamples(sourceClip, Mathf.Max(1, generationFrames), samples, out string warning))
+                if (!TryAddAutoInbetweenSamples(sourceClip, Mathf.Max(1, generationFrames), samples, out string warning, out bool hasLeadingInbetweenConstraint))
                 {
                     if (!string.IsNullOrWhiteSpace(warning))
                     {
                         Debug.LogWarning($"{LogPrefix} {warning}");
                     }
                 }
-            }
 
-            if (normalizeConstraintOrigin)
-            {
-                NormalizeConstraintOrigin(samples);
+                if (normalizeConstraintOrigin && hasLeadingInbetweenConstraint)
+                {
+                    NormalizeConstraintOrigin(samples);
+                }
             }
 
             constraintsJson = KimodoConstraintJsonExporter.ToConstraintsJson(
@@ -254,7 +254,7 @@ namespace KimodoBridge.Editor
                     continue;
                 }
 
-                sample.rootPosition = compensatedRootPositions[i];
+                sample.kimodoRootPosition = compensatedRootPositions[i];
             }
 
             return true;
@@ -282,7 +282,7 @@ namespace KimodoBridge.Editor
                 return true;
             }
 
-            Vector3 anchorRoot = samples[anchorIndex].rootPosition;
+            Vector3 anchorRoot = samples[anchorIndex].kimodoRootPosition;
             float maxDistanceSq = 0f;
             for (int i = 0; i < samples.Count; i++)
             {
@@ -292,7 +292,7 @@ namespace KimodoBridge.Editor
                     continue;
                 }
 
-                Vector3 delta = sample.rootPosition - anchorRoot;
+                Vector3 delta = sample.kimodoRootPosition - anchorRoot;
                 delta.y = 0f;
                 maxDistanceSq = Mathf.Max(maxDistanceSq, delta.sqrMagnitude);
             }
@@ -372,7 +372,7 @@ namespace KimodoBridge.Editor
                             pendingFootFrames = 0;
                             hasPreviousFootWorldPosition = false;
                             previousFootWorldPosition = Vector3.zero;
-                            compensatedRootPositions[i] = sample.rootPosition + cumulativeDelta;
+                            compensatedRootPositions[i] = sample.kimodoRootPosition + cumulativeDelta;
                             continue;
                         }
                     }
@@ -387,7 +387,7 @@ namespace KimodoBridge.Editor
                         : rightFootPosition;
                     if (currentFootWorldPosition == Vector3.zero)
                     {
-                        compensatedRootPositions[i] = sample.rootPosition + cumulativeDelta;
+                        compensatedRootPositions[i] = sample.kimodoRootPosition + cumulativeDelta;
                         continue;
                     }
 
@@ -400,7 +400,7 @@ namespace KimodoBridge.Editor
 
                     previousFootWorldPosition = currentFootWorldPosition;
                     hasPreviousFootWorldPosition = true;
-                    compensatedRootPositions[i] = sample.rootPosition + cumulativeDelta;
+                    compensatedRootPositions[i] = sample.kimodoRootPosition + cumulativeDelta;
                 }
 
                 warning = string.Empty;
@@ -472,9 +472,11 @@ namespace KimodoBridge.Editor
             TimelineClip sourceClip,
             int generationFrames,
             List<KimodoMarkerSampleResult> samples,
-            out string warning)
+            out string warning,
+            out bool hasLeadingInbetweenConstraint)
         {
             warning = string.Empty;
+            hasLeadingInbetweenConstraint = false;
             if (sourceClip == null)
             {
                 warning = "source clip is null, skip inbetween interpolation.";
@@ -525,6 +527,7 @@ namespace KimodoBridge.Editor
                     if (TryCapturePoseAtTime(leftNeighbor, director, animator, evalTime, "fullbody", out KimodoMarkerSampleResult pose, out string captureError))
                     {
                         samples.Add(pose);
+                        hasLeadingInbetweenConstraint = true;
                     }
                     else
                     {
@@ -653,56 +656,84 @@ namespace KimodoBridge.Editor
 
         private static void NormalizeConstraintOrigin(List<KimodoMarkerSampleResult> samples)
         {
-            if (samples == null || samples.Count == 0)
+            if (!TryResolveConstraintOriginAnchorSample(samples, out KimodoMarkerSampleResult anchor))
             {
                 return;
             }
 
-            int anchorIndex = ResolveConstraintOriginAnchorIndex(samples);
-            if (anchorIndex < 0 || anchorIndex >= samples.Count || samples[anchorIndex] == null)
-            {
-                return;
-            }
-
-            KimodoMarkerSampleResult anchor = samples[anchorIndex];
-            Vector3 anchorRootPosition = anchor.rootPosition;
-            Quaternion anchorYaw = GetRootYaw(anchor);
+            Vector3 anchorRootPosition = anchor.unityRootPos;
+            Quaternion inverseAnchorRootRotation = Quaternion.Inverse(anchor.unityRootRot);
 
             for (int i = 0; i < samples.Count; i++)
             {
-                KimodoMarkerSampleResult sample = samples[i];
-                if (sample == null)
-                {
-                    continue;
-                }
-
-                Vector3 localPosition = sample.rootPosition - anchorRootPosition;
-                sample.rootPosition = new Vector3(localPosition.x, sample.rootPosition.y, localPosition.z);
-
-                if (sample.localAxisAngles != null && sample.localAxisAngles.Count > 0)
-                {
-                    Quaternion rootRot = AxisAngleToQuaternion(sample.localAxisAngles[0]);
-                    Quaternion normalizedRootRot = Quaternion.Inverse(anchorYaw) * rootRot;
-                    sample.localAxisAngles[0] = KimodoRuntimeUtility.QuaternionToAxisAngleVector(normalizedRootRot);
-                }
+                NormalizeConstraintOriginSample(samples[i], anchorRootPosition, inverseAnchorRootRotation);
             }
         }
 
-        private static Quaternion GetRootYaw(KimodoMarkerSampleResult sample)
+        private static void NormalizeConstraintOriginSample(
+            KimodoMarkerSampleResult sample,
+            Vector3 anchorRootPosition,
+            Quaternion inverseAnchorRootRotation)
         {
+            if (sample == null)
+            {
+                return;
+            }
+
+            sample.kimodoRootPosition = NormalizeConstraintOriginRootPosition(
+                sample.kimodoRootPosition,
+                anchorRootPosition,
+                inverseAnchorRootRotation);
+
+            if (TryNormalizeConstraintOriginRootJointRotation(sample, inverseAnchorRootRotation, out Vector3 normalizedRootRotation))
+            {
+                sample.localAxisAngles[0] = normalizedRootRotation;
+            }
+        }
+
+        private static Vector3 NormalizeConstraintOriginRootPosition(
+            Vector3 kimodoRootPosition,
+            Vector3 anchorRootPosition,
+            Quaternion inverseAnchorRootRotation)
+        {
+            return inverseAnchorRootRotation * (kimodoRootPosition - anchorRootPosition);
+        }
+
+        private static bool TryNormalizeConstraintOriginRootJointRotation(
+            KimodoMarkerSampleResult sample,
+            Quaternion inverseAnchorRootRotation,
+            out Vector3 normalizedRootRotation)
+        {
+            normalizedRootRotation = Vector3.zero;
             if (sample == null || sample.localAxisAngles == null || sample.localAxisAngles.Count == 0)
             {
-                return Quaternion.identity;
+                return false;
             }
 
-            Quaternion rootRot = AxisAngleToQuaternion(sample.localAxisAngles[0]);
-            Vector3 flatForward = Vector3.ProjectOnPlane(rootRot * Vector3.forward, Vector3.up);
-            if (flatForward.sqrMagnitude <= 1e-8f)
+            Quaternion rootJointRotation = AxisAngleToQuaternion(sample.localAxisAngles[0]);
+            Quaternion normalizedRootJointRotation = inverseAnchorRootRotation * rootJointRotation;
+            normalizedRootRotation = KimodoRuntimeUtility.QuaternionToAxisAngleVector(normalizedRootJointRotation);
+            return true;
+        }
+
+        private static bool TryResolveConstraintOriginAnchorSample(
+            List<KimodoMarkerSampleResult> samples,
+            out KimodoMarkerSampleResult anchor)
+        {
+            anchor = null;
+            if (samples == null || samples.Count == 0)
             {
-                return Quaternion.identity;
+                return false;
             }
 
-            return Quaternion.LookRotation(flatForward.normalized, Vector3.up);
+            int anchorIndex = ResolveConstraintOriginAnchorIndex(samples);
+            if (anchorIndex < 0 || anchorIndex >= samples.Count)
+            {
+                return false;
+            }
+
+            anchor = samples[anchorIndex];
+            return anchor != null;
         }
 
         private static Quaternion AxisAngleToQuaternion(Vector3 axisAngle)
@@ -725,12 +756,19 @@ namespace KimodoBridge.Editor
             }
 
             int earliest = -1;
+            double earliestTime = double.MaxValue;
             for (int i = 0; i < samples.Count; i++)
             {
-                if (samples[i] != null)
+                KimodoMarkerSampleResult sample = samples[i];
+                if (sample == null)
                 {
+                    continue;
+                }
+
+                if (sample.sampleTime < earliestTime)
+                {
+                    earliestTime = sample.sampleTime;
                     earliest = i;
-                    break;
                 }
             }
 
@@ -818,7 +856,7 @@ namespace KimodoBridge.Editor
                              previewCompensated.Length > 1)
                     {
                         rightNeighborStartPose = rightNeighborStartPose.Clone();
-                        rightNeighborStartPose.rootPosition = previewCompensated[1];
+                        rightNeighborStartPose.kimodoRootPosition = previewCompensated[1];
                     }
                 }
             }

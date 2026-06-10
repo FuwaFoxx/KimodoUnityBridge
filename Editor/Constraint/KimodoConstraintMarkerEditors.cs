@@ -118,7 +118,7 @@ namespace KimodoBridge.Editor
             }
 
             EditorGUI.BeginDisabledGroup(readOnly);
-            EditorGUILayout.PropertyField(serializedObject.FindProperty("sampleData.rootPosition"));
+            EditorGUILayout.PropertyField(serializedObject.FindProperty("sampleData.kimodoRootPosition"));
             EditorGUILayout.PropertyField(serializedObject.FindProperty("sampleData.localAxisAngles"), true);
             EditorGUI.EndDisabledGroup();
         }
@@ -140,7 +140,7 @@ namespace KimodoBridge.Editor
             }
 
             EditorGUI.BeginDisabledGroup(readOnly);
-            EditorGUILayout.PropertyField(serializedObject.FindProperty("sampleData.rootPosition"));
+            EditorGUILayout.PropertyField(serializedObject.FindProperty("sampleData.kimodoRootPosition"));
             EditorGUILayout.PropertyField(serializedObject.FindProperty("sampleData.hasRootHeading"));
             SerializedProperty includeGlobalHeadingProp = serializedObject.FindProperty("sampleData.hasRootHeading");
             if (includeGlobalHeadingProp != null && includeGlobalHeadingProp.boolValue)
@@ -263,7 +263,7 @@ namespace KimodoBridge.Editor
                 EditorGUILayout.HelpBox("Fixed joint group marker type; joint_names is determined by marker class.", MessageType.None);
             }
 
-            EditorGUILayout.PropertyField(serializedObject.FindProperty("sampleData.rootPosition"));
+            EditorGUILayout.PropertyField(serializedObject.FindProperty("sampleData.kimodoRootPosition"));
             EditorGUILayout.PropertyField(serializedObject.FindProperty("sampleData.localAxisAngles"), true);
             EditorGUI.EndDisabledGroup();
         }
@@ -321,6 +321,9 @@ namespace KimodoBridge.Editor
             public float SourceClipLength;
             public float SourceClipFrameRate;
             public bool HasRootHeading;
+            public Vector3 KimodoRootPosition;
+            public Vector3 UnityRootPos;
+            public Quaternion UnityRootRot;
             public string[] JointNames;
         }
 
@@ -333,8 +336,10 @@ namespace KimodoBridge.Editor
             public string ModelName;
             public KimodoConstraintRigType RigType;
             public bool HasRootHeading;
-            public Vector3 RootPosition;
+            public Vector3 KimodoRootPosition;
             public Vector2 RootHeading;
+            public Vector3 UnityRootPos;
+            public Quaternion UnityRootRot;
             public string[] JointNames;
             public Vector3[] LocalAxisAngles;
             public int[] SampledJointIndices;
@@ -555,6 +560,9 @@ namespace KimodoBridge.Editor
                 SourceClipLength = context.SourceClip != null ? context.SourceClip.length : 0f,
                 SourceClipFrameRate = context.SourceClip != null ? context.SourceClip.frameRate : 0f,
                 HasRootHeading = source != null && source.hasRootHeading,
+                KimodoRootPosition = source != null ? source.kimodoRootPosition : default,
+                UnityRootPos = source != null ? source.unityRootPos : default,
+                UnityRootRot = source != null ? source.unityRootRot : default,
                 JointNames = CopyStringArray(source != null ? source.jointNames : null)
             };
         }
@@ -585,6 +593,9 @@ namespace KimodoBridge.Editor
                 Mathf.Abs(snapshot.SourceClipLength - (context.SourceClip != null ? context.SourceClip.length : 0f)) <= 1e-6f &&
                 Mathf.Abs(snapshot.SourceClipFrameRate - (context.SourceClip != null ? context.SourceClip.frameRate : 0f)) <= 1e-6f &&
                 snapshot.HasRootHeading == (sample != null && sample.hasRootHeading) &&
+                Vector3Approximately(snapshot.KimodoRootPosition, sample != null ? sample.kimodoRootPosition : default) &&
+                Vector3Approximately(snapshot.UnityRootPos, sample != null ? sample.unityRootPos : default) &&
+                QuaternionApproximately(snapshot.UnityRootRot, sample != null ? sample.unityRootRot : default) &&
                 StringArrayEquals(snapshot.JointNames, sample != null ? sample.jointNames : null);
         }
 
@@ -1065,8 +1076,10 @@ namespace KimodoBridge.Editor
                 ModelName = context.ModelName ?? string.Empty,
                 RigType = context.RigType,
                 HasRootHeading = source != null && source.hasRootHeading,
-                RootPosition = source != null ? source.rootPosition : default,
+                KimodoRootPosition = source != null ? source.kimodoRootPosition : default,
                 RootHeading = source != null ? source.rootHeading : default,
+                UnityRootPos = source != null ? source.unityRootPos : default,
+                UnityRootRot = source != null ? source.unityRootRot : default,
                 JointNames = CopyStringArray(source != null ? source.jointNames : null),
                 LocalAxisAngles = CopyVector3Array(source != null ? source.localAxisAngles : null),
                 SampledJointIndices = CopyIntArray(source != null ? source.sampledJointIndices : null)
@@ -1086,8 +1099,10 @@ namespace KimodoBridge.Editor
                 string.Equals(snapshot.ModelName ?? string.Empty, context.ModelName ?? string.Empty, StringComparison.Ordinal) &&
                 snapshot.RigType == context.RigType &&
                 snapshot.HasRootHeading == (sample != null && sample.hasRootHeading) &&
-                Vector3Approximately(snapshot.RootPosition, sample != null ? sample.rootPosition : default) &&
+                Vector3Approximately(snapshot.KimodoRootPosition, sample != null ? sample.kimodoRootPosition : default) &&
                 Vector2Approximately(snapshot.RootHeading, sample != null ? sample.rootHeading : default) &&
+                Vector3Approximately(snapshot.UnityRootPos, sample != null ? sample.unityRootPos : default) &&
+                QuaternionApproximately(snapshot.UnityRootRot, sample != null ? sample.unityRootRot : default) &&
                 StringArrayEquals(snapshot.JointNames, sample != null ? sample.jointNames : null) &&
                 Vector3ArrayEquals(snapshot.LocalAxisAngles, sample != null ? sample.localAxisAngles : null) &&
                 IntArrayEquals(snapshot.SampledJointIndices, sample != null ? sample.sampledJointIndices : null);
@@ -1105,7 +1120,7 @@ namespace KimodoBridge.Editor
                 FormatDouble(sample.sampleTime),
                 sample.rigType.ToString(),
                 sample.hasRootHeading ? "1" : "0",
-                FormatVector3(sample.rootPosition),
+                FormatVector3(sample.kimodoRootPosition),
                 FormatVector2(sample.rootHeading),
                 BuildStringListSignature(sample.jointNames),
                 BuildVector3ListSignature(sample.localAxisAngles),
@@ -1288,6 +1303,11 @@ namespace KimodoBridge.Editor
         private static bool Vector2Approximately(Vector2 left, Vector2 right)
         {
             return (left - right).sqrMagnitude <= 1e-10f;
+        }
+
+        private static bool QuaternionApproximately(Quaternion left, Quaternion right)
+        {
+            return Mathf.Abs(Quaternion.Dot(left, right)) >= 1f - 1e-10f;
         }
 
         private static bool Vector3Approximately(Vector3 left, Vector3 right)

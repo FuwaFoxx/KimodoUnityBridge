@@ -81,10 +81,10 @@ namespace KimodoBridge
             string modelName)
         {
             var output = new List<string>();
-            string root = KimodoRigProfileDatabase.GetRootJointNameForModel(modelName);
-            if (!string.IsNullOrWhiteSpace(root))
+            string profileRootJointName = KimodoRigProfileDatabase.GetProfileRootJointNameForModel(modelName);
+            if (!string.IsNullOrWhiteSpace(profileRootJointName))
             {
-                output.Add(root);
+                output.Add(profileRootJointName);
             }
 
             if (string.Equals(constraintType, "root2d", StringComparison.OrdinalIgnoreCase))
@@ -193,8 +193,8 @@ namespace KimodoBridge
             result = null;
             error = string.Empty;
 
-            Transform root = skeletonRoot != null ? skeletonRoot : (animator != null ? animator.transform : null);
-            if (root == null)
+            Transform unityRoot = skeletonRoot != null ? skeletonRoot : (animator != null ? animator.transform : null);
+            if (unityRoot == null)
             {
                 error = "Skeleton root is null.";
                 return false;
@@ -205,8 +205,16 @@ namespace KimodoBridge
             Transform[] joints = jointsOverride;
             if (jointNames == null || parentIndices == null || joints == null)
             {
-                ResolveProfile(modelName, out jointNames, out parentIndices);
-                joints = ResolveJointTransforms(jointNames, root, animator);
+                if (!KimodoProfileSkeletonUtility.TryResolveProfileSkeleton(
+                        modelName,
+                        unityRoot,
+                        out jointNames,
+                        out parentIndices,
+                        out joints,
+                        out error))
+                {
+                    return false;
+                }
             }
 
             if (jointNames == null || parentIndices == null || joints == null)
@@ -221,14 +229,18 @@ namespace KimodoBridge
                 return false;
             }
 
-            string rootJointName = jointNames != null && jointNames.Length > 0 ? jointNames[0] : "Hips";
-            Transform pelvis = joints != null && joints.Length > 0 && joints[0] != null
-                ? joints[0]
-                : TryResolveTransformByJointName(rootJointName, root, animator) ?? root;
+            Transform profileRootJoint = joints[0];
+            if (profileRootJoint == null)
+            {
+                error = "Profile skeleton root joint is null.";
+                return false;
+            }
 
-            Vector3 unityRootPosition = pelvis.position;
+            Vector3 kimodoRootPosition = profileRootJoint.position;
+            Vector3 unityRootPos = unityRoot.position;
+            Quaternion unityRootRot = unityRoot.rotation;
 
-            Vector3 forward = pelvis.forward;
+            Vector3 forward = profileRootJoint.forward;
             Vector2 unityHeading = new Vector2(forward.x, forward.z);
             if (unityHeading.sqrMagnitude <= 1e-8f)
             {
@@ -276,124 +288,15 @@ namespace KimodoBridge
                 sampleTime = globalTime,
                 rigType = KimodoRigProfileDatabase.ResolveRigTypeFromModelName(modelName),
                 hasRootHeading = true,
-                rootPosition = unityRootPosition,
+                kimodoRootPosition = kimodoRootPosition,
                 rootHeading = unityHeading,
+                unityRootPos = unityRootPos,
+                unityRootRot = unityRootRot,
                 jointNames = jointNames != null ? new List<string>(jointNames) : new List<string>(),
                 localAxisAngles = unityLocalAxisAngles,
                 sampledJointIndices = sampledJointIndices
             };
             return true;
-        }
-
-        private static void ResolveProfile(string modelName, out string[] jointNames, out int[] parentIndices)
-        {
-            KimodoRigProfileDatabase.ResolveProfile(modelName, out _, out jointNames, out parentIndices);
-        }
-
-        private static Transform[] ResolveJointTransforms(string[] names, Transform root, Animator animator)
-        {
-            int count = names != null ? names.Length : 0;
-            var transforms = new Transform[count];
-            if (root == null || count == 0)
-            {
-                return transforms;
-            }
-
-            for (int i = 0; i < count; i++)
-            {
-                string name = names[i];
-                transforms[i] = TryResolveTransformByJointName(name, root, animator);
-            }
-
-            return transforms;
-        }
-
-        private static Transform TryResolveTransformByJointName(string jointName, Transform searchRoot, Animator animator)
-        {
-            if (searchRoot == null || string.IsNullOrWhiteSpace(jointName))
-            {
-                return null;
-            }
-
-            Transform byHuman = TryResolveViaHumanBone(jointName, animator);
-            if (byHuman != null)
-            {
-                return byHuman;
-            }
-
-            return KimodoRetargetAvatarUtility.FindTransformByName(searchRoot, jointName);
-        }
-
-        private static Transform TryResolveViaHumanBone(string jointName, Animator animator)
-        {
-            if (animator == null || !animator.isHuman)
-            {
-                return null;
-            }
-
-            bool hasUpperChest = animator.GetBoneTransform(HumanBodyBones.UpperChest) != null;
-            switch (jointName)
-            {
-                case "Hips": return animator.GetBoneTransform(HumanBodyBones.Hips);
-                case "Spine1": return animator.GetBoneTransform(HumanBodyBones.Spine);
-                case "Spine2": return animator.GetBoneTransform(HumanBodyBones.Chest);
-                case "Chest":
-                    return hasUpperChest
-                        ? animator.GetBoneTransform(HumanBodyBones.UpperChest)
-                        : animator.GetBoneTransform(HumanBodyBones.Chest);
-                case "Neck1": return animator.GetBoneTransform(HumanBodyBones.Neck);
-                case "Neck2": return animator.GetBoneTransform(HumanBodyBones.Neck);
-                case "Head": return animator.GetBoneTransform(HumanBodyBones.Head);
-                case "Jaw": return animator.GetBoneTransform(HumanBodyBones.Jaw);
-                case "LeftEye": return animator.GetBoneTransform(HumanBodyBones.LeftEye);
-                case "RightEye": return animator.GetBoneTransform(HumanBodyBones.RightEye);
-                case "LeftShoulder": return animator.GetBoneTransform(HumanBodyBones.LeftShoulder);
-                case "LeftArm": return animator.GetBoneTransform(HumanBodyBones.LeftUpperArm);
-                case "LeftForeArm": return animator.GetBoneTransform(HumanBodyBones.LeftLowerArm);
-                case "LeftHand": return animator.GetBoneTransform(HumanBodyBones.LeftHand);
-                case "LeftHandThumbEnd": return animator.GetBoneTransform(HumanBodyBones.LeftThumbDistal);
-                case "LeftHandMiddleEnd": return animator.GetBoneTransform(HumanBodyBones.LeftMiddleDistal);
-                case "RightShoulder": return animator.GetBoneTransform(HumanBodyBones.RightShoulder);
-                case "RightArm": return animator.GetBoneTransform(HumanBodyBones.RightUpperArm);
-                case "RightForeArm": return animator.GetBoneTransform(HumanBodyBones.RightLowerArm);
-                case "RightHand": return animator.GetBoneTransform(HumanBodyBones.RightHand);
-                case "RightHandThumbEnd": return animator.GetBoneTransform(HumanBodyBones.RightThumbDistal);
-                case "RightHandMiddleEnd": return animator.GetBoneTransform(HumanBodyBones.RightMiddleDistal);
-                case "LeftLeg": return animator.GetBoneTransform(HumanBodyBones.LeftUpperLeg);
-                case "LeftShin": return animator.GetBoneTransform(HumanBodyBones.LeftLowerLeg);
-                case "LeftFoot": return animator.GetBoneTransform(HumanBodyBones.LeftFoot);
-                case "LeftToeBase": return animator.GetBoneTransform(HumanBodyBones.LeftToes);
-                case "RightLeg": return animator.GetBoneTransform(HumanBodyBones.RightUpperLeg);
-                case "RightShin": return animator.GetBoneTransform(HumanBodyBones.RightLowerLeg);
-                case "RightFoot": return animator.GetBoneTransform(HumanBodyBones.RightFoot);
-                case "RightToeBase": return animator.GetBoneTransform(HumanBodyBones.RightToes);
-                case "pelvis": return animator.GetBoneTransform(HumanBodyBones.Hips);
-                case "spine1": return animator.GetBoneTransform(HumanBodyBones.Spine);
-                case "spine2": return animator.GetBoneTransform(HumanBodyBones.Chest);
-                case "spine3":
-                    return hasUpperChest
-                        ? animator.GetBoneTransform(HumanBodyBones.UpperChest)
-                        : animator.GetBoneTransform(HumanBodyBones.Chest);
-                case "neck": return animator.GetBoneTransform(HumanBodyBones.Neck);
-                case "head": return animator.GetBoneTransform(HumanBodyBones.Head);
-                case "left_hip": return animator.GetBoneTransform(HumanBodyBones.LeftUpperLeg);
-                case "left_knee": return animator.GetBoneTransform(HumanBodyBones.LeftLowerLeg);
-                case "left_ankle": return animator.GetBoneTransform(HumanBodyBones.LeftFoot);
-                case "left_foot": return animator.GetBoneTransform(HumanBodyBones.LeftToes);
-                case "right_hip": return animator.GetBoneTransform(HumanBodyBones.RightUpperLeg);
-                case "right_knee": return animator.GetBoneTransform(HumanBodyBones.RightLowerLeg);
-                case "right_ankle": return animator.GetBoneTransform(HumanBodyBones.RightFoot);
-                case "right_foot": return animator.GetBoneTransform(HumanBodyBones.RightToes);
-                case "left_collar": return animator.GetBoneTransform(HumanBodyBones.LeftShoulder);
-                case "left_shoulder": return animator.GetBoneTransform(HumanBodyBones.LeftUpperArm);
-                case "left_elbow": return animator.GetBoneTransform(HumanBodyBones.LeftLowerArm);
-                case "left_wrist": return animator.GetBoneTransform(HumanBodyBones.LeftHand);
-                case "right_collar": return animator.GetBoneTransform(HumanBodyBones.RightShoulder);
-                case "right_shoulder": return animator.GetBoneTransform(HumanBodyBones.RightUpperArm);
-                case "right_elbow": return animator.GetBoneTransform(HumanBodyBones.RightLowerArm);
-                case "right_wrist": return animator.GetBoneTransform(HumanBodyBones.RightHand);
-                default: return null;
-            }
         }
 
     }

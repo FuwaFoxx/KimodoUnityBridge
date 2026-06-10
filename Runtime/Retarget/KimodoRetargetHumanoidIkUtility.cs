@@ -74,15 +74,10 @@ namespace KimodoBridge
                 worldGoalPosition += worldGoalRotation * new Vector3(axisLength, 0f, 0f);
             }
 
-            if (cache.hasRootBodyCorrection)
-            {
-                worldGoalPosition += cache.rootBodyCorrectionPosition;
-            }
-
             Quaternion inverseBodyRotation = Quaternion.Inverse(bodyRotation);
             goalPosition = inverseBodyRotation * (worldGoalPosition - bodyPosition*humanScale);
             goalRotation = inverseBodyRotation * worldGoalRotation;
-            goalPosition= goalPosition / humanScale;
+            goalPosition /= humanScale;
             return true;
         }
 

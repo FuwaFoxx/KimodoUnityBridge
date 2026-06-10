@@ -75,22 +75,6 @@ namespace KimodoBridge
                 cache.bindLocalRotations[i] = bone.localRotation;
             }
 
-            if (cache.poseHandler != null)
-            {
-                try
-                {
-                    var bindPose = new HumanPose();
-                    cache.poseHandler.GetHumanPose(ref bindPose);
-                    KimodoRetargetClipWriter.EnsureHumanPoseMuscles(ref bindPose);
-                    cache.bindHumanPose = bindPose;
-                    cache.hasBindHumanPose = true;
-                }
-                catch
-                {
-                    cache.bindHumanPose = default;
-                    cache.hasBindHumanPose = false;
-                }
-            }
         }
 
         internal static void ResetSkeletonCachePose(SkeletonCache cache)
@@ -188,9 +172,6 @@ namespace KimodoBridge
                 graph.Play();
                 graph.Evaluate(0f);
 
-                InitializeRootBodyCorrection(cache);
-
-
                 context = new ClipSamplingContext
                 {
                     cache = cache,
@@ -240,9 +221,6 @@ namespace KimodoBridge
 
             if (context.cache != null)
             {
-                context.cache.rootBodyCorrectionRotation = Quaternion.identity;
-                context.cache.rootBodyCorrectionPosition = Vector3.zero;
-                context.cache.hasRootBodyCorrection = false;
             }
         }
 
@@ -342,41 +320,6 @@ namespace KimodoBridge
             if (avatar != null)
             {
                 cache.humanScale = Mathf.Max(1e-6f, animator.humanScale);
-            }
-        }
-
-        private static void InitializeRootBodyCorrection(SkeletonCache cache)
-        {
-            if (cache == null)
-            {
-                return;
-            }
-
-            cache.rootBodyCorrectionRotation = Quaternion.identity;
-            cache.rootBodyCorrectionPosition = Vector3.zero;
-            cache.hasRootBodyCorrection = false;
-
-            if (!cache.hasBindHumanPose || cache.poseHandler == null)
-            {
-                return;
-            }
-
-            try
-            {
-                var firstPose = new HumanPose();
-                cache.poseHandler.GetHumanPose(ref firstPose);
-                KimodoRetargetClipWriter.EnsureHumanPoseMuscles(ref firstPose);
-
-                HumanPose bindPose = cache.bindHumanPose;
-                cache.rootBodyCorrectionRotation = Quaternion.identity;
-                cache.rootBodyCorrectionPosition = bindPose.bodyPosition - firstPose.bodyPosition;
-                cache.hasRootBodyCorrection = false;
-            }
-            catch
-            {
-                cache.rootBodyCorrectionRotation = Quaternion.identity;
-                cache.rootBodyCorrectionPosition = Vector3.zero;
-                cache.hasRootBodyCorrection = false;
             }
         }
 
@@ -666,7 +609,6 @@ namespace KimodoBridge
                 var pose = new HumanPose();
                 cache.poseHandler.GetHumanPose(ref pose);
                 KimodoRetargetClipWriter.EnsureHumanPoseMuscles(ref pose);
-                NormalizeHumanPoseToBindReference(cache, ref pose);
                 sample = KimodoRetargetHumanoidIkUtility.BuildMuscleSampleFromPose(cache, pose);
                 return sample != null;
             }
@@ -675,16 +617,6 @@ namespace KimodoBridge
                 error = ex.Message;
                 return false;
             }
-        }
-
-        private static void NormalizeHumanPoseToBindReference(SkeletonCache cache, ref HumanPose pose)
-        {
-            if (cache == null || !cache.hasRootBodyCorrection)
-            {
-                return;
-            }
-
-            pose.bodyPosition += cache.rootBodyCorrectionPosition;
         }
 
         internal static bool TryCreateTransientMuscleClip(

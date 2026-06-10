@@ -15,8 +15,10 @@ namespace KimodoBridge.Editor
 
             var converted = new KimodoMarkerSampleResult
             {
-                rootPosition = ToKimodoRootPosition(unitySample.rootPosition),
+                kimodoRootPosition = ToKimodoRootPosition(unitySample.unityRootPos),
                 rootHeading = ToKimodoHeading(unitySample.rootHeading),
+                unityRootPos = unitySample.unityRootPos,
+                unityRootRot = unitySample.unityRootRot,
                 localAxisAngles = new List<Vector3>(),
                 sampledJointIndices = unitySample.sampledJointIndices != null
                     ? new List<int>(unitySample.sampledJointIndices)
@@ -67,8 +69,10 @@ namespace KimodoBridge.Editor
 
             var converted = new KimodoMarkerSampleResult
             {
-                rootPosition = ToUnityRootPosition(kimodoSample.rootPosition),
+                kimodoRootPosition = ToUnityRootPosition(kimodoSample.kimodoRootPosition),
                 rootHeading = ToUnityHeading(kimodoSample.rootHeading),
+                unityRootPos = kimodoSample.unityRootPos,
+                unityRootRot = kimodoSample.unityRootRot,
                 localAxisAngles = new List<Vector3>(),
                 sampledJointIndices = kimodoSample.sampledJointIndices != null
                     ? new List<int>(kimodoSample.sampledJointIndices)

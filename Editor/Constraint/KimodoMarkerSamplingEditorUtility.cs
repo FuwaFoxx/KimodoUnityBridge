@@ -67,8 +67,10 @@ namespace KimodoBridge.Editor
                 System.Math.Abs(left.sampleTime - right.sampleTime) <= 1e-9 &&
                 left.rigType == right.rigType &&
                 left.hasRootHeading == right.hasRootHeading &&
-                Approximately(left.rootPosition, right.rootPosition) &&
+                Approximately(left.kimodoRootPosition, right.kimodoRootPosition) &&
                 Approximately(left.rootHeading, right.rootHeading) &&
+                Approximately(left.unityRootPos, right.unityRootPos) &&
+                Approximately(left.unityRootRot, right.unityRootRot) &&
                 StringListsEqual(left.jointNames, right.jointNames) &&
                 Vector3ListsEqual(left.localAxisAngles, right.localAxisAngles) &&
                 IntListsEqual(left.sampledJointIndices, right.sampledJointIndices);
@@ -142,6 +144,11 @@ namespace KimodoBridge.Editor
         private static bool Approximately(Vector3 left, Vector3 right)
         {
             return (left - right).sqrMagnitude <= 1e-10f;
+        }
+
+        private static bool Approximately(Quaternion left, Quaternion right)
+        {
+            return Mathf.Abs(Quaternion.Dot(left, right)) >= 1f - 1e-10f;
         }
     }
 }

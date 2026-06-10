@@ -107,7 +107,7 @@ namespace TimelineInject
                 frame_indices = BuildFrameIndices(sample.sampleTime - clipStartSeconds, clipDurationSeconds),
                 smooth_root_2d = new List<float[]>
                 {
-                    new[] { -sample.rootPosition.x, sample.rootPosition.z }
+                    new[] { -sample.kimodoRootPosition.x, sample.kimodoRootPosition.z }
                 }
             };
 
@@ -124,7 +124,7 @@ namespace TimelineInject
 
         private static KimodoConstraintJson BuildFullBody(KimodoMarkerSampleResult sample, double clipStartSeconds, double? clipDurationSeconds)
         {
-            Vector3 kimodoRoot = new Vector3(-sample.rootPosition.x, sample.rootPosition.y, sample.rootPosition.z);
+            Vector3 kimodoRoot = new Vector3(-sample.kimodoRootPosition.x, sample.kimodoRootPosition.y, sample.kimodoRootPosition.z);
             var json = new KimodoConstraintJson
             {
                 type = "fullbody",
@@ -148,7 +148,7 @@ namespace TimelineInject
 
         private static KimodoConstraintJson BuildEndEffector(KimodoMarkerSampleResult sample, double clipStartSeconds, double? clipDurationSeconds)
         {
-            Vector3 kimodoRoot = new Vector3(-sample.rootPosition.x, sample.rootPosition.y, sample.rootPosition.z);
+            Vector3 kimodoRoot = new Vector3(-sample.kimodoRootPosition.x, sample.kimodoRootPosition.y, sample.kimodoRootPosition.z);
             var json = new KimodoConstraintJson
             {
                 type = sample.constraintType,

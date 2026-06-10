@@ -47,16 +47,28 @@ public abstract class KimodoConstraintMarkerBase : Marker
         }
     }
 
-    public Vector3 rootPosition
+    public Vector3 kimodoRootPosition
     {
-        get => SampleData.rootPosition;
-        set => SampleData.rootPosition = value;
+        get => SampleData.kimodoRootPosition;
+        set => SampleData.kimodoRootPosition = value;
     }
 
     public Vector2 smoothRoot2D
     {
-        get => new Vector2(rootPosition.x, rootPosition.z);
-        set => rootPosition = new Vector3(value.x, rootPosition.y, value.y);
+        get => new Vector2(kimodoRootPosition.x, kimodoRootPosition.z);
+        set => kimodoRootPosition = new Vector3(value.x, kimodoRootPosition.y, value.y);
+    }
+
+    public Vector3 unityRootPos
+    {
+        get => SampleData.unityRootPos;
+        set => SampleData.unityRootPos = value;
+    }
+
+    public Quaternion unityRootRot
+    {
+        get => SampleData.unityRootRot;
+        set => SampleData.unityRootRot = value;
     }
 
     public bool includeGlobalHeading
