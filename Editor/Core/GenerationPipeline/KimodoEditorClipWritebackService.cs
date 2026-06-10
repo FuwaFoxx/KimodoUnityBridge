@@ -16,7 +16,6 @@ namespace KimodoBridge.Editor
         private const string MuscleCacheNameSuffix = "-muscle-cache";
         private const string BoneCacheNameMarker = "-bone-";
         private const string CacheNameSuffix = "-cache";
-        private const string GeneratedAvatarFolder = GeneratedClipFolder + "/Avatars";
         private const string GeneratedPreviewControllerFolder = GeneratedClipFolder + "/PreviewControllers";
 
         private static readonly HashSet<string> PendingProtectedClipPaths = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
@@ -92,69 +91,6 @@ namespace KimodoBridge.Editor
                 controller = null;
                 assetPath = string.Empty;
                 error = $"Create generated preview animator controller failed: {ex.Message}";
-                return false;
-            }
-        }
-
-        public static bool TryLoadGeneratedAvatarCache(GameObject avatarRoot, out Avatar avatar, out string cachePath)
-        {
-            avatar = null;
-            cachePath = BuildAvatarCachePath(avatarRoot);
-            if (string.IsNullOrWhiteSpace(cachePath))
-            {
-                return false;
-            }
-
-            avatar = AssetDatabase.LoadAssetAtPath<Avatar>(cachePath);
-            return avatar != null;
-        }
-
-        public static bool TrySaveGeneratedAvatarCache(GameObject avatarRoot, Avatar generatedAvatar, out Avatar savedAvatar, out string error)
-        {
-            savedAvatar = null;
-            error = string.Empty;
-
-            if (avatarRoot == null)
-            {
-                error = "Avatar root is null.";
-                return false;
-            }
-
-            if (generatedAvatar == null)
-            {
-                error = "Generated avatar is null.";
-                return false;
-            }
-
-            string cachePath = BuildAvatarCachePath(avatarRoot);
-            if (string.IsNullOrWhiteSpace(cachePath))
-            {
-                error = "Avatar cache path is empty.";
-                return false;
-            }
-
-            try
-            {
-                EnsureFolderExists(GeneratedAvatarFolder);
-                if (AssetDatabase.LoadAssetAtPath<Avatar>(cachePath) != null)
-                {
-                    AssetDatabase.DeleteAsset(cachePath);
-                }
-
-                AssetDatabase.CreateAsset(generatedAvatar, cachePath);
-                FlushWritebackAssets();
-                savedAvatar = AssetDatabase.LoadAssetAtPath<Avatar>(cachePath);
-                if (savedAvatar == null)
-                {
-                    error = "Saved avatar cache could not be loaded.";
-                    return false;
-                }
-
-                return true;
-            }
-            catch (Exception ex)
-            {
-                error = $"Save generated avatar cache failed: {ex.Message}";
                 return false;
             }
         }
@@ -290,16 +226,6 @@ namespace KimodoBridge.Editor
             return true;
         }
 
-        public static string BuildMuscleClipCacheName(AnimationClip sourceClip)
-        {
-            return BuildNamedClipCacheName(sourceClip, isMuscleClip: true, targetAvatar: null);
-        }
-
-        public static string BuildBoneClipCacheName(AnimationClip sourceClip, Avatar targetAvatar)
-        {
-            return BuildNamedClipCacheName(sourceClip, isMuscleClip: false, targetAvatar);
-        }
-
         public static bool TryMaterializeGeneratedClipCache(
             AnimationClip sourceClip,
             bool exportMuscleClip,
@@ -317,15 +243,15 @@ namespace KimodoBridge.Editor
                 return false;
             }
 
-            if (!HasClipContent(sourceClip))
+            if (!KimodoRetargetEditorCacheUtility.ClipHasContent(sourceClip))
             {
                 error = "Source clip has no curve content.";
                 return false;
             }
 
             string cacheName = exportMuscleClip
-                ? BuildMuscleClipCacheName(sourceClip)
-                : BuildBoneClipCacheName(sourceClip, targetAvatar);
+                ? BuildNamedClipCacheName(sourceClip, isMuscleClip: true, targetAvatar: null)
+                : BuildNamedClipCacheName(sourceClip, isMuscleClip: false, targetAvatar);
             if (string.IsNullOrWhiteSpace(cacheName))
             {
                 error = "Cache clip name is empty.";
@@ -412,17 +338,6 @@ namespace KimodoBridge.Editor
             {
                 FlushWritebackAssets();
             }
-        }
-
-        private static bool HasClipContent(AnimationClip clip)
-        {
-            if (clip == null)
-            {
-                return false;
-            }
-
-            return AnimationUtility.GetCurveBindings(clip).Length > 0 ||
-                AnimationUtility.GetObjectReferenceCurveBindings(clip).Length > 0;
         }
 
         private static string BuildNamedClipCacheName(AnimationClip sourceClip, bool isMuscleClip, Avatar targetAvatar)
@@ -530,13 +445,6 @@ namespace KimodoBridge.Editor
             return $"{GeneratedClipNamePrefix}Preview_{DateTime.Now:yyyyMMdd_HHmmss_fff}_{Guid.NewGuid():N}";
         }
 
-        private static string BuildAvatarCachePath(GameObject avatarRoot)
-        {
-            string safeName = KimodoRuntimeUtility.SanitizeName(avatarRoot != null ? avatarRoot.name : "Avatar", "Avatar");
-            int hash = ComputeHierarchyHash(avatarRoot != null ? avatarRoot.transform : null);
-            return $"{GeneratedAvatarFolder}/{safeName}_{hash:X8}.asset";
-        }
-
         private static int CompareGeneratedClipPathsByAgeOldestFirst(string leftPath, string rightPath)
         {
             string leftName = Path.GetFileNameWithoutExtension(leftPath) ?? string.Empty;
@@ -548,31 +456,6 @@ namespace KimodoBridge.Editor
                 ? rightName.Substring(GeneratedClipNamePrefix.Length)
                 : rightName;
             return string.Compare(leftStamp, rightStamp, StringComparison.Ordinal);
-        }
-
-        private static int ComputeHierarchyHash(Transform root)
-        {
-            unchecked
-            {
-                int hash = 5381;
-                if (root == null)
-                {
-                    return hash;
-                }
-
-                Transform[] all = root.GetComponentsInChildren<Transform>(true);
-                for (int i = 0; i < all.Length; i++)
-                {
-                    string path = AnimationUtility.CalculateTransformPath(all[i], root);
-                    string name = $"{all[i].name}|{path}";
-                    for (int j = 0; j < name.Length; j++)
-                    {
-                        hash = ((hash << 5) + hash) ^ name[j];
-                    }
-                }
-
-                return hash;
-            }
         }
 
         private static void ScheduleGeneratedClipTrim(AnimationClip protectedClip)
@@ -611,7 +494,7 @@ namespace KimodoBridge.Editor
             }
         }
 
-        private static void EnsureFolderExists(string folderPath)
+        internal static void EnsureFolderExists(string folderPath)
         {
             if (AssetDatabase.IsValidFolder(folderPath))
             {
@@ -636,6 +519,5 @@ namespace KimodoBridge.Editor
                 current = next;
             }
         }
-
     }
 }

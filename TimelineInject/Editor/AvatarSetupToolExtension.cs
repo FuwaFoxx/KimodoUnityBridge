@@ -5,6 +5,20 @@ namespace TimelineInject
 {
     public static class AvatarSetupToolExtension
     {
+        public static bool TryLoadImporterAvatar(GameObject avatarRoot, out Avatar avatar, out string modelImporterPath)
+        {
+            avatar = null;
+            modelImporterPath = string.Empty;
+
+            if (!TryGetModelImporter(avatarRoot, out _, out modelImporterPath))
+            {
+                return false;
+            }
+
+            avatar = AssetDatabase.LoadAssetAtPath<Avatar>(modelImporterPath);
+            return avatar != null;
+        }
+
         public static Avatar AutoGenerateHumanoidAvatarFromModelOrThrow(GameObject avatarRoot, bool forceReimport)
         {
 

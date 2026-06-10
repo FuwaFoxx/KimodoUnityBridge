@@ -57,7 +57,7 @@ namespace KimodoBridge.Editor
                 return true;
             }
 
-            if (TryGetImporterAvatar(avatarRoot, out Avatar importerAvatar) &&
+            if (KimodoHumanoidAvatarBuilderUtility.TryLoadImporterAvatar(avatarRoot, out Avatar importerAvatar, out _) &&
                 KimodoRetargetCoreUtility.IsValidHumanoid(importerAvatar) &&
                 CheckAvatarValid(importerAvatar, avatarRoot))
             {
@@ -66,7 +66,7 @@ namespace KimodoBridge.Editor
                 return true;
             }
 
-            if (KimodoEditorClipWritebackService.TryLoadGeneratedAvatarCache(avatarRoot, out Avatar cached, out _))
+            if (KimodoEditorAvatarCacheUtility.TryLoadGeneratedAvatarCache(avatarRoot, out Avatar cached, out _))
             {
                 if (KimodoRetargetCoreUtility.IsValidHumanoid(cached) && CheckAvatarValid(cached, avatarRoot))
                 {
@@ -78,10 +78,6 @@ namespace KimodoBridge.Editor
 
             Avatar generated = KimodoHumanoidAvatarBuilderUtility.GenerateHumanoidAvatar(
                 avatarRoot,
-                includeExtendedNameAliases: true,
-                normalizeSourceTransformBeforeClone: true,
-                forceUnitScaleOnClone: false,
-                avatarNameSuffix: "Humanoid",
                 out string generateError);
             if (!KimodoRetargetCoreUtility.IsValidHumanoid(generated) || !CheckAvatarValid(generated, avatarRoot))
             {
@@ -99,7 +95,7 @@ namespace KimodoBridge.Editor
                 return true;
             }
 
-            if (KimodoEditorClipWritebackService.TrySaveGeneratedAvatarCache(avatarRoot, generated, out Avatar saved, out string saveError))
+            if (KimodoEditorAvatarCacheUtility.TrySaveGeneratedAvatarCache(avatarRoot, generated, out Avatar saved, out string saveError))
             {
                 if (KimodoRetargetCoreUtility.IsValidHumanoid(saved))
                 {
@@ -116,26 +112,6 @@ namespace KimodoBridge.Editor
             avatar = generated;
             source = "GeneratedTemp";
             return true;
-        }
-
-        public static bool TryEnsureHumanoidAvatar(
-            Animator animator,
-            out Avatar avatar,
-            out string source,
-            out string error)
-        {
-            avatar = null;
-            source = string.Empty;
-            error = string.Empty;
-
-            if (animator == null)
-            {
-                error = "Animator is null.";
-                return false;
-            }
-
-            GameObject avatarRoot = animator.avatarRoot != null ? animator.avatarRoot.gameObject : animator.gameObject;
-            return TryEnsureHumanoidAvatar(avatarRoot, out avatar, out source, out error);
         }
 
         public static bool CheckAvatarValid(Avatar avatar, GameObject gameObject)
@@ -168,22 +144,6 @@ namespace KimodoBridge.Editor
 
             return true;
         }
-
-        private static bool TryGetImporterAvatar(GameObject gameObject, out Avatar avatar)
-        {
-            avatar = null;
-            if (gameObject == null)
-            {
-                return false;
-            }
-
-            if (!KimodoHumanoidAvatarBuilderUtility.TryLoadImporterAvatar(gameObject, out avatar, out _))
-            {
-                return false;
-            }
-            return true;
-        }
-
     }
 }
 

@@ -6,6 +6,8 @@ namespace KimodoBridge
 {
     internal static class KimodoRetargetMarkerSamplingUtility
     {
+        private const string DefaultModelName = "Kimodo-SOMA-RP-v1";
+
         public static bool TrySampleMarkerFromClip(
             AnimationClip sourceClip,
             string markerType,
@@ -32,7 +34,7 @@ namespace KimodoBridge
                 return false;
             }
 
-            if (!TryResolveMarkerTargetAvatar(explicitTargetAvatar, fallbackAnimator, modelName, out Avatar targetAvatar, out error))
+            if (!TryResolveTargetAvatar(explicitTargetAvatar, fallbackAnimator, modelName, out Avatar targetAvatar, out error))
             {
                 return false;
             }
@@ -95,7 +97,7 @@ namespace KimodoBridge
             }
         }
 
-        private static bool TryResolveMarkerTargetAvatar(
+        internal static bool TryResolveTargetAvatar(
             Avatar explicitTargetAvatar,
             Animator fallbackAnimator,
             string modelName,
@@ -104,6 +106,7 @@ namespace KimodoBridge
         {
             targetAvatar = null;
             error = string.Empty;
+            _ = fallbackAnimator;
 
             if (KimodoRetargetCoreUtility.IsValidHumanoid(explicitTargetAvatar))
             {
@@ -111,7 +114,8 @@ namespace KimodoBridge
                 return true;
             }
 
-            if (KimodoRuntimeAvatarSkeletonBuilder.TryLoadAvatarByModelName(modelName, out Avatar resolvedAvatar, out string targetError) &&
+            string resolvedModelName = string.IsNullOrWhiteSpace(modelName) ? DefaultModelName : modelName.Trim();
+            if (KimodoRuntimeAvatarSkeletonBuilder.TryLoadAvatarByModelName(resolvedModelName, out Avatar resolvedAvatar, out string targetError) &&
                 KimodoRetargetCoreUtility.IsValidHumanoid(resolvedAvatar))
             {
                 targetAvatar = resolvedAvatar;
@@ -124,7 +128,7 @@ namespace KimodoBridge
             return false;
         }
 
-        private static bool TryBuildMarkerSampleResultFromBoneSample(
+        internal static bool TryBuildMarkerSampleResultFromBoneSample(
             BoneSample sample,
             SkeletonCache targetCache,
             string modelName,
@@ -135,6 +139,7 @@ namespace KimodoBridge
         {
             result = null;
             error = string.Empty;
+            string resolvedModelName = string.IsNullOrWhiteSpace(modelName) ? DefaultModelName : modelName.Trim();
 
             if (sample == null || !sample.IsValid)
             {
@@ -153,7 +158,7 @@ namespace KimodoBridge
             }
 
             if (!KimodoProfileSkeletonUtility.TryResolveProfileSkeleton(
-                    modelName,
+                    resolvedModelName,
                     targetCache.skeletonRoot,
                     out string[] jointNames,
                     out int[] parentIndices,
@@ -166,7 +171,7 @@ namespace KimodoBridge
             return KimodoMarkerSamplingUtility.TrySampleMarkerFromProfileSkeletonRaw(
                 targetCache.animator,
                 targetCache.skeletonRoot,
-                modelName,
+                resolvedModelName,
                 sampleTime,
                 markerType,
                 jointNames,

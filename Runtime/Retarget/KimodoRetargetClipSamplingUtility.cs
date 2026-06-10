@@ -24,6 +24,8 @@ namespace KimodoBridge
             public float evaluatedTime;
             public bool hasEvaluatedTime;
             public float frameRate;
+            public bool applyFootIk;
+            public bool applyPlayableIk;
 
             public bool IsReady =>
                 cache != null &&
@@ -133,6 +135,8 @@ namespace KimodoBridge
             SkeletonCache cache,
             string rootName,
             ClipSamplingMode samplingMode,
+            bool applyFootIk,
+            bool applyPlayableIk,
             out ClipSamplingContext context,
             out string error)
         {
@@ -163,8 +167,8 @@ namespace KimodoBridge
                 graph = PlayableGraph.Create(rootName + "Graph");
                 graph.SetTimeUpdateMode(DirectorUpdateMode.Manual);
                 AnimationClipPlayable clipPlayable = AnimationClipPlayable.Create(graph, clip);
-                clipPlayable.SetApplyFootIK(true);
-                clipPlayable.SetApplyPlayableIK(true);
+                clipPlayable.SetApplyFootIK(applyFootIk);
+                clipPlayable.SetApplyPlayableIK(applyPlayableIk);
                 AnimationPlayableOutput output = AnimationPlayableOutput.Create(graph, rootName + "Output", cache.animator);
                 output.SetSourcePlayable(clipPlayable);
 
@@ -181,7 +185,9 @@ namespace KimodoBridge
                     originalAnimatorAvatar = originalAnimatorAvatar,
                     evaluatedTime = 0f,
                     hasEvaluatedTime = false,
-                    frameRate = ResolveFrameRate(clip)
+                    frameRate = ResolveFrameRate(clip),
+                    applyFootIk = applyFootIk,
+                    applyPlayableIk = applyPlayableIk
                 };
                 return true;
             }
@@ -365,6 +371,8 @@ namespace KimodoBridge
                 sampleTime,
                 "KimodoRetargetTools_SourceBoneSampler",
                 KimodoRetargetClipSamplingUtility.ResolveClipSamplingMode(clip),
+                false,
+                false,
                 TrySampleBoneClipToBoneSampleInternal,
                 out sample,
                 out error);
@@ -441,6 +449,8 @@ namespace KimodoBridge
                 duration,
                 "KimodoRetargetTools_BatchBoneSampler",
                 samplingMode,
+                false,
+                false,
                 TrySampleBoneClipToBoneSampleInternal,
                 CloneBoneSample,
                 out samples,
@@ -463,6 +473,8 @@ namespace KimodoBridge
                 duration,
                 "KimodoRetargetTools_BatchMuscleSampler",
                 samplingMode,
+                false,
+                false,
                 TrySampleMuscleClipToMuscleSampleInternal,
                 CloneMuscleSample,
                 out samples,
@@ -497,6 +509,8 @@ namespace KimodoBridge
                     targetCache,
                     "KimodoRetargetTools_TargetHumanoidSample",
                     KimodoRetargetClipSamplingUtility.ClipSamplingMode.Humanoid,
+                    false,
+                    false,
                     out KimodoRetargetClipSamplingUtility.ClipSamplingContext context,
                     out error))
             {
@@ -665,6 +679,8 @@ namespace KimodoBridge
             float sampleTime,
             string rootName,
             KimodoRetargetClipSamplingUtility.ClipSamplingMode samplingMode,
+            bool applyFootIk,
+            bool applyPlayableIk,
             ClipSampleCallback<TSample> sampleCallback,
             out TSample sample,
             out string error)
@@ -677,6 +693,8 @@ namespace KimodoBridge
                     cache,
                     rootName,
                     samplingMode,
+                    applyFootIk,
+                    applyPlayableIk,
                     out KimodoRetargetClipSamplingUtility.ClipSamplingContext context,
                     out error))
             {
@@ -700,6 +718,8 @@ namespace KimodoBridge
             float duration,
             string rootName,
             KimodoRetargetClipSamplingUtility.ClipSamplingMode samplingMode,
+            bool applyFootIk,
+            bool applyPlayableIk,
             ClipSampleCallback<TSample> sampleCallback,
             Func<TSample, TSample> cloneSample,
             out TSample[] samples,
@@ -713,6 +733,8 @@ namespace KimodoBridge
                     cache,
                     rootName,
                     samplingMode,
+                    applyFootIk,
+                    applyPlayableIk,
                     out KimodoRetargetClipSamplingUtility.ClipSamplingContext context,
                     out error))
             {

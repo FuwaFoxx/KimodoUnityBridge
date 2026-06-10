@@ -332,7 +332,7 @@ namespace KimodoBridge.Editor
                         return false;
                     }
 
-                    if (!KimodoConstraintPoseRigFactory.TryResolveFootWorldPositions(
+                    if (!KimodoConstraintPoseRigFootUtility.TryResolveFootWorldPositions(
                             rigInstance,
                             modelName,
                             out Vector3 leftFootPosition,

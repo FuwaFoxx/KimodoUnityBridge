@@ -85,7 +85,9 @@ namespace KimodoBridge
 
         public static KimodoConstraintRigType ResolveRigTypeFromModelName(string modelName)
         {
-            string normalized = NormalizeModelName(modelName);
+            string normalized = string.IsNullOrWhiteSpace(modelName)
+                ? string.Empty
+                : modelName.Trim().ToLowerInvariant();
             if (normalized.Contains("g1"))
             {
                 return KimodoConstraintRigType.G1;
@@ -109,12 +111,6 @@ namespace KimodoBridge
         {
             ResolveProfile(modelName, out _, out _, out int[] parentIndices);
             return CloneInts(parentIndices);
-        }
-
-        [Obsolete("Use GetProfileRootJointNameForModel instead.")]
-        public static string GetRootJointNameForModel(string modelName)
-        {
-            return GetProfileRootJointNameForModel(modelName);
         }
 
         public static string GetProfileRootJointNameForModel(string modelName)
@@ -146,11 +142,6 @@ namespace KimodoBridge
                     parentIndices = Soma77Parents;
                     return;
             }
-        }
-
-        private static string NormalizeModelName(string modelName)
-        {
-            return string.IsNullOrWhiteSpace(modelName) ? string.Empty : modelName.Trim().ToLowerInvariant();
         }
 
         private static string[] CloneStrings(string[] source)
