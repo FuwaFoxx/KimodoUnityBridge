@@ -25,11 +25,10 @@ namespace KimodoBridge.Editor
 
             UpdateConstraintReferences(sourceClip);
 
-            bool ok = KimodoInbetweenConstraintUtility.TryBuildConstraintsJson(
+            bool ok = KimodoTimelineInOutConstraintAdapter.TryBuildConstraintsJson(
                 sourceClip,
-                clip.enableInbetweenInterpolation,
+                clip.inOutConstraintMode,
                 clip.normalizeConstraintOrigin,
-                clip.enableInClipRootMotionCompensation,
                 clip.generationFrames,
                 out string constraintsJson,
                 out string error);

@@ -11,7 +11,6 @@ namespace KimodoBridge.Editor
     internal sealed class KimodoAnimatorPreviewPanel : IDisposable
     {
         private const float MinLeftWidth = 360f;
-        private const string DefaultBridgeModelName = "Kimodo-SOMA-RP-v1";
         private const string BlendTreeUnsupportedMessage = "TODO: will support BlendTree on future.";
 
         private enum PreviewMode
@@ -302,7 +301,7 @@ namespace KimodoBridge.Editor
             generatedPreviewHistory.Clear();
             generatedPreviewIndex = -1;
             previewMode = PreviewMode.Original;
-            retargetAvatarBridgeModelName = NormalizeBridgeModelName(bridgeModelName);
+            retargetAvatarBridgeModelName = KimodoPlayableClip.NormalizeBridgeModelName(bridgeModelName);
             avatarPreviewCore?.RestartFromZeroAndPlay();
         }
 
@@ -353,134 +352,88 @@ namespace KimodoBridge.Editor
                 : Mathf.Max(1f / KimodoPlayableClip.FIXED_FRAME_RATE, clip.length);
         }
 
-        public bool TryBuildExternalConstraints(string bridgeModelName, float generationDurationSeconds, bool isLoop, out string constraintsJson, out string error)
+        public bool TryBuildExternalConstraints(
+            string bridgeModelName,
+            KimodoInOutConstraintMode mode,
+            float generationDurationSeconds,
+            bool isLoop,
+            out string constraintsJson,
+            out string error)
         {
             constraintsJson = string.Empty;
             error = string.Empty;
+
+            if (mode == KimodoInOutConstraintMode.None)
+            {
+                return true;
+            }
 
             if (!TryResolveAvatarAndMotionForSampling(bridgeModelName, preparePreviewRoot: true, out Avatar avatar, out AnimationClip sourceClip, out error))
             {
                 return false;
             }
 
-            string modelName = NormalizeBridgeModelName(bridgeModelName);
-            AnimationClip beginClip = sourceClip;
-            AnimationClip endClip = sourceClip;
-            double beginNormalizedTime = 0.0;
-            double endNormalizedTime = 1.0;
-            if (selectedTransition != null)
+            string modelName = KimodoPlayableClip.NormalizeBridgeModelName(bridgeModelName);
+            AnimationClip previousClip = null;
+            AnimationClip currentClip = sourceClip;
+            AnimationClip nextClip = null;
+            switch (mode)
             {
-                AnimationClip destinationClip = selectedTransition.destinationState != null
-                    ? selectedTransition.destinationState.motion as AnimationClip
-                    : null;
-                if (destinationClip == null)
+                case KimodoInOutConstraintMode.Inside:
+                    break;
+
+                case KimodoInOutConstraintMode.Outside:
                 {
-                    error = "Transition preview requires from/to clips.";
-                    return false;
+                    if (selectedTransition == null)
+                    {
+                        error = "Outside mode requires AnimatorStateTransition selection.";
+                        return false;
+                    }
+
+                    AnimationClip destinationClip = selectedTransition.destinationState != null
+                        ? selectedTransition.destinationState.motion as AnimationClip
+                        : null;
+                    if (destinationClip == null)
+                    {
+                        error = "Transition preview requires from/to clips.";
+                        return false;
+                    }
+
+                    previousClip = sourceClip;
+                    currentClip = null;
+                    nextClip = destinationClip;
+                    break;
                 }
 
-                beginNormalizedTime = 1.0;
-                endNormalizedTime = 0.0;
-                endClip = destinationClip;
+                default:
+                    error = $"Unsupported InOut constraint mode: {mode}.";
+                    return false;
             }
 
-            int generatedFrameCount = ResolveConstraintFrameCount(generationDurationSeconds);
-            double generatedClipDurationSeconds = ResolveConstraintClipDurationSeconds(generatedFrameCount);
-            double endConstraintTime = ResolveConstraintEndSampleTimeSeconds(generatedFrameCount);
-
-            var samples = new List<KimodoMarkerSampleResult>(2);
-            if (!KimodoRetargetToolsEditor.TrySampleMarkerForClip(
-                    beginClip,
-                    "fullbody",
-                    ResolveClipSampleTime(beginClip, beginNormalizedTime),
-                    avatar,
-                    null,
-                    null,
-                    modelName,
-                    forceRefresh: false,
-                    out KimodoMarkerSampleResult begin,
-                    out error))
+            int generatedFrameCount = KimodoInOutConstraintTimingUtility.DurationSecondsToFrameCount(generationDurationSeconds);
+            var request = new KimodoInOutConstraintRequest
             {
-                return false;
-            }
-            if (!KimodoRetargetToolsEditor.TrySampleMarkerForClip(
-                    endClip,
-                    "fullbody",
-                    ResolveClipSampleTime(endClip, endNormalizedTime),
-                    avatar,
-                    null,
-                    null,
-                    modelName,
-                    forceRefresh: false,
-                    out KimodoMarkerSampleResult end,
+                Mode = mode,
+                PreviousClip = previousClip,
+                CurrentClip = currentClip,
+                NextClip = nextClip,
+                SourceAvatar = avatar,
+                ModelName = modelName,
+                GenerationFrames = generatedFrameCount,
+                IsLoop = mode == KimodoInOutConstraintMode.Inside && isLoop
+            };
+
+            if (!KimodoInOutConstraintComposer.TryBuild(
+                    request,
+                    out KimodoInOutConstraintResult result,
+                    out _,
                     out error))
             {
                 return false;
             }
 
-            begin.constraintType = "fullbody";
-            end.constraintType = "fullbody";
-            begin.sampleTime = 0.0;
-            end.sampleTime = endConstraintTime;
-            if (isLoop)
-            {
-                OverwriteLoopEndPoseAxes(begin, end);
-            }
-
-            samples.Add(begin);
-            if (generatedFrameCount > 1)
-            {
-                samples.Add(end);
-            }
-
-            constraintsJson = KimodoConstraintJsonExporter.ToConstraintsJson(samples, 0.0, generatedClipDurationSeconds);
+            constraintsJson = result != null ? result.ConstraintsJson ?? string.Empty : string.Empty;
             return true;
-        }
-
-        private static double ResolveClipSampleTime(AnimationClip clip, double normalizedTime)
-        {
-            if (clip == null)
-            {
-                return 0.0;
-            }
-
-            double duration = Math.Max(0.0, clip.length);
-            if (duration <= 0.0)
-            {
-                return 0.0;
-            }
-
-            double clampedNormalizedTime = Math.Max(0.0, Math.Min(1.0, normalizedTime));
-            if (clampedNormalizedTime <= 0.0)
-            {
-                return 0.0;
-            }
-
-            if (clampedNormalizedTime >= 1.0)
-            {
-                double epsilon = Math.Min(1e-3, duration * 0.5);
-                return Math.Max(0.0, duration - epsilon);
-            }
-
-            return clampedNormalizedTime * duration;
-        }
-
-        private static void OverwriteLoopEndPoseAxes(KimodoMarkerSampleResult begin, KimodoMarkerSampleResult end)
-        {
-            if (begin == null || end == null)
-            {
-                return;
-            }
-
-            end.localAxisAngles = begin.localAxisAngles != null
-                ? new List<Vector3>(begin.localAxisAngles)
-                : new List<Vector3>();
-            end.sampledJointIndices = begin.sampledJointIndices != null
-                ? new List<int>(begin.sampledJointIndices)
-                : new List<int>();
-            end.jointNames = begin.jointNames != null
-                ? new List<string>(begin.jointNames)
-                : new List<string>();
         }
 
         public void LockCurrentSelection()
@@ -536,8 +489,8 @@ namespace KimodoBridge.Editor
             {
                 selectedTransition = transition;
                 selectedState = null;
-                selectedController = FindControllerForObject(transition);
-                selectedStateMachine = FindStateMachineForTransition(selectedController, transition, out selectedFromState);
+                selectedController = KimodoAnimatorSelectionUtility.FindControllerForObject(transition);
+                selectedStateMachine = KimodoAnimatorSelectionUtility.FindStateMachineForTransition(selectedController, transition, out selectedFromState);
                 selectionLatched = lockSelection;
                 latchedSelectionInstanceId = lockSelection ? obj.GetInstanceID() : 0;
                 return true;
@@ -548,8 +501,8 @@ namespace KimodoBridge.Editor
                 selectedState = state;
                 selectedTransition = null;
                 selectedFromState = null;
-                selectedController = FindControllerForObject(state);
-                selectedStateMachine = FindStateMachineForState(selectedController, state);
+                selectedController = KimodoAnimatorSelectionUtility.FindControllerForObject(state);
+                selectedStateMachine = KimodoAnimatorSelectionUtility.FindStateMachineForState(selectedController, state);
                 selectionLatched = lockSelection;
                 latchedSelectionInstanceId = lockSelection ? obj.GetInstanceID() : 0;
                 return true;
@@ -578,7 +531,7 @@ namespace KimodoBridge.Editor
                 return;
             }
 
-            if (!TryResolveAvatarAndMotionForSampling(DefaultBridgeModelName, preparePreviewRoot: true, out _, out _, out _))
+            if (!TryResolveAvatarAndMotionForSampling(KimodoPlayableClip.DefaultBridgeModelName, preparePreviewRoot: true, out _, out _, out _))
             {
                 DestroyPreviewRootInstance();
                 ClearResolvedPreviewSource();
@@ -595,7 +548,7 @@ namespace KimodoBridge.Editor
             avatar = null;
             sourceClip = null;
             error = string.Empty;
-            string modelName = NormalizeBridgeModelName(bridgeModelName);
+            string modelName = KimodoPlayableClip.NormalizeBridgeModelName(bridgeModelName);
 
             if (!TryResolveSelectedSourceClip(out sourceClip, out error))
             {
@@ -737,31 +690,6 @@ namespace KimodoBridge.Editor
             retargetAvatarBridgeModelName = string.Empty;
         }
 
-        private static int ResolveConstraintFrameCount(float generationDurationSeconds)
-        {
-            float minDuration = KimodoPlayableClip.MIN_FRAMES / KimodoPlayableClip.FIXED_FRAME_RATE;
-            float maxDuration = KimodoPlayableClip.MAX_FRAMES / KimodoPlayableClip.FIXED_FRAME_RATE;
-            float clampedDuration = Mathf.Clamp(generationDurationSeconds, minDuration, maxDuration);
-            return Mathf.Clamp(
-                Mathf.RoundToInt(clampedDuration * KimodoPlayableClip.FIXED_FRAME_RATE),
-                KimodoPlayableClip.MIN_FRAMES,
-                KimodoPlayableClip.MAX_FRAMES);
-        }
-
-        private static double ResolveConstraintClipDurationSeconds(int frameCount)
-        {
-            int clampedFrameCount = Mathf.Clamp(frameCount, KimodoPlayableClip.MIN_FRAMES, KimodoPlayableClip.MAX_FRAMES);
-            return clampedFrameCount / KimodoPlayableClip.FIXED_FRAME_RATE;
-        }
-
-        private static double ResolveConstraintEndSampleTimeSeconds(int frameCount)
-        {
-            int clampedFrameCount = Mathf.Clamp(frameCount, KimodoPlayableClip.MIN_FRAMES, KimodoPlayableClip.MAX_FRAMES);
-            return clampedFrameCount <= 1
-                ? 0.0
-                : (clampedFrameCount - 1.0) / KimodoPlayableClip.FIXED_FRAME_RATE;
-        }
-
         private void SetGeneratedPreviewByIndex()
         {
             if (generatedPreviewHistory.Count == 0)
@@ -797,7 +725,7 @@ namespace KimodoBridge.Editor
                 avatar = null;
                 if (sourceRoot == null)
                 {
-                    string modelName = NormalizeBridgeModelName(bridgeModelName);
+                    string modelName = KimodoPlayableClip.NormalizeBridgeModelName(bridgeModelName);
                     if (KimodoRuntimeAvatarSkeletonBuilder.TryLoadAvatarByModelName(modelName, out Avatar fallbackAvatar, out _)
                         && fallbackAvatar != null && fallbackAvatar.isValid && fallbackAvatar.isHuman)
                     {
@@ -903,13 +831,6 @@ namespace KimodoBridge.Editor
             return false;
         }
 
-        private static string NormalizeBridgeModelName(string bridgeModelName)
-        {
-            return string.IsNullOrWhiteSpace(bridgeModelName)
-                ? DefaultBridgeModelName
-                : bridgeModelName.Trim();
-        }
-
         private static string ResolvePromptFromState(AnimatorState state)
         {
             if (state == null)
@@ -960,140 +881,6 @@ namespace KimodoBridge.Editor
             }
 
             return $"transition {fromName} to {toName}";
-        }
-
-        private static AnimatorController FindControllerForObject(UnityEngine.Object target)
-        {
-            if (target == null)
-            {
-                return null;
-            }
-            string path = AssetDatabase.GetAssetPath(target);
-            if (string.IsNullOrWhiteSpace(path))
-            {
-                return null;
-            }
-            return AssetDatabase.LoadAssetAtPath<AnimatorController>(path);
-        }
-
-        private static AnimatorStateMachine FindStateMachineForState(AnimatorController controller, AnimatorState state)
-        {
-            if (controller == null || state == null)
-            {
-                return null;
-            }
-
-            for (int i = 0; i < controller.layers.Length; i++)
-            {
-                AnimatorStateMachine sm = controller.layers[i].stateMachine;
-                if (TryFindStateMachineForStateRecursive(sm, state, out AnimatorStateMachine owner))
-                {
-                    return owner;
-                }
-            }
-            return null;
-        }
-
-        private static AnimatorStateMachine FindStateMachineForTransition(AnimatorController controller, AnimatorStateTransition transition, out AnimatorState fromState)
-        {
-            fromState = null;
-            if (controller == null || transition == null)
-            {
-                return null;
-            }
-
-            for (int i = 0; i < controller.layers.Length; i++)
-            {
-                AnimatorStateMachine sm = controller.layers[i].stateMachine;
-                if (TryFindStateMachineForTransitionRecursive(sm, transition, out AnimatorStateMachine owner, out fromState))
-                {
-                    return owner;
-                }
-            }
-            return null;
-        }
-
-        private static bool TryFindStateMachineForStateRecursive(
-            AnimatorStateMachine stateMachine,
-            AnimatorState targetState,
-            out AnimatorStateMachine owner)
-        {
-            owner = null;
-            if (stateMachine == null || targetState == null)
-            {
-                return false;
-            }
-
-            ChildAnimatorState[] states = stateMachine.states;
-            for (int i = 0; i < states.Length; i++)
-            {
-                if (states[i].state == targetState)
-                {
-                    owner = stateMachine;
-                    return true;
-                }
-            }
-
-            ChildAnimatorStateMachine[] childStateMachines = stateMachine.stateMachines;
-            for (int i = 0; i < childStateMachines.Length; i++)
-            {
-                if (TryFindStateMachineForStateRecursive(childStateMachines[i].stateMachine, targetState, out owner))
-                {
-                    return true;
-                }
-            }
-
-            return false;
-        }
-
-        private static bool TryFindStateMachineForTransitionRecursive(
-            AnimatorStateMachine stateMachine,
-            AnimatorStateTransition transition,
-            out AnimatorStateMachine owner,
-            out AnimatorState fromState)
-        {
-            owner = null;
-            fromState = null;
-            if (stateMachine == null || transition == null)
-            {
-                return false;
-            }
-
-            ChildAnimatorState[] states = stateMachine.states;
-            for (int i = 0; i < states.Length; i++)
-            {
-                AnimatorState state = states[i].state;
-                if (state == null)
-                {
-                    continue;
-                }
-
-                AnimatorStateTransition[] transitions = state.transitions;
-                for (int j = 0; j < transitions.Length; j++)
-                {
-                    if (transitions[j] == transition)
-                    {
-                        owner = stateMachine;
-                        fromState = state;
-                        return true;
-                    }
-                }
-            }
-
-            ChildAnimatorStateMachine[] childStateMachines = stateMachine.stateMachines;
-            for (int i = 0; i < childStateMachines.Length; i++)
-            {
-                if (TryFindStateMachineForTransitionRecursive(
-                        childStateMachines[i].stateMachine,
-                        transition,
-                        out owner,
-                        out fromState))
-                {
-                    return true;
-                }
-            }
-
-            return false;
         }
 
         private static bool TryResolveScenePreviewSourceByController(AnimatorController controller, out GameObject sourceRoot, out Avatar avatar)

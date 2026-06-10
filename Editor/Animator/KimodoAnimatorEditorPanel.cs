@@ -20,7 +20,7 @@ namespace KimodoBridge.Editor
             ref float customDurationSeconds,
             float suggestedDurationSeconds,
             ref int diffusionSteps,
-            ref bool enableInbetweenConstraints,
+            ref KimodoInOutConstraintMode inOutConstraintMode,
             ref bool isLoop,
             ref bool randomSeed,
             ref int seed,
@@ -58,7 +58,7 @@ namespace KimodoBridge.Editor
                         ref customDurationSeconds,
                         suggestedDurationSeconds,
                         ref diffusionSteps,
-                        ref enableInbetweenConstraints,
+                        ref inOutConstraintMode,
                         ref isLoop,
                         ref randomSeed,
                         ref seed,
@@ -88,7 +88,7 @@ namespace KimodoBridge.Editor
             ref float customDurationSeconds,
             float suggestedDurationSeconds,
             ref int diffusionSteps,
-            ref bool enableInbetweenConstraints,
+            ref KimodoInOutConstraintMode inOutConstraintMode,
             ref bool isLoop,
             ref bool randomSeed,
             ref int seed,
@@ -146,18 +146,20 @@ namespace KimodoBridge.Editor
                 1,
                 1000);
 
-            EditorGUILayout.BeginHorizontal();
-            enableInbetweenConstraints = EditorGUILayout.ToggleLeft(
-                new GUIContent("In-between Constraint", "Use boundary pose constraints for generation."),
-                enableInbetweenConstraints);
-            using (new EditorGUI.DisabledScope(!enableInbetweenConstraints))
+            inOutConstraintMode = (KimodoInOutConstraintMode)EditorGUILayout.EnumPopup(
+                new GUIContent("InOut Constraint", "None disables boundary constraints. Inside uses the selected clip's own start/end poses. Outside uses transition boundary poses."),
+                inOutConstraintMode);
+            if (inOutConstraintMode != KimodoInOutConstraintMode.Inside)
+            {
+                isLoop = false;
+            }
+
+            using (new EditorGUI.DisabledScope(inOutConstraintMode != KimodoInOutConstraintMode.Inside))
             {
                 isLoop = EditorGUILayout.ToggleLeft(
                     new GUIContent("Is Loop", "Reuse the start fullbody pose axes for the end fullbody constraint while preserving end root motion."),
-                    isLoop,
-                    GUILayout.Width(90f));
+                    isLoop);
             }
-            EditorGUILayout.EndHorizontal();
 
             EditorGUILayout.BeginHorizontal();
             randomSeed = EditorGUILayout.ToggleLeft(new GUIContent("Random"), randomSeed, GUILayout.Width(90f));

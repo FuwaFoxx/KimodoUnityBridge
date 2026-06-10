@@ -23,6 +23,13 @@ namespace KimodoBridge
         SMPLX = 2
     }
 
+    public enum KimodoInOutConstraintMode
+    {
+        None = 0,
+        Inside = 1,
+        Outside = 2
+    }
+
     [System.Serializable]
     public class KimodoCurveFilterOptions
     {
@@ -53,7 +60,7 @@ namespace KimodoBridge
         public int comfyuiPort = 8188;
 
         [Header("Kimodo Bridge")]
-        public string bridgeModelName = "Kimodo-SOMA-RP-v1";
+        public string bridgeModelName = DefaultBridgeModelName;
         [Tooltip("Low: quantized encoder (~4G). High: full encoder (~16G). Kimodo base model ~2G.")]
         public KimodoBridgeVramMode bridgeVramMode = KimodoBridgeVramMode.Low;
 
@@ -65,15 +72,12 @@ namespace KimodoBridge
         public int seed = 42;
         [SerializeField, HideInInspector]
         private Avatar customRetargetAvatar;
-        [Tooltip("Enable inbetween interpolation by constraining start/end with neighboring clips on timeline.")]
-        public bool enableInbetweenInterpolation = false;
+        [Tooltip("Choose whether to disable InOutConstraint, use this clip's own start/end poses, or use neighboring clip boundary poses.")]
+        public KimodoInOutConstraintMode inOutConstraintMode = KimodoInOutConstraintMode.None;
         [Tooltip("Show all constraint pose previews for this clip when selected in Timeline/Inspector.")]
         public bool showConstraint = true;
         [Tooltip("Normalize constraint root positions around the first available origin anchor before export.")]
         public bool normalizeConstraintOrigin = true;
-        [Tooltip("Compensate in-clip root motion when marker constraints stay clustered within the same clip.")]
-        public bool enableInClipRootMotionCompensation = true;
-
         public bool isGenerated;
         public string lastGeneratedPrompt;
         [Header("Bake Options")]
@@ -97,7 +101,7 @@ namespace KimodoBridge
 
         public static KimodoBakeSkeletonType ResolveBakeSkeletonTypeFromModelName(string modelName)
         {
-            string normalized = (modelName ?? string.Empty).Trim().ToLowerInvariant();
+            string normalized = NormalizeBridgeModelName(modelName).ToLowerInvariant();
             if (normalized.Contains("smplx"))
             {
                 return KimodoBakeSkeletonType.SMPLX;
@@ -111,6 +115,13 @@ namespace KimodoBridge
             return KimodoBakeSkeletonType.SOMA;
         }
 
+        public static string NormalizeBridgeModelName(string modelName)
+        {
+            return string.IsNullOrWhiteSpace(modelName)
+                ? DefaultBridgeModelName
+                : modelName.Trim();
+        }
+
         public Avatar CustomRetargetAvatar
         {
             get => customRetargetAvatar;
@@ -121,6 +132,7 @@ namespace KimodoBridge
         public const int MIN_FRAMES = 1;
         public const int MAX_FRAMES = 300;
         public const int DEFAULT_FRAMES = 150;
+        public const string DefaultBridgeModelName = "Kimodo-SOMA-RP-v1";
 
         public override Playable CreatePlayable(PlayableGraph graph, GameObject owner)
         {

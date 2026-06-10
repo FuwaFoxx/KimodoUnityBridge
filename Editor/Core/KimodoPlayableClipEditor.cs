@@ -23,10 +23,9 @@ namespace KimodoBridge.Editor
         private SerializedProperty diffusionSteps;
         private SerializedProperty randomProp;
         private SerializedProperty seed;
-        private SerializedProperty enableInbetweenInterpolation;
+        private SerializedProperty inOutConstraintModeProp;
         private SerializedProperty showConstraint;
         private SerializedProperty normalizeConstraintOrigin;
-        private SerializedProperty enableInClipRootMotionCompensation;
 
         private SerializedProperty animationClipProp;
         private SerializedProperty footIKProp;
@@ -70,10 +69,9 @@ namespace KimodoBridge.Editor
             diffusionSteps = serializedObject.FindProperty("diffusionSteps");
             randomProp = serializedObject.FindProperty("randomSeed");
             seed = serializedObject.FindProperty("seed");
-            enableInbetweenInterpolation = serializedObject.FindProperty("enableInbetweenInterpolation");
+            inOutConstraintModeProp = serializedObject.FindProperty("inOutConstraintMode");
             showConstraint = serializedObject.FindProperty("showConstraint");
             normalizeConstraintOrigin = serializedObject.FindProperty("normalizeConstraintOrigin");
-            enableInClipRootMotionCompensation = serializedObject.FindProperty("enableInClipRootMotionCompensation");
 
             animationClipProp = serializedObject.FindProperty("m_Clip");
             footIKProp = serializedObject.FindProperty("m_ApplyFootIK");
@@ -170,15 +168,15 @@ namespace KimodoBridge.Editor
             motionPrompt.stringValue = EditorGUILayout.TextArea(motionPrompt.stringValue, GUILayout.Height(60));
 
             int oldFrames = generationFrames.intValue;
-            float minDurationSeconds = FramesToSeconds(KimodoPlayableClip.MIN_FRAMES);
-            float maxDurationSeconds = FramesToSeconds(KimodoPlayableClip.MAX_FRAMES);
-            float oldDurationSeconds = FramesToSeconds(oldFrames);
+            float minDurationSeconds = KimodoInOutConstraintTimingUtility.FrameCountToDurationSeconds(KimodoPlayableClip.MIN_FRAMES);
+            float maxDurationSeconds = KimodoInOutConstraintTimingUtility.FrameCountToDurationSeconds(KimodoPlayableClip.MAX_FRAMES);
+            float oldDurationSeconds = KimodoInOutConstraintTimingUtility.FrameCountToDurationSeconds(oldFrames);
             float newDurationSeconds = EditorGUILayout.Slider(
                 new GUIContent("Duration (s)", "Target generated clip length in seconds. Internally uses the fixed Kimodo sample rate and also syncs timeline clip duration when changed."),
                 oldDurationSeconds,
                 minDurationSeconds,
                 maxDurationSeconds);
-            int newFrames = SecondsToFrames(newDurationSeconds);
+            int newFrames = KimodoInOutConstraintTimingUtility.DurationSecondsToFrameCount(newDurationSeconds);
             if (newFrames != oldFrames)
             {
                 generationFrames.intValue = newFrames;
@@ -193,11 +191,11 @@ namespace KimodoBridge.Editor
             seed.intValue = EditorGUILayout.IntField(new GUIContent("Seed", "Deterministic seed used when Random is disabled."), seed.intValue);
             EditorGUI.EndDisabledGroup();
             EditorGUILayout.EndHorizontal();
-            if (enableInbetweenInterpolation != null)
+            if (inOutConstraintModeProp != null)
             {
                 EditorGUILayout.PropertyField(
-                    enableInbetweenInterpolation,
-                    new GUIContent("In-between Interpolation", "Use neighboring clip boundary poses as constraints to generate in-between motion."));
+                    inOutConstraintModeProp,
+                    new GUIContent("InOut Constraint", "None disables boundary constraints. Inside uses this clip's own start/end poses. Outside uses neighboring clip boundary poses."));
             }
             if (showConstraint != null)
             {
@@ -207,7 +205,7 @@ namespace KimodoBridge.Editor
             }
             DrawConstraintPreviewIfNeeded();
 
-            float seconds = FramesToSeconds(generationFrames.intValue);
+            float seconds = KimodoInOutConstraintTimingUtility.FrameCountToDurationSeconds(generationFrames.intValue);
             EditorGUILayout.LabelField($"Duration: {seconds:F2}s", EditorStyles.miniLabel);
             DrawConstraintReferenceList();
 
@@ -361,7 +359,7 @@ namespace KimodoBridge.Editor
 
         private void DrawBridgeModelSelector()
         {
-            string current = string.IsNullOrWhiteSpace(bridgeModelName.stringValue) ? "Kimodo-SOMA-RP-v1" : bridgeModelName.stringValue.Trim();
+            string current = KimodoPlayableClip.NormalizeBridgeModelName(bridgeModelName.stringValue);
             string[] options = KimodoBridgeController.SupportedModelNames;
             int idx = Array.IndexOf(options, current);
             if (idx < 0)
@@ -377,7 +375,7 @@ namespace KimodoBridge.Editor
         {
             string runtimeRoot = KimodoBridgeController.GetRuntimeRootPath();
             bool highVram = clip != null && clip.bridgeVramMode == KimodoBridgeVramMode.High;
-            string modelName = clip == null || string.IsNullOrWhiteSpace(clip.bridgeModelName) ? "Kimodo-SOMA-RP-v1" : clip.bridgeModelName.Trim();
+            string modelName = clip == null ? KimodoPlayableClip.DefaultBridgeModelName : KimodoPlayableClip.NormalizeBridgeModelName(clip.bridgeModelName);
             string modelsRootOverride = KimodoPlayableClipGenerationSettings.instance.LocalModelsPath?.Trim();
             if (!KimodoBridgeController.TryGetModelMissingSetupMinutes(runtimeRoot, highVram, modelName, modelsRootOverride, out int minutes))
             {
@@ -598,13 +596,6 @@ namespace KimodoBridge.Editor
                     new GUIContent("Normalize Constraint Origin", "Use the first available boundary constraint as the local origin before export. When disabled, timeline Match Offsets to Previous Clip will also be skipped."));
             }
 
-            if (enableInClipRootMotionCompensation != null)
-            {
-                EditorGUILayout.PropertyField(
-                    enableInClipRootMotionCompensation,
-                    new GUIContent("Motion Composition", "Compensate clustered constraints inside the same clip by accumulating inferred foot motion."));
-            }
-
             EditorGUILayout.Space(4f);
             EditorGUILayout.LabelField("Curve Filter Options", EditorStyles.boldLabel);
 
@@ -682,7 +673,7 @@ namespace KimodoBridge.Editor
                 EditorGUILayout.LabelField($"Prompt: {clip.lastGeneratedPrompt}", EditorStyles.miniLabel);
             }
             EditorGUILayout.LabelField(
-                $"Duration: {FramesToSeconds(clip.frameCount):F2}s, Frames: {clip.frameCount}, Joints: {clip.jointCount}",
+                $"Duration: {KimodoInOutConstraintTimingUtility.FrameCountToDurationSeconds(clip.frameCount):F2}s, Frames: {clip.frameCount}, Joints: {clip.jointCount}",
                 EditorStyles.miniLabel);
             if (!string.IsNullOrWhiteSpace(lastConstraintsPath))
             {
@@ -707,24 +698,9 @@ namespace KimodoBridge.Editor
                 return;
             }
 
-            float newDuration = FramesToSeconds(frames);
+            float newDuration = KimodoInOutConstraintTimingUtility.FrameCountToDurationSeconds(frames);
             UndoExtensions.RegisterClip(timelineClip, L10n.Tr("Modify Clip Duration"));
             timelineClip.duration = newDuration;
-        }
-
-        private static float FramesToSeconds(int frames)
-        {
-            return Mathf.Max(0, frames) / KimodoPlayableClip.FIXED_FRAME_RATE;
-        }
-
-        private static int SecondsToFrames(float durationSeconds)
-        {
-            float minDurationSeconds = KimodoPlayableClip.MIN_FRAMES / KimodoPlayableClip.FIXED_FRAME_RATE;
-            float maxDurationSeconds = KimodoPlayableClip.MAX_FRAMES / KimodoPlayableClip.FIXED_FRAME_RATE;
-            return Mathf.Clamp(
-                Mathf.RoundToInt(Mathf.Clamp(durationSeconds, minDurationSeconds, maxDurationSeconds) * KimodoPlayableClip.FIXED_FRAME_RATE),
-                KimodoPlayableClip.MIN_FRAMES,
-                KimodoPlayableClip.MAX_FRAMES);
         }
 
         private void DrawConstraintPreviewIfNeeded()
@@ -795,32 +771,33 @@ namespace KimodoBridge.Editor
                 });
             }
 
-            if (clip.enableInbetweenInterpolation &&
-                KimodoInbetweenConstraintUtility.TryBuildNeighborBoundarySamplesForPreview(
+            if (clip.inOutConstraintMode != KimodoInOutConstraintMode.None &&
+                KimodoTimelineInOutConstraintAdapter.TryBuildBoundarySamplesForPreview(
                     timelineClip,
-                    Mathf.Max(1, clip.generationFrames),
-                    out KimodoMarkerSampleResult leftNeighborEndPose,
-                    out KimodoMarkerSampleResult rightNeighborStartPose,
+                    clip.inOutConstraintMode,
+                    KimodoInOutConstraintTimingUtility.ClampFrameCount(clip.generationFrames),
+                    out KimodoMarkerSampleResult beginBoundaryPose,
+                    out KimodoMarkerSampleResult endBoundaryPose,
                     out _))
             {
-                if (leftNeighborEndPose != null)
+                if (beginBoundaryPose != null)
                 {
                     renderItems.Add(new PoseCacheRenderItem
                     {
-                        EntryId = "inbetween_left_neighbor_end",
-                        SampleData = leftNeighborEndPose,
+                        EntryId = "inout_begin_boundary",
+                        SampleData = beginBoundaryPose,
                         ConstraintType = "fullbody",
                         HighlightJoints = null,
                         Visible = true
                     });
                 }
 
-                if (rightNeighborStartPose != null)
+                if (endBoundaryPose != null)
                 {
                     renderItems.Add(new PoseCacheRenderItem
                     {
-                        EntryId = "inbetween_right_neighbor_start",
-                        SampleData = rightNeighborStartPose,
+                        EntryId = "inout_end_boundary",
+                        SampleData = endBoundaryPose,
                         ConstraintType = "fullbody",
                         HighlightJoints = null,
                         Visible = true

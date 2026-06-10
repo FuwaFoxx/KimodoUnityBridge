@@ -17,13 +17,13 @@ namespace KimodoBridge.Editor
         private string lastError = string.Empty;
         private bool isGenerating;
         private KimodoGenerationBackend generationBackend = KimodoGenerationBackend.KimodoBridge;
-        private string bridgeModelName = "Kimodo-SOMA-RP-v1";
+        private string bridgeModelName = KimodoPlayableClip.DefaultBridgeModelName;
         private KimodoBridgeVramMode bridgeVramMode = KimodoBridgeVramMode.Low;
         private string motionPrompt = string.Empty;
         private bool autoDuration = true;
         private float customDurationSeconds = KimodoPlayableClip.DEFAULT_FRAMES / KimodoPlayableClip.FIXED_FRAME_RATE;
         private int diffusionSteps = 100;
-        private bool enableInbetweenConstraints = true;
+        private KimodoInOutConstraintMode inOutConstraintMode = KimodoInOutConstraintMode.Inside;
         private bool isLoop;
         private bool randomSeed;
         private int seed = 42;
@@ -116,7 +116,7 @@ namespace KimodoBridge.Editor
                     ref customDurationSeconds,
                     suggestedDurationSeconds,
                     ref diffusionSteps,
-                    ref enableInbetweenConstraints,
+                    ref inOutConstraintMode,
                     ref isLoop,
                     ref randomSeed,
                     ref seed,
@@ -188,11 +188,16 @@ namespace KimodoBridge.Editor
             }
 
             float generationDurationSeconds = ResolveGenerationDurationSeconds();
-            int generationFrameCount = DurationSecondsToFrameCount(generationDurationSeconds);
+            int generationFrameCount = KimodoInOutConstraintTimingUtility.DurationSecondsToFrameCount(generationDurationSeconds);
             int effectiveSeed = ResolveEffectiveSeedForRun();
             string constraintsJson = string.Empty;
-            if (enableInbetweenConstraints &&
-                !previewPanel.TryBuildExternalConstraints(bridgeModelName, generationDurationSeconds, isLoop, out constraintsJson, out error))
+            if (!previewPanel.TryBuildExternalConstraints(
+                    bridgeModelName,
+                    inOutConstraintMode,
+                    generationDurationSeconds,
+                    isLoop,
+                    out constraintsJson,
+                    out error))
             {
                 lastError = error;
                 return;
@@ -227,14 +232,11 @@ namespace KimodoBridge.Editor
         {
             try
             {
-                AnimationClip targetClip = KimodoEditorClipWritebackService.CreateGeneratedAnimationClipAsset(
-                    $"Kimodo_Animator_{DateTime.Now:yyyyMMdd_HHmmss_fff}");
                 KimodoEditorGenerateRequest request = BuildAnimatorGenerateRequest(
                     constraintsJson,
                     explicitRetargetAvatar,
                     generationFrameCount,
                     effectiveSeed,
-                    targetClip,
                     runCts.Token,
                     (stage, message) =>
                     {
@@ -333,7 +335,7 @@ namespace KimodoBridge.Editor
                 success = applyService.TryApplyTransition(
                     new KimodoAnimatorApplyService.TransitionApplyContext
                     {
-                        Controller = KimodoAnimatorSelectionResolver.FindControllerForObject(previewPanel.SelectedTransition),
+                        Controller = KimodoAnimatorSelectionUtility.FindControllerForObject(previewPanel.SelectedTransition),
                         StateMachine = previewPanel.SelectedStateMachine,
                         FromState = previewPanel.SelectedFromState,
                         ToState = toState,
@@ -348,7 +350,7 @@ namespace KimodoBridge.Editor
                 success = applyService.TryApplyState(
                     new KimodoAnimatorApplyService.StateApplyContext
                     {
-                        Controller = KimodoAnimatorSelectionResolver.FindControllerForObject(previewPanel.SelectedState),
+                        Controller = KimodoAnimatorSelectionUtility.FindControllerForObject(previewPanel.SelectedState),
                         State = previewPanel.SelectedState,
                         GeneratedClip = lastSuccessfulGeneratedClipForApply
                     },
@@ -438,25 +440,10 @@ namespace KimodoBridge.Editor
             Avatar explicitRetargetAvatar,
             int generationFrameCount,
             int effectiveSeed,
-            AnimationClip targetClip,
             CancellationToken token,
             Action<KimodoGeneratePipelineStage, string> progress)
         {
-            string resolvedModelName = string.IsNullOrWhiteSpace(bridgeModelName) ? "Kimodo-SOMA-RP-v1" : bridgeModelName.Trim();
-            Avatar originRetargetAvatar = null;
-            if (!KimodoRuntimeAvatarSkeletonBuilder.TryLoadAvatarByModelName(resolvedModelName, out originRetargetAvatar, out _) ||
-                originRetargetAvatar == null ||
-                !originRetargetAvatar.isValid ||
-                !originRetargetAvatar.isHuman)
-            {
-                throw new InvalidOperationException("Failed to resolve origin retarget avatar.");
-            }
-
-            if (explicitRetargetAvatar == null || !explicitRetargetAvatar.isValid || !explicitRetargetAvatar.isHuman)
-            {
-                throw new InvalidOperationException("Preview retarget avatar is null/invalid/non-humanoid.");
-            }
-
+            string resolvedModelName = KimodoPlayableClip.NormalizeBridgeModelName(bridgeModelName);
             return new KimodoEditorGenerateRequest
             {
                 Prompt = motionPrompt,
@@ -467,34 +454,76 @@ namespace KimodoBridge.Editor
                 DiffusionSteps = diffusionSteps,
                 EffectiveSeed = effectiveSeed,
                 ConstraintsJson = constraintsJson ?? string.Empty,
-                OriginRetargetAvatar = originRetargetAvatar,
-                TargetRetargetAvatar = explicitRetargetAvatar,
-                ExportMuscleClip = true,
-                CurveFilterOptions = null,
-                CanSkipRetarget = generatedClip =>
-                    previewPanel != null &&
-                    previewPanel.PreviewAvatarRoot != null &&
-                    KimodoEditorClipUtility.CanApplyClipDirectlyToProfileSkeleton(
-                        generatedClip,
-                        previewPanel.PreviewAvatarRoot,
-                        resolvedModelName,
-                        out _),
+                PrepareTargetClipPlan = modelName => PrepareAnimatorTargetClipPlan(modelName),
+                PreparePostBakePlan = (generatedClip, modelName) => PrepareAnimatorPostBakePlan(
+                    generatedClip,
+                    explicitRetargetAvatar,
+                    modelName),
                 ModelsRoot = KimodoPlayableClipGenerationSettings.instance.LocalModelsPath?.Trim() ?? string.Empty,
                 ComfyHost = string.Empty,
                 ComfyPort = 8188,
                 GenerationTimeoutSeconds = KimodoPlayableClipGenerationSettings.instance.GenerationTimeoutSeconds,
-                TargetClip = targetClip,
                 Progress = progress,
                 Token = token
             };
         }
 
-        private static int DurationSecondsToFrameCount(float durationSeconds)
+        private static KimodoEditorGenerateTargetClipPlan PrepareAnimatorTargetClipPlan(string modelName)
         {
-            return Mathf.Clamp(
-                Mathf.RoundToInt(ClampDurationSeconds(durationSeconds) * KimodoPlayableClip.FIXED_FRAME_RATE),
-                KimodoPlayableClip.MIN_FRAMES,
-                KimodoPlayableClip.MAX_FRAMES);
+            return new KimodoEditorGenerateTargetClipPlan
+            {
+                TargetClip = KimodoEditorClipWritebackService.CreateGeneratedAnimationClipAsset(
+                    $"Kimodo_Animator_{DateTime.Now:yyyyMMdd_HHmmss_fff}")
+            };
+        }
+
+        private KimodoEditorGeneratePostBakePlan PrepareAnimatorPostBakePlan(
+            AnimationClip generatedClip,
+            Avatar explicitRetargetAvatar,
+            string modelName)
+        {
+            string resolvedModelName = KimodoPlayableClip.NormalizeBridgeModelName(modelName);
+            bool canSkipRetarget =
+                previewPanel != null &&
+                previewPanel.PreviewAvatarRoot != null &&
+                KimodoEditorClipUtility.CanApplyClipDirectlyToProfileSkeleton(
+                    generatedClip,
+                    previewPanel.PreviewAvatarRoot,
+                    resolvedModelName,
+                    out _);
+            if (canSkipRetarget)
+            {
+                return new KimodoEditorGeneratePostBakePlan
+                {
+                    CanSkipRetarget = true
+                };
+            }
+
+            Avatar targetRetargetAvatar =
+                explicitRetargetAvatar != null &&
+                explicitRetargetAvatar.isValid &&
+                explicitRetargetAvatar.isHuman
+                    ? explicitRetargetAvatar
+                    : null;
+
+            return new KimodoEditorGeneratePostBakePlan
+            {
+                OriginRetargetAvatar = ResolveOriginRetargetAvatar(resolvedModelName),
+                TargetRetargetAvatar = targetRetargetAvatar,
+                ExportMuscleClip = true,
+                CurveFilterOptions = null,
+                CanSkipRetarget = false
+            };
+        }
+
+        private static Avatar ResolveOriginRetargetAvatar(string modelName)
+        {
+            if (!KimodoRuntimeAvatarSkeletonBuilder.TryLoadAvatarByModelName(modelName, out Avatar avatar, out _))
+            {
+                return null;
+            }
+
+            return KimodoRetargetCoreUtility.IsValidHumanoid(avatar) ? avatar : null;
         }
 
         private static float ClampDurationSeconds(float durationSeconds)
@@ -552,22 +581,4 @@ namespace KimodoBridge.Editor
         }
     }
 
-    internal static class KimodoAnimatorSelectionResolver
-    {
-        public static AnimatorController FindControllerForObject(UnityEngine.Object target)
-        {
-            if (target == null)
-            {
-                return null;
-            }
-
-            string path = AssetDatabase.GetAssetPath(target);
-            if (string.IsNullOrWhiteSpace(path))
-            {
-                return null;
-            }
-
-            return AssetDatabase.LoadAssetAtPath<AnimatorController>(path);
-        }
-    }
 }
