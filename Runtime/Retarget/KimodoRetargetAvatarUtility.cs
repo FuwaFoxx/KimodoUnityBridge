@@ -363,7 +363,11 @@ namespace KimodoBridge
 
             root.position = sample.unityRootPos;
             root.rotation = sample.unityRootRot;
-
+            if (TryGetProfileRootJointTransform(nameMap, modelName, out Transform profileRootJoint))
+            {
+                profileRootJoint.position = sample.kimodoRootPosition;
+                profileRootJoint.rotation = AxisAngleToQuaternion(sample.localAxisAngles[0]);
+            }
             int count = sample.localAxisAngles != null ? sample.localAxisAngles.Count : 0;
             int applyCount = Mathf.Min(modelJointNames.Length, count);
             for (int i = 0; i < applyCount; i++)
@@ -374,14 +378,14 @@ namespace KimodoBridge
                     error = $"joint '{jointName}' missing on pose rig";
                     return false;
                 }
-
+                if(t== profileRootJoint)
+                {
+                    continue;
+                }
                 t.localRotation = AxisAngleToQuaternion(sample.localAxisAngles[i]);
             }
 
-            if (TryGetProfileRootJointTransform(nameMap, modelName, out Transform profileRootJoint))
-            {
-                profileRootJoint.position = sample.kimodoRootPosition;
-            }
+
 
             return true;
         }
