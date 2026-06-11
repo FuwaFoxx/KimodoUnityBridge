@@ -24,27 +24,6 @@ namespace KimodoBridge.Editor
             Transform leftFoot = cache.animator.GetBoneTransform(HumanBodyBones.LeftFoot);
             Transform rightFoot = cache.animator.GetBoneTransform(HumanBodyBones.RightFoot);
 
-            if (leftFoot == null)
-            {
-                leftFoot = cache.animator.GetBoneTransform(HumanBodyBones.LeftToes);
-            }
-
-            if (rightFoot == null)
-            {
-                rightFoot = cache.animator.GetBoneTransform(HumanBodyBones.RightToes);
-            }
-
-            if (leftFoot == null)
-            {
-                error = "left foot transform not found on skeleton cache";
-                return false;
-            }
-
-            if (rightFoot == null)
-            {
-                error = "right foot transform not found on skeleton cache";
-                return false;
-            }
 
             leftFootPosition = leftFoot.position;
             rightFootPosition = rightFoot.position;

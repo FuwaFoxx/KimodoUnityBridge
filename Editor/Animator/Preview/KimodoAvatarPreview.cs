@@ -1616,7 +1616,7 @@ namespace KimodoBridge.Editor
             AvatarTimeControlGUI(rect);
 
 
-            int previewSceneID = GUIUtility.GetControlID(m_PreviewSceneHint, FocusType.Passive);
+            int previewSceneID = GUIUtility.GetControlID(m_PreviewSceneHint, FocusType.Passive, previewRect);
             type = evt.GetTypeForControl(previewSceneID);
 
             DoAvatarPreviewDrag(evt, type);
