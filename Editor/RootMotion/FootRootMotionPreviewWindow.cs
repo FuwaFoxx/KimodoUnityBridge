@@ -126,12 +126,12 @@ namespace KimodoBridge.Editor
                 showSettings = EditorGUILayout.Foldout(showSettings, "Solver Settings", true);
                 if (showSettings)
                 {
-                    settings.sampleRate = EditorGUILayout.FloatField("Sample Rate", settings.sampleRate);
-                    settings.supportSwitchWindowFrames = EditorGUILayout.IntSlider("Switch Window Frames", settings.supportSwitchWindowFrames, 2, 30);
-                    settings.smoothing = EditorGUILayout.Slider("Smoothing", settings.smoothing, 0f, 1f);
+                    settings.initialSupportMode = (FootRootMotionInitialSupportMode)EditorGUILayout.EnumPopup("Initial Support", settings.initialSupportMode);
+                    settings.legBendChannel = (FootRootMotionLegBendChannel)EditorGUILayout.EnumPopup("Bend Channel", settings.legBendChannel);
+                    settings.phaseWindowFrames = EditorGUILayout.IntSlider("Window Size", settings.phaseWindowFrames, 2, 30);
                     settings.dampingSpeed = Mathf.Max(0f, EditorGUILayout.FloatField("Damping Speed", settings.dampingSpeed));
                     settings.dampingAngleSpeed = Mathf.Max(0f, EditorGUILayout.FloatField("Damping Angle Speed", settings.dampingAngleSpeed));
-                    settings.keepOriginMotion = EditorGUILayout.Toggle("Keep Origin Motion", settings.keepOriginMotion);
+                    EditorGUILayout.HelpBox("Window Size controls the signed muscle-delta sliding window used for support switching.", MessageType.None);
                 }
 
                 showDebug = EditorGUILayout.Foldout(showDebug, "Debug Metrics", true);
@@ -201,6 +201,9 @@ namespace KimodoBridge.Editor
             float avgSpeed = duration > 1e-4f ? total.magnitude / duration : 0f;
             int leftPlants = CountPlants(solvedResult.debug.leftPlant);
             int rightPlants = CountPlants(solvedResult.debug.rightPlant);
+            int unknownFrames = CountSupportStates(solvedResult.supportStates, FootRootMotionSupportState.Unknown);
+            int doubleSupportFrames = CountSupportStates(solvedResult.supportStates, FootRootMotionSupportState.DoubleSupport);
+            int airFrames = CountSupportStates(solvedResult.supportStates, FootRootMotionSupportState.Air);
             float predictionRatio = ComputePredictionRatio(solvedResult.debug.usedPrediction);
 
             EditorGUILayout.Space(8f);
@@ -208,6 +211,9 @@ namespace KimodoBridge.Editor
             EditorGUILayout.LabelField("Average Speed", avgSpeed.ToString("F3") + " m/s");
             EditorGUILayout.LabelField("Left Support Frames", leftPlants.ToString());
             EditorGUILayout.LabelField("Right Support Frames", rightPlants.ToString());
+            EditorGUILayout.LabelField("Unknown Frames", unknownFrames.ToString());
+            EditorGUILayout.LabelField("Double Support Frames", doubleSupportFrames.ToString());
+            EditorGUILayout.LabelField("Air Frames", airFrames.ToString());
             EditorGUILayout.LabelField("Zero-Speed Ratio", (predictionRatio * 100f).ToString("F1") + " %");
         }
 
@@ -218,6 +224,9 @@ namespace KimodoBridge.Editor
             {
                 bool hasSelection = selectionContext != null && selectionContext.SourceClip != null && selectionContext.ModelRoot != null;
                 bool hasGenerated = generatedPreviewClip != null;
+
+                settings.keepOriginMotion = EditorGUILayout.ToggleLeft("Keep Origin Motion", settings.keepOriginMotion);
+                EditorGUILayout.Space(3f);
 
                 using (new EditorGUILayout.HorizontalScope())
                 {
@@ -297,7 +306,7 @@ namespace KimodoBridge.Editor
                 return;
             }
 
-            Rect overlayRect = new Rect(rect.x + 10f, rect.y + 10f, 270f, 104f);
+            Rect overlayRect = new Rect(rect.x + 10f, rect.y + 10f, 270f, 144f);
             GUI.Box(overlayRect, GUIContent.none, EditorStyles.helpBox);
             Rect lineRect = new Rect(overlayRect.x + 8f, overlayRect.y + 6f, overlayRect.width - 16f, 18f);
             GUI.Label(lineRect, "Preview Mode: " + previewMode);
@@ -310,6 +319,23 @@ namespace KimodoBridge.Editor
             {
                 lineRect.y += 20f;
                 GUI.Label(lineRect, "Solved Root XZ: " + solvedResult.rootXZ[frameIndex].ToString("F3"));
+                if (solvedResult.supportStates != null && frameIndex < solvedResult.supportStates.Length)
+                {
+                    lineRect.y += 20f;
+                    GUI.Label(lineRect, "Support State: " + solvedResult.supportStates[frameIndex]);
+                }
+
+                if (solvedResult.debug != null &&
+                    solvedResult.debug.leftTotalCost != null &&
+                    solvedResult.debug.rightTotalCost != null &&
+                    frameIndex < solvedResult.debug.leftTotalCost.Length &&
+                    frameIndex < solvedResult.debug.rightTotalCost.Length)
+                {
+                    lineRect.y += 20f;
+                    GUI.Label(
+                        lineRect,
+                        $"Window L/R: {solvedResult.debug.leftTotalCost[frameIndex]:F2} / {solvedResult.debug.rightTotalCost[frameIndex]:F2}");
+                }
             }
         }
 
@@ -339,7 +365,7 @@ namespace KimodoBridge.Editor
                 return;
             }
 
-            Vector2 min = ToXZ(sampledFrames[0].leftFootWorld);
+            Vector2 min = FootRootMotionMathUtility.ToXZ(sampledFrames[0].leftFootWorld);
             Vector2 max = min;
             ExpandBounds(ref min, ref max, sampledFrames[0].rightFootWorld);
 
@@ -360,8 +386,8 @@ namespace KimodoBridge.Editor
             if (size.y < 0.001f) size.y = 0.001f;
 
             Handles.BeginGUI();
-            DrawPolyline(rect, sampledFrames, frame => ToXZ(frame.leftFootWorld), min, size, new Color(0.3f, 0.85f, 1f, 1f), 2f);
-            DrawPolyline(rect, sampledFrames, frame => ToXZ(frame.rightFootWorld), min, size, new Color(1f, 0.55f, 0.3f, 1f), 2f);
+            DrawPolyline(rect, sampledFrames, frame => FootRootMotionMathUtility.ToXZ(frame.leftFootWorld), min, size, new Color(0.3f, 0.85f, 1f, 1f), 2f);
+            DrawPolyline(rect, sampledFrames, frame => FootRootMotionMathUtility.ToXZ(frame.rightFootWorld), min, size, new Color(1f, 0.55f, 0.3f, 1f), 2f);
 
             if (solvedResult != null && solvedResult.rootXZ != null && solvedResult.rootXZ.Length > 0)
             {
@@ -854,8 +880,8 @@ namespace KimodoBridge.Editor
             int frameCount = Mathf.Min(
                 frames != null ? frames.Length : 0,
                 Mathf.Min(
-                    solved != null && solved.rootXZ != null ? solved.rootXZ.Length : 0,
-                    solved != null && solved.rootYawRadians != null ? solved.rootYawRadians.Length : 0));
+                    solved != null && solved.rootDeltaXZ != null ? solved.rootDeltaXZ.Length : 0,
+                    solved != null && solved.rootYawDeltaRadians != null ? solved.rootYawDeltaRadians.Length : 0));
             if (clip == null || frameCount <= 0)
             {
                 error = "No solved frames available.";
@@ -869,15 +895,22 @@ namespace KimodoBridge.Editor
             AnimationCurve rootQy = new AnimationCurve();
             AnimationCurve rootQz = new AnimationCurve();
             AnimationCurve rootQw = new AnimationCurve();
+            Vector2 accumulatedRootXZ = Vector2.zero;
+            float accumulatedRootYawRadians = 0f;
 
             for (int i = 0; i < frameCount; i++)
             {
                 float time = frames[i].time;
-                Vector2 solvedXZ = solved.rootXZ[i];
-                Quaternion yawOnly = Quaternion.AngleAxis(solved.rootYawRadians[i] * Mathf.Rad2Deg, Vector3.up);
+                if (i > 0)
+                {
+                    accumulatedRootXZ += solved.rootDeltaXZ[i];
+                    accumulatedRootYawRadians += solved.rootYawDeltaRadians[i];
+                }
 
-                rootTx.AddKey(time, solvedXZ.x);
-                rootTz.AddKey(time, solvedXZ.y);
+                Quaternion yawOnly = Quaternion.AngleAxis(accumulatedRootYawRadians * Mathf.Rad2Deg, Vector3.up);
+
+                rootTx.AddKey(time, accumulatedRootXZ.x);
+                rootTz.AddKey(time, accumulatedRootXZ.y);
                 rootQx.AddKey(time, yawOnly.x);
                 rootQy.AddKey(time, yawOnly.y);
                 rootQz.AddKey(time, yawOnly.z);
@@ -1308,6 +1341,25 @@ namespace KimodoBridge.Editor
             return count;
         }
 
+        private static int CountSupportStates(FootRootMotionSupportState[] states, FootRootMotionSupportState targetState)
+        {
+            if (states == null)
+            {
+                return 0;
+            }
+
+            int count = 0;
+            for (int i = 0; i < states.Length; i++)
+            {
+                if (states[i] == targetState)
+                {
+                    count++;
+                }
+            }
+
+            return count;
+        }
+
         private static float ComputePredictionRatio(bool[] mask)
         {
             if (mask == null || mask.Length == 0)
@@ -1329,14 +1381,9 @@ namespace KimodoBridge.Editor
 
         private static void ExpandBounds(ref Vector2 min, ref Vector2 max, Vector3 point)
         {
-            Vector2 p = ToXZ(point);
+            Vector2 p = FootRootMotionMathUtility.ToXZ(point);
             min = Vector2.Min(min, p);
             max = Vector2.Max(max, p);
-        }
-
-        private static Vector2 ToXZ(Vector3 point)
-        {
-            return new Vector2(point.x, point.z);
         }
 
         private static Vector2 ChartPoint(Rect rect, Vector2 point, Vector2 min, Vector2 size)

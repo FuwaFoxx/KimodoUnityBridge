@@ -4,356 +4,584 @@ namespace KimodoBridge.Editor
 {
     internal static class FootRootMotionSolver
     {
-        private enum SupportFoot
+        private struct FrameSolveState
         {
-            None = 0,
-            Left = 1,
-            Right = 2
+            public FootRootMotionSupportState supportState;
+            public FootRootMotionSupportState drivenSupportState;
+            public Vector2 rootXZ;
+            public float rootYawRadians;
+            public Vector2 rootDeltaXZ;
+            public float rootYawDeltaRadians;
+            public Vector3 leftAnchor;
+            public Vector3 rightAnchor;
+            public float leftAnchorYawRadians;
+            public float rightAnchorYawRadians;
+            public bool hasLeftAnchor;
+            public bool hasRightAnchor;
+            public float leftConfidence;
+            public float rightConfidence;
+            public bool usedPrediction;
+            public bool leftPlant;
+            public bool rightPlant;
+            public FootContactState leftContact;
+            public FootContactState rightContact;
+            public float leftCost;
+            public float rightCost;
+            public float leftPhaseDrive;
+            public float rightPhaseDrive;
         }
 
         public static FootRootMotionResult Solve(FootRootMotionFrame[] frames, FootRootMotionSolverSettings settings)
         {
+            return Solve(frames, settings, null);
+        }
+
+        public static FootRootMotionResult Solve(
+            FootRootMotionFrame[] frames,
+            FootRootMotionSolverSettings settings,
+            IFootRootMotionCostEvaluator costEvaluator)
+        {
             settings = settings ?? new FootRootMotionSolverSettings();
             if (frames == null || frames.Length == 0)
             {
-                return new FootRootMotionResult
+                return CreateEmptyResult();
+            }
+
+            FootRootMotionSolveFrame[] solveFrames = BuildSolveFrames(frames);
+            FootRootMotionPhaseFrame[] phaseFrames = FootRootMotionPhaseUtility.BuildPhaseFrames(frames, settings);
+            int count = solveFrames.Length;
+
+            var states = new FrameSolveState[count];
+            FootRootMotionPhaseFrame firstPhaseFrame = phaseFrames.Length > 0
+                ? phaseFrames[0]
+                : default(FootRootMotionPhaseFrame);
+            FootRootMotionSupportState initialSupportState = ResolveInitialSupportState(phaseFrames, settings);
+            FootRootMotionSupportState initialDrivenSupportState = ResolveDrivenSupportState(
+                initialSupportState,
+                FootRootMotionSupportState.Unknown,
+                settings);
+
+            states[0] = CreateFirstFrameState(
+                solveFrames[0],
+                firstPhaseFrame,
+                initialSupportState,
+                initialDrivenSupportState);
+
+            for (int i = 1; i < count; i++)
+            {
+                FootRootMotionPhaseFrame phaseFrame = i < phaseFrames.Length
+                    ? phaseFrames[i]
+                    : default(FootRootMotionPhaseFrame);
+                FrameSolveState previousState = states[i - 1];
+                FootRootMotionSupportState supportState = DetermineOutputSupportState(
+                    phaseFrame,
+                    previousState.supportState,
+                    settings);
+                FootRootMotionSupportState drivenSupportState = ResolveDrivenSupportState(
+                    supportState,
+                    previousState.drivenSupportState,
+                    settings);
+
+                states[i] = SolveFrame(
+                    solveFrames[i],
+                    solveFrames[i - 1],
+                    phaseFrame,
+                    previousState,
+                    supportState,
+                    drivenSupportState,
+                    settings);
+            }
+
+            return BuildResult(states);
+        }
+
+        private static FootRootMotionResult CreateEmptyResult()
+        {
+            return new FootRootMotionResult
+            {
+                rootXZ = new Vector2[0],
+                rootYawRadians = new float[0],
+                rootDeltaXZ = new Vector2[0],
+                rootYawDeltaRadians = new float[0],
+                supportStates = new FootRootMotionSupportState[0],
+                leftContact = new FootContactState[0],
+                rightContact = new FootContactState[0],
+                debug = new FootRootMotionDebugInfo
                 {
-                    rootXZ = new Vector2[0],
-                    rootYawRadians = new float[0],
-                    rootDeltaXZ = new Vector2[0],
-                    leftContact = new FootContactState[0],
-                    rightContact = new FootContactState[0],
-                    debug = new FootRootMotionDebugInfo()
+                    leftAnchors = new Vector2[0],
+                    rightAnchors = new Vector2[0],
+                    leftConfidence = new float[0],
+                    rightConfidence = new float[0],
+                    conflictError = new float[0],
+                    usedPrediction = new bool[0],
+                    leftPlant = new bool[0],
+                    rightPlant = new bool[0],
+                    supportStates = new FootRootMotionSupportState[0],
+                    leftTotalCost = new float[0],
+                    rightTotalCost = new float[0],
+                    leftPhaseDrive = new float[0],
+                    rightPhaseDrive = new float[0]
+                }
+            };
+        }
+
+        private static FootRootMotionSolveFrame[] BuildSolveFrames(FootRootMotionFrame[] frames)
+        {
+            var solveFrames = new FootRootMotionSolveFrame[frames.Length];
+            for (int i = 0; i < frames.Length; i++)
+            {
+                FootRootMotionFrame frame = frames[i];
+                solveFrames[i] = new FootRootMotionSolveFrame
+                {
+                    time = frame.time,
+                    sampledRootXZ = FootRootMotionMathUtility.ToXZ(frame.sampledRootWorld),
+                    sampledRootYawRadians = FootRootMotionMathUtility.ExtractYawRadians(frame.sampledRootRotation),
+                    leftFootWorld = frame.leftFootWorld,
+                    rightFootWorld = frame.rightFootWorld,
+                    leftFootLocal = frame.leftFootLocal,
+                    leftFootLocalYawRadians = frame.leftFootLocalYawRadians,
+                    rightFootLocal = frame.rightFootLocal,
+                    rightFootLocalYawRadians = frame.rightFootLocalYawRadians
                 };
             }
 
-            int count = frames.Length;
-            SupportFoot[] supportFeet = new SupportFoot[count];
-            float[] conflict = new float[count];
-            EvaluateSupportState(frames, settings, supportFeet, conflict);
+            return solveFrames;
+        }
 
+        private static FootRootMotionSupportState ResolveInitialSupportState(
+            FootRootMotionPhaseFrame[] phaseFrames,
+            FootRootMotionSolverSettings settings)
+        {
+            if (phaseFrames != null && phaseFrames.Length > 0)
+            {
+                FootRootMotionSupportState hint = phaseFrames[0].supportStateHint;
+                if (hint == FootRootMotionSupportState.LeftPlant || hint == FootRootMotionSupportState.RightPlant)
+                {
+                    return hint;
+                }
+            }
+
+            switch (settings.initialSupportMode)
+            {
+                case FootRootMotionInitialSupportMode.Right:
+                    return FootRootMotionSupportState.RightPlant;
+                case FootRootMotionInitialSupportMode.Left:
+                    return FootRootMotionSupportState.LeftPlant;
+                default:
+                    return FootRootMotionSupportState.LeftPlant;
+            }
+        }
+
+        private static FootRootMotionSupportState DetermineOutputSupportState(
+            FootRootMotionPhaseFrame phaseFrame,
+            FootRootMotionSupportState previousState,
+            FootRootMotionSolverSettings settings)
+        {
+            switch (phaseFrame.supportStateHint)
+            {
+                case FootRootMotionSupportState.LeftPlant:
+                case FootRootMotionSupportState.RightPlant:
+                case FootRootMotionSupportState.DoubleSupport:
+                case FootRootMotionSupportState.Air:
+                    return phaseFrame.supportStateHint;
+            }
+
+            if (previousState != FootRootMotionSupportState.Unknown)
+            {
+                return previousState;
+            }
+
+            return ResolveInitialSupportState(null, settings);
+        }
+
+        private static FootRootMotionSupportState ResolveDrivenSupportState(
+            FootRootMotionSupportState supportState,
+            FootRootMotionSupportState previousDrivenSupportState,
+            FootRootMotionSolverSettings settings)
+        {
+            if (supportState == FootRootMotionSupportState.LeftPlant || supportState == FootRootMotionSupportState.RightPlant)
+            {
+                return supportState;
+            }
+
+            if (previousDrivenSupportState == FootRootMotionSupportState.LeftPlant ||
+                previousDrivenSupportState == FootRootMotionSupportState.RightPlant)
+            {
+                return previousDrivenSupportState;
+            }
+
+            switch (settings.initialSupportMode)
+            {
+                case FootRootMotionInitialSupportMode.Right:
+                    return FootRootMotionSupportState.RightPlant;
+                case FootRootMotionInitialSupportMode.Left:
+                case FootRootMotionInitialSupportMode.Auto:
+                default:
+                    return FootRootMotionSupportState.LeftPlant;
+            }
+        }
+
+        private static FrameSolveState CreateFirstFrameState(
+            FootRootMotionSolveFrame frame,
+            FootRootMotionPhaseFrame phaseFrame,
+            FootRootMotionSupportState supportState,
+            FootRootMotionSupportState drivenSupportState)
+        {
+            FrameSolveState state = new FrameSolveState
+            {
+                supportState = supportState,
+                drivenSupportState = drivenSupportState,
+                rootXZ = Vector2.zero,
+                rootYawRadians = 0f,
+                rootDeltaXZ = Vector2.zero,
+                rootYawDeltaRadians = 0f,
+                leftCost = phaseFrame.leftWindowDrive,
+                rightCost = phaseFrame.rightWindowDrive,
+                leftPhaseDrive = phaseFrame.leftWindowDrive,
+                rightPhaseDrive = phaseFrame.rightWindowDrive
+            };
+
+            CaptureAnchorFromSolvedRoot(ref state, frame, FootRootMotionSupportState.LeftPlant, state.rootXZ, state.rootYawRadians);
+            CaptureAnchorFromSolvedRoot(ref state, frame, FootRootMotionSupportState.RightPlant, state.rootXZ, state.rootYawRadians);
+            MarkSupportState(ref state, supportState, 1f);
+            return state;
+        }
+
+        private static FrameSolveState SolveFrame(
+            FootRootMotionSolveFrame frame,
+            FootRootMotionSolveFrame previousFrame,
+            FootRootMotionPhaseFrame phaseFrame,
+            FrameSolveState previousState,
+            FootRootMotionSupportState supportState,
+            FootRootMotionSupportState drivenSupportState,
+            FootRootMotionSolverSettings settings)
+        {
+            FrameSolveState state = previousState;
+            state.supportState = supportState;
+            state.drivenSupportState = drivenSupportState;
+            state.leftCost = phaseFrame.leftWindowDrive;
+            state.rightCost = phaseFrame.rightWindowDrive;
+            state.leftPhaseDrive = phaseFrame.leftWindowDrive;
+            state.rightPhaseDrive = phaseFrame.rightWindowDrive;
+            state.usedPrediction = false;
+
+            float deltaTime = Mathf.Max(1e-4f, frame.time - previousFrame.time);
+            switch (supportState)
+            {
+                case FootRootMotionSupportState.LeftPlant:
+                case FootRootMotionSupportState.RightPlant:
+                    SolvePlantFrame(
+                        ref state,
+                        frame,
+                        previousState,
+                        supportState,
+                        drivenSupportState,
+                        settings,
+                        deltaTime);
+                    state.usedPrediction = false;
+                    MarkSupportState(ref state, supportState, 1f);
+                    return state;
+                case FootRootMotionSupportState.DoubleSupport:
+                    ApplyZeroDelta(ref state, previousState);
+                    state.usedPrediction = false;
+                    MarkSupportState(ref state, supportState, 1f);
+                    return state;
+                case FootRootMotionSupportState.Air:
+                    ApplySampledSpeedDelta(ref state, frame, previousFrame, previousState, settings, deltaTime);
+                    state.usedPrediction = true;
+                    MarkSupportState(ref state, supportState, 0f);
+                    return state;
+                case FootRootMotionSupportState.Unknown:
+                default:
+                    ApplyZeroDelta(ref state, previousState);
+                    state.usedPrediction = true;
+                    MarkSupportState(ref state, supportState, 0f);
+                    return state;
+            }
+        }
+
+        private static void SolvePlantFrame(
+            ref FrameSolveState state,
+            FootRootMotionSolveFrame frame,
+            FrameSolveState previousState,
+            FootRootMotionSupportState supportState,
+            FootRootMotionSupportState drivenSupportState,
+            FootRootMotionSolverSettings settings,
+            float deltaTime)
+        {
+            bool supportChanged =
+                previousState.drivenSupportState != drivenSupportState ||
+                previousState.supportState == FootRootMotionSupportState.DoubleSupport ||
+                previousState.supportState == FootRootMotionSupportState.Air ||
+                previousState.supportState == FootRootMotionSupportState.Unknown;
+            if (supportChanged || !HasAnchor(previousState, drivenSupportState))
+            {
+                CaptureAnchorFromSolvedRoot(
+                    ref state,
+                    frame,
+                    drivenSupportState,
+                    previousState.rootXZ,
+                    previousState.rootYawRadians);
+            }
+
+            SolveAgainstSupportAnchor(
+                ref state,
+                frame,
+                previousState,
+                supportState,
+                settings,
+                deltaTime);
+        }
+
+        private static void CaptureAnchorFromSolvedRoot(
+            ref FrameSolveState state,
+            FootRootMotionSolveFrame frame,
+            FootRootMotionSupportState supportState,
+            Vector2 rootXZ,
+            float rootYawRadians)
+        {
+            Vector3 supportLocal = GetSupportLocalPosition(frame, supportState);
+            Vector2 supportWorldXZ = rootXZ +
+                FootRootMotionMathUtility.RotateXZ(
+                    new Vector2(supportLocal.x, supportLocal.z),
+                    rootYawRadians);
+            float supportWorldYawRadians = rootYawRadians + GetSupportLocalYaw(frame, supportState);
+            Vector3 supportWorld = GetSupportWorld(frame, supportState);
+            Vector3 anchor = new Vector3(supportWorldXZ.x, supportWorld.y, supportWorldXZ.y);
+
+            if (supportState == FootRootMotionSupportState.LeftPlant)
+            {
+                state.leftAnchor = anchor;
+                state.leftAnchorYawRadians = supportWorldYawRadians;
+                state.hasLeftAnchor = true;
+                return;
+            }
+
+            state.rightAnchor = anchor;
+            state.rightAnchorYawRadians = supportWorldYawRadians;
+            state.hasRightAnchor = true;
+        }
+
+        private static void SolveAgainstSupportAnchor(
+            ref FrameSolveState state,
+            FootRootMotionSolveFrame frame,
+            FrameSolveState previousState,
+            FootRootMotionSupportState supportState,
+            FootRootMotionSolverSettings settings,
+            float deltaTime)
+        {
+            Vector3 supportLocal = GetSupportLocalPosition(frame, supportState);
+            float supportLocalYawRadians = GetSupportLocalYaw(frame, supportState);
+            Vector3 anchor = GetAnchor(state, supportState);
+            float anchorYawRadians = GetAnchorYaw(state, supportState);
+
+            float targetRootYawRadians = anchorYawRadians - supportLocalYawRadians;
+            Vector2 targetRootXZ = new Vector2(anchor.x, anchor.z) -
+                FootRootMotionMathUtility.RotateXZ(
+                    new Vector2(supportLocal.x, supportLocal.z),
+                    targetRootYawRadians);
+
+            Vector2 deltaXZ = FootRootMotionMathUtility.ClampMagnitude(
+                targetRootXZ - previousState.rootXZ,
+                settings.MaxDeltaDistance(deltaTime));
+            float yawDeltaRadians = FootRootMotionMathUtility.ClampYawDelta(
+                FootRootMotionMathUtility.DeltaYawRadians(previousState.rootYawRadians, targetRootYawRadians),
+                settings.MaxYawDeltaRadians(deltaTime));
+
+            state.rootXZ = previousState.rootXZ + deltaXZ;
+            state.rootYawRadians = previousState.rootYawRadians + yawDeltaRadians;
+            state.rootDeltaXZ = deltaXZ;
+            state.rootYawDeltaRadians = yawDeltaRadians;
+        }
+
+        private static void ApplyZeroDelta(ref FrameSolveState state, FrameSolveState previousState)
+        {
+            state.rootXZ = previousState.rootXZ;
+            state.rootYawRadians = previousState.rootYawRadians;
+            state.rootDeltaXZ = Vector2.zero;
+            state.rootYawDeltaRadians = 0f;
+        }
+
+        private static void ApplySampledSpeedDelta(
+            ref FrameSolveState state,
+            FootRootMotionSolveFrame frame,
+            FootRootMotionSolveFrame previousFrame,
+            FrameSolveState previousState,
+            FootRootMotionSolverSettings settings,
+            float deltaTime)
+        {
+            Vector2 sampledDeltaXZ = frame.sampledRootXZ - previousFrame.sampledRootXZ;
+            float sampledYawDeltaRadians = FootRootMotionMathUtility.DeltaYawRadians(
+                previousFrame.sampledRootYawRadians,
+                frame.sampledRootYawRadians);
+
+            Vector2 deltaXZ = FootRootMotionMathUtility.ClampMagnitude(
+                sampledDeltaXZ,
+                settings.MaxDeltaDistance(deltaTime));
+            float yawDeltaRadians = FootRootMotionMathUtility.ClampYawDelta(
+                sampledYawDeltaRadians,
+                settings.MaxYawDeltaRadians(deltaTime));
+
+            state.rootXZ = previousState.rootXZ + deltaXZ;
+            state.rootYawRadians = previousState.rootYawRadians + yawDeltaRadians;
+            state.rootDeltaXZ = deltaXZ;
+            state.rootYawDeltaRadians = yawDeltaRadians;
+        }
+
+        private static bool HasAnchor(FrameSolveState state, FootRootMotionSupportState supportState)
+        {
+            return supportState == FootRootMotionSupportState.LeftPlant
+                ? state.hasLeftAnchor
+                : state.hasRightAnchor;
+        }
+
+        private static Vector3 GetAnchor(FrameSolveState state, FootRootMotionSupportState supportState)
+        {
+            return supportState == FootRootMotionSupportState.LeftPlant
+                ? state.leftAnchor
+                : state.rightAnchor;
+        }
+
+        private static float GetAnchorYaw(FrameSolveState state, FootRootMotionSupportState supportState)
+        {
+            return supportState == FootRootMotionSupportState.LeftPlant
+                ? state.leftAnchorYawRadians
+                : state.rightAnchorYawRadians;
+        }
+
+        private static Vector3 GetSupportWorld(FootRootMotionSolveFrame frame, FootRootMotionSupportState supportState)
+        {
+            return supportState == FootRootMotionSupportState.LeftPlant
+                ? frame.leftFootWorld
+                : frame.rightFootWorld;
+        }
+
+        private static Vector3 GetSupportLocalPosition(FootRootMotionSolveFrame frame, FootRootMotionSupportState supportState)
+        {
+            return supportState == FootRootMotionSupportState.LeftPlant
+                ? frame.leftFootLocal
+                : frame.rightFootLocal;
+        }
+
+        private static float GetSupportLocalYaw(FootRootMotionSolveFrame frame, FootRootMotionSupportState supportState)
+        {
+            return supportState == FootRootMotionSupportState.LeftPlant
+                ? frame.leftFootLocalYawRadians
+                : frame.rightFootLocalYawRadians;
+        }
+
+        private static FootRootMotionResult BuildResult(FrameSolveState[] states)
+        {
+            int count = states.Length;
             Vector2[] rootXZ = new Vector2[count];
-            float[] rootYaw = new float[count];
-            Vector2[] rootDelta = new Vector2[count];
+            float[] rootYawRadians = new float[count];
+            Vector2[] rootDeltaXZ = new Vector2[count];
+            float[] rootYawDeltaRadians = new float[count];
             Vector2[] leftAnchors = new Vector2[count];
             Vector2[] rightAnchors = new Vector2[count];
             float[] leftConfidence = new float[count];
             float[] rightConfidence = new float[count];
+            float[] leftTotalCost = new float[count];
+            float[] rightTotalCost = new float[count];
+            float[] leftPhaseDrive = new float[count];
+            float[] rightPhaseDrive = new float[count];
+            float[] conflictError = new float[count];
             bool[] usedPrediction = new bool[count];
             bool[] leftPlant = new bool[count];
             bool[] rightPlant = new bool[count];
-            FootContactState[] leftStates = new FootContactState[count];
-            FootContactState[] rightStates = new FootContactState[count];
+            FootRootMotionSupportState[] supportStates = new FootRootMotionSupportState[count];
+            FootContactState[] leftContact = new FootContactState[count];
+            FootContactState[] rightContact = new FootContactState[count];
 
-            Vector2 sourceRoot0 = ToXZ(frames[0].sampledRootWorld);
-            float sourceYaw0 = frames[0].rootYawRadians;
-            Vector2 sourceLeftOffset0 = ComputeLocalOffset(frames[0].leftFootWorld, sourceRoot0, 0f);
-            Vector2 sourceRightOffset0 = ComputeLocalOffset(frames[0].rightFootWorld, sourceRoot0, 0f);
-
-            Vector2 leftAnchor = sourceLeftOffset0;
-            Vector2 rightAnchor = sourceRightOffset0;
-            rootXZ[0] = Vector2.zero;
-            rootYaw[0] = 0f;
-            rootDelta[0] = Vector2.zero;
-            Vector2 previousRoot = Vector2.zero;
-            float previousYaw = 0f;
-            SupportFoot previousSupport = supportFeet[0];
-            usedPrediction[0] = previousSupport == SupportFoot.None;
-
-            MarkSupportDebug(0, previousSupport, leftPlant, rightPlant, leftStates, rightStates, leftConfidence, rightConfidence);
-            leftAnchors[0] = leftAnchor;
-            rightAnchors[0] = rightAnchor;
-
-            for (int i = 1; i < count; i++)
+            for (int i = 0; i < count; i++)
             {
-                float dt = Mathf.Max(1e-4f, frames[i].time - frames[i - 1].time);
-                Vector2 sourceRoot = ToXZ(frames[i].sampledRootWorld);
-                float sourceYaw = ComputeYawDelta(sourceYaw0, frames[i].rootYawRadians);
-                Vector2 leftOffset = ComputeLocalOffset(frames[i].leftFootWorld, sourceRoot, sourceYaw);
-                Vector2 rightOffset = ComputeLocalOffset(frames[i].rightFootWorld, sourceRoot, sourceYaw);
-                SupportFoot support = supportFeet[i];
-
-                Vector2 candidateRoot = previousRoot;
-                float candidateYaw = previousYaw;
-
-                if (support == SupportFoot.None)
-                {
-                    usedPrediction[i] = true;
-                    rootXZ[i] = previousRoot;
-                    rootYaw[i] = previousYaw;
-                    rootDelta[i] = Vector2.zero;
-                    leftAnchors[i] = leftAnchor;
-                    rightAnchors[i] = rightAnchor;
-                    MarkSupportDebug(i, support, leftPlant, rightPlant, leftStates, rightStates, leftConfidence, rightConfidence);
-
-                    previousRoot = rootXZ[i];
-                    previousYaw = rootYaw[i];
-                    previousSupport = support;
-                    continue;
-                }
-
-                if (support != previousSupport)
-                {
-                    if (support == SupportFoot.Left)
-                    {
-                        leftAnchor = previousRoot + RotateXZ(leftOffset, previousYaw);
-                    }
-                    else
-                    {
-                        rightAnchor = previousRoot + RotateXZ(rightOffset, previousYaw);
-                    }
-                }
-
-                if (support == SupportFoot.Left)
-                {
-                    candidateYaw = SolveSupportYaw(frames[i], sourceRoot, sourceYaw, SupportFoot.Left, leftOffset, previousYaw);
-                    candidateRoot = leftAnchor - RotateXZ(leftOffset, candidateYaw);
-                }
-                else if (support == SupportFoot.Right)
-                {
-                    candidateYaw = SolveSupportYaw(frames[i], sourceRoot, sourceYaw, SupportFoot.Right, rightOffset, previousYaw);
-                    candidateRoot = rightAnchor - RotateXZ(rightOffset, candidateYaw);
-                }
-
-                Vector2 delta = ClampDelta(candidateRoot - previousRoot, settings.MaxDeltaDistance(dt));
-                float rawYawDelta = ComputeYawDelta(previousYaw, candidateYaw);
-                float yawDelta = ClampYawDelta(rawYawDelta, settings.MaxYawDeltaRadians(dt));
-
-                rootXZ[i] = previousRoot + delta;
-                rootYaw[i] = previousYaw + yawDelta;
-                rootDelta[i] = delta;
-
-                if (support == SupportFoot.Left)
-                {
-                    leftAnchor = rootXZ[i] + RotateXZ(leftOffset, rootYaw[i]);
-                }
-                else if (support == SupportFoot.Right)
-                {
-                    rightAnchor = rootXZ[i] + RotateXZ(rightOffset, rootYaw[i]);
-                }
-
-                leftAnchors[i] = leftAnchor;
-                rightAnchors[i] = rightAnchor;
-                MarkSupportDebug(i, support, leftPlant, rightPlant, leftStates, rightStates, leftConfidence, rightConfidence);
-
-                previousRoot = rootXZ[i];
-                previousYaw = rootYaw[i];
-                previousSupport = support;
+                FrameSolveState state = states[i];
+                rootXZ[i] = state.rootXZ;
+                rootYawRadians[i] = state.rootYawRadians;
+                rootDeltaXZ[i] = state.rootDeltaXZ;
+                rootYawDeltaRadians[i] = state.rootYawDeltaRadians;
+                leftAnchors[i] = new Vector2(state.leftAnchor.x, state.leftAnchor.z);
+                rightAnchors[i] = new Vector2(state.rightAnchor.x, state.rightAnchor.z);
+                leftConfidence[i] = state.leftConfidence;
+                rightConfidence[i] = state.rightConfidence;
+                leftTotalCost[i] = state.leftCost;
+                rightTotalCost[i] = state.rightCost;
+                leftPhaseDrive[i] = state.leftPhaseDrive;
+                rightPhaseDrive[i] = state.rightPhaseDrive;
+                conflictError[i] = Mathf.Abs(state.leftCost - state.rightCost);
+                usedPrediction[i] = state.usedPrediction;
+                leftPlant[i] = state.leftPlant;
+                rightPlant[i] = state.rightPlant;
+                supportStates[i] = state.supportState;
+                leftContact[i] = state.leftContact;
+                rightContact[i] = state.rightContact;
             }
 
             return new FootRootMotionResult
             {
                 rootXZ = rootXZ,
-                rootYawRadians = rootYaw,
-                rootDeltaXZ = rootDelta,
-                leftContact = leftStates,
-                rightContact = rightStates,
+                rootYawRadians = rootYawRadians,
+                rootDeltaXZ = rootDeltaXZ,
+                rootYawDeltaRadians = rootYawDeltaRadians,
+                supportStates = supportStates,
+                leftContact = leftContact,
+                rightContact = rightContact,
                 debug = new FootRootMotionDebugInfo
                 {
                     leftAnchors = leftAnchors,
                     rightAnchors = rightAnchors,
                     leftConfidence = leftConfidence,
                     rightConfidence = rightConfidence,
-                    conflictError = conflict,
+                    conflictError = conflictError,
                     usedPrediction = usedPrediction,
                     leftPlant = leftPlant,
-                    rightPlant = rightPlant
+                    rightPlant = rightPlant,
+                    supportStates = supportStates,
+                    leftTotalCost = leftTotalCost,
+                    rightTotalCost = rightTotalCost,
+                    leftPhaseDrive = leftPhaseDrive,
+                    rightPhaseDrive = rightPhaseDrive
                 }
             };
         }
 
-        private static void EvaluateSupportState(
-            FootRootMotionFrame[] frames,
-            FootRootMotionSolverSettings settings,
-            SupportFoot[] supportFeet,
-            float[] conflictError)
+        private static void MarkSupportState(
+            ref FrameSolveState state,
+            FootRootMotionSupportState supportState,
+            float confidence)
         {
-            DetermineSupportFootSwitchByIkMotion(
-                frames,
-                settings != null ? settings.SupportSwitchWindowFrameCount : 2,
-                supportFeet,
-                conflictError);
-        }
+            state.leftPlant = false;
+            state.rightPlant = false;
+            state.leftConfidence = 0f;
+            state.rightConfidence = 0f;
+            state.leftContact = FootContactState.Air;
+            state.rightContact = FootContactState.Air;
 
-        private static void DetermineSupportFootSwitchByIkMotion(
-            FootRootMotionFrame[] frames,
-            int windowFrames,
-            SupportFoot[] supportFeet,
-            float[] conflictError)
-        {
-            if (frames == null || supportFeet == null)
+            switch (supportState)
             {
-                return;
+                case FootRootMotionSupportState.LeftPlant:
+                    state.leftPlant = true;
+                    state.leftConfidence = confidence;
+                    state.leftContact = FootContactState.Plant;
+                    break;
+                case FootRootMotionSupportState.RightPlant:
+                    state.rightPlant = true;
+                    state.rightConfidence = confidence;
+                    state.rightContact = FootContactState.Plant;
+                    break;
+                case FootRootMotionSupportState.DoubleSupport:
+                    state.leftPlant = true;
+                    state.rightPlant = true;
+                    state.leftConfidence = confidence;
+                    state.rightConfidence = confidence;
+                    state.leftContact = FootContactState.Plant;
+                    state.rightContact = FootContactState.Plant;
+                    break;
+                case FootRootMotionSupportState.Air:
+                case FootRootMotionSupportState.Unknown:
+                default:
+                    break;
             }
-
-            int count = Mathf.Min(frames.Length, supportFeet.Length);
-            if (count == 0)
-            {
-                return;
-            }
-
-            windowFrames = Mathf.Max(2, windowFrames);
-
-            float[] leftMotion = new float[count];
-            float[] rightMotion = new float[count];
-            float[] leftPrefix = new float[count];
-            float[] rightPrefix = new float[count];
-
-            for (int i = 1; i < count; i++)
-            {
-                leftMotion[i] = ComputeFootMotionScore(
-                    frames[i - 1].leftFootWorld,
-                    frames[i].leftFootWorld,
-                    frames[i - 1].leftFootWorldRotation,
-                    frames[i].leftFootWorldRotation);
-                rightMotion[i] = ComputeFootMotionScore(
-                    frames[i - 1].rightFootWorld,
-                    frames[i].rightFootWorld,
-                    frames[i - 1].rightFootWorldRotation,
-                    frames[i].rightFootWorldRotation);
-
-                leftPrefix[i] = leftPrefix[i - 1] + leftMotion[i];
-                rightPrefix[i] = rightPrefix[i - 1] + rightMotion[i];
-            }
-
-            supportFeet[0] = SupportFoot.None;
-            if (conflictError != null && conflictError.Length > 0)
-            {
-                conflictError[0] = 0f;
-            }
-            for (int i = 1; i < count; i++)
-            {
-                int startIndex = Mathf.Max(1, i - windowFrames + 2);
-                float leftSum = leftPrefix[i] - leftPrefix[startIndex - 1];
-                float rightSum = rightPrefix[i] - rightPrefix[startIndex - 1];
-                if (conflictError != null && i < conflictError.Length)
-                {
-                    conflictError[i] = Mathf.Abs(leftSum - rightSum);
-                }
-
-                if (i < windowFrames - 1)
-                {
-                    supportFeet[i] = SupportFoot.None;
-                    continue;
-                }
-
-                supportFeet[i] = DetermineSupportFootFromMotion(leftSum, rightSum);
-            }
-        }
-
-        private static SupportFoot DetermineSupportFootFromMotion(float leftMotion, float rightMotion)
-        {
-            const float motionEpsilon = 1e-4f;
-            float totalMotion = leftMotion + rightMotion;
-            if (totalMotion <= motionEpsilon || Mathf.Abs(leftMotion - rightMotion) <= motionEpsilon)
-            {
-                return SupportFoot.None;
-            }
-
-            return leftMotion > rightMotion ? SupportFoot.Right : SupportFoot.Left;
-        }
-
-        private static float ComputeFootMotionScore(
-            Vector3 previousPosition,
-            Vector3 currentPosition,
-            Quaternion previousRotation,
-            Quaternion currentRotation)
-        {
-            float deltaPosition = Vector3.Distance(previousPosition, currentPosition);
-            float deltaRotation = Quaternion.Angle(previousRotation, currentRotation) * 0.01f;
-            return deltaPosition + deltaRotation;
-        }
-
-        private static float SolveSupportYaw(
-            FootRootMotionFrame frame,
-            Vector2 sourceRoot,
-            float sourceYaw,
-            SupportFoot support,
-            Vector2 supportOffset,
-            float fallbackYaw)
-        {
-            Vector2 hipOffset = ComputeLocalOffset(frame.hipWorld, sourceRoot, sourceYaw);
-            Vector2 localHipFromSupport = hipOffset - supportOffset;
-            Vector2 supportWorld = support == SupportFoot.Left
-                ? ToXZ(frame.leftFootWorld)
-                : ToXZ(frame.rightFootWorld);
-            Vector2 sampledHipFromSupport = ToXZ(frame.hipWorld) - supportWorld;
-            if (localHipFromSupport.sqrMagnitude < 1e-6f || sampledHipFromSupport.sqrMagnitude < 1e-6f)
-            {
-                return fallbackYaw;
-            }
-
-            float localYaw = Mathf.Atan2(localHipFromSupport.x, localHipFromSupport.y);
-            float sampledYaw = Mathf.Atan2(sampledHipFromSupport.x, sampledHipFromSupport.y);
-            return ComputeYawDelta(localYaw, sampledYaw);
-        }
-
-        private static Vector2 ClampDelta(Vector2 delta, float maxDistance)
-        {
-            if (!IsFinite(maxDistance) || delta.sqrMagnitude <= maxDistance * maxDistance)
-            {
-                return delta;
-            }
-
-            return delta.normalized * maxDistance;
-        }
-
-        private static float ClampYawDelta(float yawDelta, float maxRadians)
-        {
-            yawDelta = Mathf.DeltaAngle(0f, yawDelta * Mathf.Rad2Deg) * Mathf.Deg2Rad;
-            if (!IsFinite(maxRadians))
-            {
-                return yawDelta;
-            }
-
-            return Mathf.Clamp(yawDelta, -maxRadians, maxRadians);
-        }
-
-        private static bool IsFinite(float value)
-        {
-            return !float.IsNaN(value) && !float.IsInfinity(value);
-        }
-
-        private static float ComputeYawDelta(float fromRadians, float toRadians)
-        {
-            return Mathf.DeltaAngle(fromRadians * Mathf.Rad2Deg, toRadians * Mathf.Rad2Deg) * Mathf.Deg2Rad;
-        }
-
-        private static Vector2 ComputeLocalOffset(Vector3 worldPoint, Vector2 sourceRoot, float sourceYaw)
-        {
-            return RotateXZ(ToXZ(worldPoint) - sourceRoot, -sourceYaw);
-        }
-
-        private static Vector2 RotateXZ(Vector2 value, float yawRadians)
-        {
-            float sin = Mathf.Sin(yawRadians);
-            float cos = Mathf.Cos(yawRadians);
-            return new Vector2(value.x * cos + value.y * sin, -value.x * sin + value.y * cos);
-        }
-
-        private static void MarkSupportDebug(
-            int index,
-            SupportFoot support,
-            bool[] leftPlant,
-            bool[] rightPlant,
-            FootContactState[] leftStates,
-            FootContactState[] rightStates,
-            float[] leftConfidence,
-            float[] rightConfidence)
-        {
-            bool left = support == SupportFoot.Left;
-            bool right = support == SupportFoot.Right;
-            leftPlant[index] = left;
-            rightPlant[index] = right;
-            leftStates[index] = left ? FootContactState.Plant : FootContactState.Air;
-            rightStates[index] = right ? FootContactState.Plant : FootContactState.Air;
-            leftConfidence[index] = left ? 1f : 0f;
-            rightConfidence[index] = right ? 1f : 0f;
-        }
-
-        private static Vector2 ToXZ(Vector3 value)
-        {
-            return new Vector2(value.x, value.z);
         }
     }
 }

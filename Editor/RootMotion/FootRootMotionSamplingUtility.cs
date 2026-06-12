@@ -33,42 +33,40 @@ namespace KimodoBridge.Editor
                 return false;
             }
 
-            GameObject instance = null;
+            if (!KimodoLocalAvatarUtility.TryEnsureHumanoidAvatar(prefab, out Avatar avatar, out _, out error))
+            {
+                return false;
+            }
+
+            SkeletonCache cache = null;
+            KimodoRetargetClipSamplingUtility.ClipSamplingContext context = null;
             try
             {
-                instance = UnityEngine.Object.Instantiate(prefab);
-                instance.hideFlags = HideFlags.HideAndDontSave;
-                instance.name = prefab.name + "_FootRootMotionSampler";
-
-                Animator animator = instance.GetComponentInChildren<Animator>(true);
-                if (animator == null)
+                if (!KimodoRetargetAvatarUtility.TryBuildSkeletonCache(
+                        avatar,
+                        prefab.name + "_FootRootMotionSampler",
+                        out cache,
+                        out error))
                 {
-                    animator = instance.AddComponent<Animator>();
+                    return false;
                 }
 
-                if (!KimodoRetargetCoreUtility.IsValidHumanoid(animator.avatar))
+                KimodoRetargetClipSamplingUtility.ClipSamplingMode samplingMode =
+                    KimodoRetargetClipSamplingUtility.ResolveClipSamplingMode(clip);
+                if (!KimodoRetargetClipSamplingUtility.TryBuildClipSamplingContext(
+                        clip,
+                        cache,
+                        prefab.name + "_FootRootMotionContext",
+                        samplingMode,
+                        out context,
+                        out error))
                 {
-                    if (!KimodoLocalAvatarUtility.TryEnsureHumanoidAvatar(
-                            instance,
-                            out Avatar avatar,
-                            out _,
-                            out error))
-                    {
-                        return false;
-                    }
-
-                    animator.avatar = avatar;
+                    return false;
                 }
 
-                animator.applyRootMotion = true;
-                animator.cullingMode = AnimatorCullingMode.AlwaysAnimate;
-                animator.enabled = true;
-                animator.Rebind();
-                animator.Update(0f);
-
-                Transform leftFoot = animator.GetBoneTransform(HumanBodyBones.LeftFoot);
-                Transform rightFoot = animator.GetBoneTransform(HumanBodyBones.RightFoot);
-                Transform hips = animator.GetBoneTransform(HumanBodyBones.Hips);
+                Transform leftFoot = KimodoRetargetHumanoidIkUtility.ResolveHumanBoneTransform(cache, HumanBodyBones.LeftFoot);
+                Transform rightFoot = KimodoRetargetHumanoidIkUtility.ResolveHumanBoneTransform(cache, HumanBodyBones.RightFoot);
+                Transform hips = KimodoRetargetHumanoidIkUtility.ResolveHumanBoneTransform(cache, HumanBodyBones.Hips);
                 if (leftFoot == null || rightFoot == null || hips == null)
                 {
                     error = "Humanoid avatar is missing LeftFoot, RightFoot, or Hips bone mapping.";
@@ -77,34 +75,38 @@ namespace KimodoBridge.Editor
 
                 float fps = settings != null && settings.sampleRate > 0f
                     ? settings.sampleRate
-                    : (clip.frameRate > 0f ? clip.frameRate : 60f);
+                    : KimodoRetargetClipSamplingUtility.ResolveFrameRate(clip);
                 fps = Mathf.Max(1f, fps);
 
-                int frameCount = Mathf.Max(2, Mathf.CeilToInt(clip.length * fps) + 1);
+                int frameCount = KimodoRetargetSamplingUtility.ResolveFrameCount(clip.length, fps);
                 frames = new FootRootMotionFrame[frameCount];
+
                 for (int i = 0; i < frameCount; i++)
                 {
-                    float t = Mathf.Min(clip.length, i / fps);
-                    clip.SampleAnimation(instance, t);
-
-                    Vector3 hipsForward = Vector3.ProjectOnPlane(hips.rotation * Vector3.forward, Vector3.up);
-                    if (hipsForward.sqrMagnitude < 1e-6f)
+                    float time = Mathf.Min(clip.length, i / fps);
+                    if (!KimodoRetargetClipSamplingUtility.TryEvaluateClipSamplingContext(context, time, out error))
                     {
-                        hipsForward = Vector3.forward;
+                        frames = null;
+                        return false;
                     }
 
-                frames[i] = new FootRootMotionFrame
-                {
-                    time = t,
-                    leftFootWorld = leftFoot.position,
-                    leftFootWorldRotation = leftFoot.rotation,
-                    rightFootWorld = rightFoot.position,
-                    rightFootWorldRotation = rightFoot.rotation,
-                    hipWorld = hips.position,
-                    rootYawRadians = Mathf.Atan2(hipsForward.x, hipsForward.z),
-                    sampledRootWorld = instance.transform.position,
-                    sampledRootRotation = instance.transform.rotation
-                };
+                    MuscleSample muscleSample = null;
+                    if (!KimodoRetargetSamplingUtility.TryCaptureMuscleSample(cache, out muscleSample, out _))
+                    {
+                        muscleSample = null;
+                    }
+
+                    if (!TryBuildFrameSample(
+                            cache,
+                            muscleSample,
+                            hips,
+                            time,
+                            out frames[i],
+                            out error))
+                    {
+                        frames = null;
+                        return false;
+                    }
                 }
 
                 return true;
@@ -117,11 +119,93 @@ namespace KimodoBridge.Editor
             }
             finally
             {
-                if (instance != null)
+                if (context != null)
                 {
-                    UnityEngine.Object.DestroyImmediate(instance);
+                    KimodoRetargetClipSamplingUtility.DestroyClipSamplingContext(context);
                 }
+
+                cache?.Dispose();
             }
+        }
+
+        private static bool TryBuildFrameSample(
+            SkeletonCache cache,
+            MuscleSample muscleSample,
+            Transform hips,
+            float time,
+            out FootRootMotionFrame frame,
+            out string error)
+        {
+            frame = default(FootRootMotionFrame);
+            error = string.Empty;
+
+            if (cache == null)
+            {
+                error = "Skeleton cache is null.";
+                return false;
+            }
+
+            if (muscleSample == null)
+            {
+                error = "Muscle sample is null.";
+                return false;
+            }
+
+            HumanPose pose = muscleSample.pose;
+            KimodoRetargetClipWriter.EnsureHumanPoseMuscles(ref pose);
+
+            float humanScale = Mathf.Max(1e-6f, cache.humanScale);
+            Vector3 rootPosition = pose.bodyPosition;
+            Quaternion rootRotation = pose.bodyRotation;
+            float rootYawRadians = FootRootMotionMathUtility.ExtractYawRadians(rootRotation);
+            Quaternion rootYawRotation = Quaternion.AngleAxis(rootYawRadians * Mathf.Rad2Deg, Vector3.up);
+            Quaternion inverseRootYawRotation = Quaternion.Inverse(rootYawRotation);
+
+            Vector3 leftFootWorld = rootPosition + rootRotation * muscleSample.leftFootPosition;
+            Quaternion leftFootWorldRotation = rootRotation * muscleSample.leftFootRotation;
+            Vector3 rightFootWorld = rootPosition + rootRotation * muscleSample.rightFootPosition;
+            Quaternion rightFootWorldRotation = rootRotation * muscleSample.rightFootRotation;
+
+            Vector3 leftFootLocal = inverseRootYawRotation * (leftFootWorld - rootPosition);
+            float leftFootLocalYawRadians = FootRootMotionMathUtility.DeltaYawRadians(
+                rootYawRadians,
+                FootRootMotionMathUtility.ExtractYawRadians(leftFootWorldRotation));
+            Vector3 rightFootLocal = inverseRootYawRotation * (rightFootWorld - rootPosition);
+            float rightFootLocalYawRadians = FootRootMotionMathUtility.DeltaYawRadians(
+                rootYawRadians,
+                FootRootMotionMathUtility.ExtractYawRadians(rightFootWorldRotation));
+
+            Vector3 hipWorld = rootPosition;
+            float hipLocalYawRadians = 0f;
+            Vector3 hipLocal = Vector3.zero;
+            if (hips != null)
+            {
+                hipWorld = hips.position / humanScale;
+                hipLocal = inverseRootYawRotation * (hipWorld - rootPosition);
+                hipLocalYawRadians = FootRootMotionMathUtility.DeltaYawRadians(
+                    rootYawRadians,
+                    FootRootMotionMathUtility.ExtractYawRadians(hips.rotation));
+            }
+
+            frame = new FootRootMotionFrame
+            {
+                time = time,
+                muscleSample = muscleSample,
+                sampledRootWorld = rootPosition,
+                sampledRootRotation = rootRotation,
+                hipWorld = hipWorld,
+                leftFootWorld = leftFootWorld,
+                leftFootWorldRotation = leftFootWorldRotation,
+                rightFootWorld = rightFootWorld,
+                rightFootWorldRotation = rightFootWorldRotation,
+                hipLocal = hipLocal,
+                hipLocalYawRadians = hipLocalYawRadians,
+                leftFootLocal = leftFootLocal,
+                leftFootLocalYawRadians = leftFootLocalYawRadians,
+                rightFootLocal = rightFootLocal,
+                rightFootLocalYawRadians = rightFootLocalYawRadians
+            };
+            return true;
         }
     }
 }
