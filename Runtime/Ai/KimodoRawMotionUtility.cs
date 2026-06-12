@@ -10,7 +10,7 @@ namespace KimodoBridge
     {
         internal readonly string[] jointNames;
         internal readonly int[] jointParents;
-        internal readonly List<List<List<float>>> positions;
+        internal readonly List<float> joints;
         internal readonly List<float> localRotQuats;
         internal readonly int rootJointIndex;
 
@@ -20,7 +20,7 @@ namespace KimodoBridge
             float frameRate,
             string[] jointNames,
             int[] jointParents,
-            List<List<List<float>>> positions,
+            List<float> joints,
             List<float> localRotQuats,
             int rootJointIndex)
         {
@@ -29,7 +29,7 @@ namespace KimodoBridge
             FrameRate = frameRate > 0f ? frameRate : KimodoPlayableClip.FIXED_FRAME_RATE;
             this.jointNames = jointNames ?? Array.Empty<string>();
             this.jointParents = jointParents ?? Array.Empty<int>();
-            this.positions = positions;
+            this.joints = joints ?? new List<float>(0);
             this.localRotQuats = localRotQuats;
             this.rootJointIndex = Mathf.Clamp(rootJointIndex, 0, Mathf.Max(0, jointCount - 1));
         }
@@ -45,22 +45,22 @@ namespace KimodoBridge
         internal bool TryReadUnityPosition(int frameIndex, int jointIndex, out Vector3 value)
         {
             value = default;
-            if (positions == null ||
+            if (joints == null ||
                 frameIndex < 0 ||
-                frameIndex >= positions.Count ||
+                frameIndex >= FrameCount ||
                 jointIndex < 0 ||
-                jointIndex >= positions[frameIndex].Count)
+                jointIndex >= JointCount)
             {
                 return false;
             }
 
-            List<float> raw = positions[frameIndex][jointIndex];
-            if (raw == null || raw.Count < 3)
+            int baseIndex = (frameIndex * JointCount + jointIndex) * 3;
+            if (baseIndex < 0 || baseIndex + 2 >= joints.Count)
             {
                 return false;
             }
 
-            value = new Vector3(-raw[0], raw[1], raw[2]);
+            value = new Vector3(-joints[baseIndex + 0], joints[baseIndex + 1], joints[baseIndex + 2]);
             return true;
         }
 
@@ -125,7 +125,7 @@ namespace KimodoBridge
             public int fps;
             public string[] joint_names;
             public int[] joint_parents;
-            public List<List<List<float>>> positions;
+            public List<float> joints;
             public List<float> local_rot_quats;
         }
 
@@ -150,10 +150,8 @@ namespace KimodoBridge
                 return false;
             }
 
-            int positionFrames = data.positions != null ? data.positions.Count : 0;
-            int frameHint = data.num_frames > 0 ? data.num_frames : positionFrames;
-            int frameCount = positionFrames > 0 ? Mathf.Min(frameHint, positionFrames) : Mathf.Max(2, frameHint);
-            int jointCount = Mathf.Min(data.joint_names.Length, data.num_joints > 0 ? data.num_joints : data.joint_names.Length);
+            int frameCount = data.num_frames;
+            int jointCount = Mathf.Min(data.joint_names.Length, data.num_joints);
             int rotationJointCount = ResolveRotationJointCount(data, frameCount, jointCount);
             jointCount = Mathf.Min(jointCount, rotationJointCount > 0 ? Mathf.Max(jointCount, rotationJointCount) : jointCount);
             int rootJoint = FindRootJointIndex(data, jointCount);
@@ -164,7 +162,7 @@ namespace KimodoBridge
                 data.fps > 0 ? data.fps : KimodoPlayableClip.FIXED_FRAME_RATE,
                 data.joint_names,
                 data.joint_parents,
-                data.positions,
+                data.joints,
                 data.local_rot_quats,
                 rootJoint);
             return true;
@@ -492,64 +490,7 @@ namespace KimodoBridge
                 throw new Exception("motion json root is not an object.");
             }
 
-            MotionJsonData data = obj.ToObject<MotionJsonData>() ?? new MotionJsonData();
-            if (data.positions != null && data.positions.Count > 0)
-            {
-                return data;
-            }
-
-            JToken posed = obj["posed_joints"];
-            if (posed is JArray)
-            {
-                data.positions = posed.ToObject<List<List<List<float>>>>();
-                if (data.positions != null && data.positions.Count > 0)
-                {
-                    if (data.num_frames <= 0)
-                    {
-                        data.num_frames = data.positions.Count;
-                    }
-
-                    if (data.num_joints <= 0 && data.positions[0] != null)
-                    {
-                        data.num_joints = data.positions[0].Count;
-                    }
-
-                    return data;
-                }
-            }
-
-            JToken flat = obj["joints"];
-            if (flat is JArray)
-            {
-                List<float> flatValues = flat.ToObject<List<float>>();
-                int frames = data.num_frames;
-                int joints = data.num_joints;
-                if (frames > 0 && joints > 0 && flatValues != null && flatValues.Count >= frames * joints * 3)
-                {
-                    data.positions = new List<List<List<float>>>(frames);
-                    int ptr = 0;
-                    for (int frameIndex = 0; frameIndex < frames; frameIndex++)
-                    {
-                        var frame = new List<List<float>>(joints);
-                        for (int jointIndex = 0; jointIndex < joints; jointIndex++)
-                        {
-                            frame.Add(new List<float>
-                            {
-                                flatValues[ptr],
-                                flatValues[ptr + 1],
-                                flatValues[ptr + 2]
-                            });
-                            ptr += 3;
-                        }
-
-                        data.positions.Add(frame);
-                    }
-
-                    return data;
-                }
-            }
-
-            return data;
+            return obj.ToObject<MotionJsonData>() ?? new MotionJsonData();
         }
 
         private static bool ValidateData(MotionJsonData data, out string error)
@@ -561,10 +502,15 @@ namespace KimodoBridge
                 return false;
             }
 
-            if ((data.positions == null || data.positions.Count == 0) &&
-                (data.local_rot_quats == null || data.local_rot_quats.Count == 0))
+            if (data.num_frames < 2)
             {
-                error = "No positions or local_rot_quats in motion data.";
+                error = "Need at least 2 frames in motion data.";
+                return false;
+            }
+
+            if (data.num_joints <= 0)
+            {
+                error = "No num_joints in motion data.";
                 return false;
             }
 
@@ -574,11 +520,28 @@ namespace KimodoBridge
                 return false;
             }
 
-            int positionFrames = data.positions != null ? data.positions.Count : 0;
-            int frameHint = data.num_frames > 0 ? data.num_frames : positionFrames;
-            if (frameHint < 2)
+            if (data.joint_names.Length < data.num_joints)
             {
-                error = "Need at least 2 frames in motion data.";
+                error = "joint_names count is smaller than num_joints.";
+                return false;
+            }
+
+            if (data.joints == null || data.joints.Count == 0)
+            {
+                error = "No joints in compact motion data.";
+                return false;
+            }
+
+            int requiredJointScalars = data.num_frames * data.num_joints * 3;
+            if (data.joints.Count < requiredJointScalars)
+            {
+                error = $"Compact joints count is too small. Expected at least {requiredJointScalars}, got {data.joints.Count}.";
+                return false;
+            }
+
+            if (data.local_rot_quats == null || data.local_rot_quats.Count == 0)
+            {
+                error = "No local_rot_quats in motion data.";
                 return false;
             }
 
