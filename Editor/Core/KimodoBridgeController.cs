@@ -313,12 +313,12 @@ namespace KimodoBridge.Editor
             if (active)
             {
                 serverStateCache.Pause();
-                UnityEngine.Debug.Log("[Kimodo][CompileGate] server state cache paused.");
+                //UnityEngine.Debug.Log("[Kimodo][CompileGate] server state cache paused.");
                 return;
             }
 
             serverStateCache.Resume();
-            UnityEngine.Debug.Log("[Kimodo][CompileGate] server state cache resumed.");
+            //UnityEngine.Debug.Log("[Kimodo][CompileGate] server state cache resumed.");
             EditorApplication.delayCall += RecoverBridgeAfterDomainReload;
         }
 

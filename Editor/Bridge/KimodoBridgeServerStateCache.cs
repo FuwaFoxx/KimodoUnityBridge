@@ -65,7 +65,7 @@ namespace KimodoBridge.Editor
                 queryInFlight = false;
                 nextQueryAt = EditorApplication.timeSinceStartup + QueryCooldownSeconds;
             }
-            UnityEngine.Debug.Log("[Kimodo][ServerStateCache] paused.");
+            //UnityEngine.Debug.Log("[Kimodo][ServerStateCache] paused.");
         }
 
         internal void Resume()
@@ -77,7 +77,7 @@ namespace KimodoBridge.Editor
                 queryInFlight = false;
                 nextQueryAt = EditorApplication.timeSinceStartup + QueryCooldownSeconds;
             }
-            UnityEngine.Debug.Log("[Kimodo][ServerStateCache] resumed.");
+           // UnityEngine.Debug.Log("[Kimodo][ServerStateCache] resumed.");
         }
 
         internal void Invalidate(System.Func<string> getRuntimeRoot)
