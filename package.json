@@ -19,9 +19,9 @@
   },
   "samples": [
     {
-      "displayName": "Kimodo Example",
-      "description": "Example scene and generated clips for Kimodo Unity Motion Tools.",
-      "path": "example~"
+      "displayName": "Light Sample",
+      "description": "Light Sample scene and generated clips for Kimodo Unity Motion Tools On Default RenderPpie.",
+      "path": "LightSample~"
     }
   ],
   "type": "library"

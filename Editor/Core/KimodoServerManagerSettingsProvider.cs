@@ -26,6 +26,7 @@ namespace KimodoBridge.Editor
         private const float ModelListMaxHeight = 260f;
         private const float ModelListRowHeight = 22f;
         private const float ModelDeleteButtonWidth = 70f;
+        private const float ClearClipCacheButtonWidth = 160f;
 
         private string runtimeRoot = string.Empty;
         private string resolvedModelsRoot = string.Empty;
@@ -162,16 +163,29 @@ namespace KimodoBridge.Editor
 
             KimodoPlayableClipGenerationSettings settings = KimodoPlayableClipGenerationSettings.instance;
 
-            EditorGUI.BeginChangeCheck();
-            int newLimit = EditorGUILayout.IntSlider(
-                new GUIContent("Max Cached Clip", "Maximum number of generated clips kept in runtime cache. Range: 1-1000."),
-                settings.MaxGeneratedClips,
-                KimodoPlayableClipGenerationSettings.MinGeneratedClipsLimit,
-                KimodoPlayableClipGenerationSettings.MaxGeneratedClipsLimit);
-            if (EditorGUI.EndChangeCheck())
+            using (new EditorGUILayout.HorizontalScope())
             {
-                settings.MaxGeneratedClips = newLimit;
-                settings.SaveSettings();
+                EditorGUI.BeginChangeCheck();
+                int newLimit = EditorGUILayout.IntSlider(
+                    new GUIContent("Max Cached Clip", "Maximum number of generated clips kept in runtime cache. Range: 1-1000."),
+                    settings.MaxGeneratedClips,
+                    KimodoPlayableClipGenerationSettings.MinGeneratedClipsLimit,
+                    KimodoPlayableClipGenerationSettings.MaxGeneratedClipsLimit);
+                if (EditorGUI.EndChangeCheck())
+                {
+                    settings.MaxGeneratedClips = newLimit;
+                    settings.SaveSettings();
+                }
+
+                using (new EditorGUI.DisabledScope(operationInProgress))
+                {
+                    if (GUILayout.Button(
+                        new GUIContent("Clear Clip Cache", "Delete unreferenced Kimodo cache clips under Assets/KimodoGeneratedClips."),
+                        GUILayout.Width(ClearClipCacheButtonWidth)))
+                    {
+                        TryClearUnreferencedClipCaches();
+                    }
+                }
             }
 
             EditorGUI.BeginChangeCheck();
@@ -501,6 +515,43 @@ namespace KimodoBridge.Editor
             catch (Exception e)
             {
                 modelError = $"Delete model failed ({modelName}): {e.Message}";
+            }
+        }
+
+        private void TryClearUnreferencedClipCaches()
+        {
+            const string title = "Clear Clip Cache";
+            const string message =
+                "This will scan Kimodo animation clip caches and delete cache clips that have no scene reference and no object/asset reference.\n\n" +
+                "This operation may take a while on large projects. Continue?";
+
+            if (!EditorUtility.DisplayDialog(title, message, "Clear", "Cancel"))
+            {
+                return;
+            }
+
+            lastError = string.Empty;
+            operationStatus = "Scanning Kimodo clip cache references...";
+
+            if (KimodoEditorClipWritebackService.TryDeleteUnreferencedNamedClipCaches(
+                out KimodoEditorClipWritebackService.NamedClipCacheCleanupSummary summary,
+                out string error))
+            {
+                operationStatus =
+                    $"Clip cache cleanup complete. Scanned {summary.CandidateCount} cache clip(s), kept {summary.ReferencedCount}, deleted {summary.DeletedCount}.";
+                if (summary.FailedCount > 0)
+                {
+                    lastError = $"Some cache clips could not be deleted ({summary.FailedCount}).";
+                }
+            }
+            else
+            {
+                operationStatus = string.IsNullOrWhiteSpace(error)
+                    ? "Clip cache cleanup finished with errors."
+                    : error;
+                lastError = string.IsNullOrWhiteSpace(error)
+                    ? "Clear clip cache failed."
+                    : error;
             }
         }
 

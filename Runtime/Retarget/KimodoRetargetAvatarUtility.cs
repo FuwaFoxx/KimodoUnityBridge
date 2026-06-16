@@ -363,12 +363,27 @@ namespace KimodoBridge
 
             root.position = sample.unityRootPos;
             root.rotation = sample.unityRootRot;
+            int count = sample.localAxisAngles != null ? sample.localAxisAngles.Count : 0;
             if (TryGetProfileRootJointTransform(nameMap, modelName, out Transform profileRootJoint))
             {
                 profileRootJoint.position = sample.kimodoRootPosition;
-                profileRootJoint.rotation = AxisAngleToQuaternion(sample.localAxisAngles[0]);
+                if (count > 0)
+                {
+                    profileRootJoint.rotation = AxisAngleToQuaternion(sample.localAxisAngles[0]);
+                }
             }
-            int count = sample.localAxisAngles != null ? sample.localAxisAngles.Count : 0;
+
+            if (count == 0)
+            {
+                if (string.Equals(sample.constraintType, "root2d", StringComparison.OrdinalIgnoreCase))
+                {
+                    return true;
+                }
+
+                error = $"marker sample has no localAxisAngles for constraint '{sample.constraintType ?? string.Empty}' at time {sample.sampleTime:F3}";
+                return false;
+            }
+
             int applyCount = Mathf.Min(modelJointNames.Length, count);
             for (int i = 0; i < applyCount; i++)
             {

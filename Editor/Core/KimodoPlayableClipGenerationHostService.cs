@@ -147,21 +147,26 @@ namespace KimodoBridge.Editor
 
         private static void TryMatchOffsetsToPreviousClip(KimodoPlayableClip playableClip, TimelineClip timelineClip)
         {
-            if (playableClip == null ||
-                playableClip.inOutConstraintMode != KimodoInOutConstraintMode.Outside ||
-                !playableClip.normalizeConstraintOrigin ||
-                TimelineEditor.inspectedDirector == null)
+            if (playableClip == null || playableClip.inOutConstraintMode != KimodoInOutConstraintMode.Outside)
             {
                 return;
             }
 
-            if (!TryResolveBindingAnimatorAvatar(playableClip, out Avatar bindingAvatar) || !KimodoRetargetCoreUtility.IsValidHumanoid(bindingAvatar))
+            if (TimelineEditor.inspectedDirector == null)
             {
+                Debug.LogWarning($"[Kimodo][TimelineOffset] skipped for '{playableClip.name}': Timeline inspected director is null.");
                 return;
             }
 
-            if (timelineClip == null || !KimodoTimelineInOutConstraintContextUtility.HasPreviousNeighbor(timelineClip))
+            if (timelineClip == null)
             {
+                Debug.LogWarning($"[Kimodo][TimelineOffset] skipped for '{playableClip.name}': timeline clip not found.");
+                return;
+            }
+
+            if (!KimodoTimelineInOutConstraintContextUtility.HasPreviousNeighbor(timelineClip))
+            {
+                Debug.LogWarning($"[Kimodo][TimelineOffset] skipped for '{playableClip.name}': no previous neighbor clip.");
                 return;
             }
 
@@ -171,6 +176,7 @@ namespace KimodoBridge.Editor
                     $"Match Offsets to Previous Clip failed for '{playableClip.name}': {error}");
             }
 
+            Debug.Log($"[Kimodo][TimelineOffset] matched previous offsets for '{playableClip.name}'.");
             EditorUtility.SetDirty(playableClip);
             if (timelineClip.GetParentTrack() != null)
             {

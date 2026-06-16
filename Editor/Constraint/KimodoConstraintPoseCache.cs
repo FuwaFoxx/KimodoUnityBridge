@@ -117,6 +117,10 @@ namespace KimodoBridge.Editor
 
                 if (!ApplySampleToRig(item.SampleData, context.ModelName, entry, out error))
                 {
+                    int localAxisCount = item.SampleData != null && item.SampleData.localAxisAngles != null
+                        ? item.SampleData.localAxisAngles.Count
+                        : 0;
+                    error = $"pose cache render failed for entry '{entryId}' (constraint='{item.ConstraintType ?? string.Empty}', sampleTime={item.SampleData.sampleTime:F3}, localAxisAngles={localAxisCount}): {error}";
                     return false;
                 }
 

@@ -593,7 +593,7 @@ namespace KimodoBridge.Editor
             {
                 EditorGUILayout.PropertyField(
                     normalizeConstraintOrigin,
-                    new GUIContent("Normalize Constraint Origin", "Use the first available boundary constraint as the local origin before export. When disabled, timeline Match Offsets to Previous Clip will also be skipped."));
+                    new GUIContent("Normalize Constraint Origin", "Use the first available boundary constraint as the local origin before export."));
             }
 
             EditorGUILayout.Space(4f);
