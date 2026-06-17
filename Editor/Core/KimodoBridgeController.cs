@@ -154,16 +154,6 @@ namespace KimodoBridge.Editor
                     return;
                 }
 
-                bool canConnect = await BridgeRuntimeControl.CanConnectAsync(
-                    host,
-                    port,
-                    BridgeRuntimeSettings.DefaultStatusConnectTimeoutMs,
-                    CancellationToken.None);
-                if (!canConnect)
-                {
-                    return;
-                }
-
                 string launcherPath = ResolveStartScript(runtimeRoot);
                 if (string.IsNullOrWhiteSpace(launcherPath) || !File.Exists(launcherPath))
                 {
@@ -270,8 +260,7 @@ namespace KimodoBridge.Editor
         {
             if (ShouldKeepServerAlive())
             {
-                UnityEngine.Debug.Log("[Kimodo][CompileGate] AlwaysKeepServer enabled, skipping bridge detach before assembly reload.");
-                return;
+                                return;
             }
 
             _ = generationFacade.ShutdownAsync(
@@ -342,23 +331,9 @@ namespace KimodoBridge.Editor
                     port: -1);
             }
 
-            bool running = false;
-            try
-            {
-                running = BridgeRuntimeControl.CanConnect(
-                    host,
-                    port,
-                    BridgeRuntimeSettings.DefaultStatusConnectTimeoutMs,
-                    CancellationToken.None);
-            }
-            catch
-            {
-                running = false;
-            }
-
             return new ServerStatusSnapshot(
                 ready: true,
-                running: running,
+                running: true,
                 hasPort: true,
                 queryInFlight: false,
                 host: host,

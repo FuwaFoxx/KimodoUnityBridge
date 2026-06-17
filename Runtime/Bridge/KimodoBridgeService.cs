@@ -22,6 +22,7 @@ namespace KimodoBridge
         private readonly BridgeLogPump logPump;
         private readonly List<BridgeLogPump> sideLogPumps = new List<BridgeLogPump>(2);
         private readonly SemaphoreSlim lifecycleGate = new SemaphoreSlim(1, 1);
+        private readonly SynchronizationContext creationContext;
 
         private string currentHost;
         private int currentPort = -1;
@@ -41,6 +42,7 @@ namespace KimodoBridge
                 this.settings.modelLoadingPollIntervalMs);
             processManager = new BridgeProcessManager(platform);
             logPump = new BridgeLogPump();
+            creationContext = SynchronizationContext.Current;
             currentHost = string.IsNullOrWhiteSpace(this.settings.hostFallback) ? "127.0.0.1" : this.settings.hostFallback;
         }
 
@@ -60,6 +62,38 @@ namespace KimodoBridge
         public string RuntimeRoot => settings.runtimeRoot;
         public string LauncherPath => settings.launcherPath;
 
+        private void EmitDebugLog(string message)
+        {
+            if (string.IsNullOrWhiteSpace(message))
+            {
+                return;
+            }
+
+            if (creationContext != null)
+            {
+                creationContext.Post(_ => Debug.Log(message), null);
+                return;
+            }
+
+            Debug.Log(message);
+        }
+
+        private void EmitProgress(Action<string> progress, string message)
+        {
+            if (progress == null || string.IsNullOrWhiteSpace(message))
+            {
+                return;
+            }
+
+            if (creationContext != null)
+            {
+                creationContext.Post(_ => progress(message), null);
+                return;
+            }
+
+            progress(message);
+        }
+
         public async Task<bool> AttachAsync(Action<string> progress, CancellationToken token)
         {
             ThrowIfDisposed();
@@ -67,16 +101,6 @@ namespace KimodoBridge
 
             currentPortFilePath = BridgeEndpointResolver.GetServerPortFilePath(settings.runtimeRoot);
             if (!BridgeEndpointResolver.TryReadServerEndpoint(settings.runtimeRoot, settings.hostFallback, out string host, out int port, out _))
-            {
-                return false;
-            }
-
-            bool canConnect = await BridgeRuntimeControl.CanConnectAsync(
-                host,
-                port,
-                settings.statusConnectTimeoutMs,
-                token).ConfigureAwait(false);
-            if (!canConnect)
             {
                 return false;
             }
@@ -110,8 +134,7 @@ namespace KimodoBridge
             currentPortFilePath = BridgeEndpointResolver.GetServerPortFilePath(settings.runtimeRoot);
             if (File.Exists(currentPortFilePath))
             {
-                if (BridgeEndpointResolver.TryReadServerEndpoint(settings.runtimeRoot, settings.hostFallback, out string host, out int port, out _) &&
-                    await BridgeRuntimeControl.CanConnectAsync(host, port, settings.statusConnectTimeoutMs, token).ConfigureAwait(false))
+                if (BridgeEndpointResolver.TryReadServerEndpoint(settings.runtimeRoot, settings.hostFallback, out string host, out int port, out _))
                 {
                     currentHost = host;
                     currentPort = port;
@@ -119,8 +142,10 @@ namespace KimodoBridge
                     return $"Ready - {settings.modelName} on {host}:{port}";
                 }
 
-                await InvalidateCurrentEndpointAsync().ConfigureAwait(false);
-                TryDeleteServerPortFile();
+                currentHost = settings.hostFallback;
+                currentPort = -1;
+                StartLogPump(BridgeEndpointResolver.ResolveAttachLogPath(settings.runtimeRoot), progress);
+                return $"Ready - {settings.modelName} (serverport detected)";
             }
 
             await InvalidateCurrentEndpointAsync().ConfigureAwait(false);
@@ -135,14 +160,14 @@ namespace KimodoBridge
                     settings.modelsRoot,
                     settings.idleTimeoutSeconds,
                     settings.ownerProcessId);
-                progress?.Invoke("Bridge process launched.");
+                EmitProgress(progress, "Bridge process launched.");
             }
 
             StartLogPump(BridgeEndpointResolver.ResolveAttachLogPath(settings.runtimeRoot), progress);
 
             try
             {
-                progress?.Invoke(reusingExistingProcess ? "Bridge process already exists, waiting for endpoint..." : "Starting bridge...");
+                EmitProgress(progress, reusingExistingProcess ? "Bridge process already exists, waiting for endpoint..." : "Starting bridge...");
                 await processManager.WaitUntilReadyAsync(
                     settings.runtimeRoot,
                     settings.hostFallback,
@@ -188,7 +213,7 @@ namespace KimodoBridge
         {
             ThrowIfDisposed();
             await EnsureHealthyOrStartAsync(progress, token).ConfigureAwait(false);
-            Debug.Log(
+            EmitDebugLog(
                 $"[KimodoBridge] Generate request: host={currentHost}:{currentPort}, " +
                 $"promptLen={(prompt ?? string.Empty).Length}, duration={durationSeconds:F3}, " +
                 $"steps={diffusionSteps}, seed={(seed.HasValue ? seed.Value.ToString() : "null")}, " +
@@ -219,9 +244,10 @@ namespace KimodoBridge
             }
             catch (Exception ex) when (IsLikelyTransportFailure(ex))
             {
-                progress?.Invoke($"Bridge connection lost, restarting bridge... {ex.Message}");
-                Debug.LogWarning($"[KimodoBridge] Transport failure during generate. Restarting bridge once. {ex}");
+                EmitProgress(progress, $"Bridge connection lost, restarting bridge... {ex.Message}");
+                EmitDebugLog($"[KimodoBridge] Transport failure during generate. Restarting bridge once. {ex}");
                 await InvalidateCurrentEndpointAsync().ConfigureAwait(false);
+                TryDeleteServerPortFile();
                 _ = await StartAsync(progress, token).ConfigureAwait(false);
                 await EnsureHealthyOrThrowAsync(token).ConfigureAwait(false);
                 response = await SendGenerateRequestAsync(
@@ -241,7 +267,7 @@ namespace KimodoBridge
             string status = response?.Value<string>("status") ?? string.Empty;
             string responseMessage = response?.Value<string>("message") ?? string.Empty;
             string motionJson = response?.Value<string>("motion_json_compact");
-            Debug.Log(
+            EmitDebugLog(
                 $"[KimodoBridge] Generate response: status='{status}', hasMotion={!string.IsNullOrWhiteSpace(motionJson)}, " +
                 $"message='{responseMessage}'");
             if (!string.Equals(status, "done", StringComparison.OrdinalIgnoreCase))
@@ -254,7 +280,7 @@ namespace KimodoBridge
                 throw new Exception("Bridge completed without motion_json_compact.");
             }
 
-            progress?.Invoke("Bridge generation complete.");
+            EmitProgress(progress, "Bridge generation complete.");
             return motionJson;
         }
 
@@ -271,6 +297,7 @@ namespace KimodoBridge
             Action<string> progress,
             CancellationToken token)
         {
+            Action<string> marshaledProgress = progress == null ? null : msg => EmitProgress(progress, msg);
             return protocolClient.GenerateAsync(
                 currentHost,
                 currentPort,
@@ -283,7 +310,7 @@ namespace KimodoBridge
                 loopHint,
                 segmentIndex,
                 transitionDurationSeconds,
-                progress,
+                marshaledProgress,
                 token);
         }
 
@@ -403,7 +430,8 @@ namespace KimodoBridge
                 return;
             }
 
-            progress?.Invoke("Bridge endpoint is unreachable, restarting bridge...");
+            EmitProgress(progress, "Bridge endpoint is unreachable, restarting bridge...");
+            TryDeleteServerPortFile();
             _ = await StartAsync(progress, token).ConfigureAwait(false);
             await EnsureHealthyOrThrowAsync(token).ConfigureAwait(false);
         }
@@ -551,7 +579,7 @@ namespace KimodoBridge
                 BridgeMessageLogPumpMissingFilePollMs);
             StartSideLogPumpIfDifferent(Path.Combine(settings.runtimeRoot, "log", "run_server.log"), "[RunServer]", mainLogFullPath, progress);
             StartSideLogPumpIfDifferent(Path.Combine(settings.runtimeRoot, "log", "setup.log"), "[Setup]", mainLogFullPath, progress);
-            StartSideLogPumpIfDifferent(Path.Combine(settings.runtimeRoot, "log", "download_model.log"), "[Download]", mainLogFullPath, progress, readFromStartOverride: true);
+            StartSideLogPumpIfDifferent(Path.Combine(settings.runtimeRoot, "log", "download_model.log"), "[Download]", mainLogFullPath, progress);
         }
 
         private void StopLogPump()
