@@ -51,7 +51,7 @@ namespace KimodoBridge.Editor
                 modelsRoot,
                 forceSetup,
                 startupTimeoutMs: (int)Math.Round(startupTimeoutSeconds * 1000f));
-            return await runtimeService.StartAsync(KimodoBackendType.Bridge, progress, token);
+            return await runtimeService.StartAsync(KimodoBackendType.Bridge, progress, token).ConfigureAwait(false);
         }
 
         internal async Task<KimodoGenerationResultDto> GenerateBridgeAsync(
@@ -86,13 +86,13 @@ namespace KimodoBridge.Editor
                 forceSetup: false,
                 startupTimeoutMs: startupTimeoutMs);
 
-            await runtimeService.StartAsync(KimodoBackendType.Bridge, progress, token);
-            return await runtimeService.GenerateAsync(request, KimodoBackendType.Bridge, progress, token);
+            await runtimeService.StartAsync(KimodoBackendType.Bridge, progress, token).ConfigureAwait(false);
+            return await runtimeService.GenerateAsync(request, KimodoBackendType.Bridge, progress, token).ConfigureAwait(false);
         }
 
         internal async Task CloseServerAsync(Func<Task<(bool hasEndpoint, string host, int port)>> tryGetEndpointAsync)
         {
-            await ShutdownAsync(ShutdownMode.StopAndDispose, tryGetEndpointAsync, CancellationToken.None);
+            await ShutdownAsync(ShutdownMode.StopAndDispose, tryGetEndpointAsync, CancellationToken.None).ConfigureAwait(false);
         }
 
         internal void DetachSharedRuntimeGenerationService()
@@ -234,7 +234,7 @@ namespace KimodoBridge.Editor
             {
                 try
                 {
-                    (endpointKnown, endpointHost, endpointPort) = await tryGetEndpointAsync();
+                    (endpointKnown, endpointHost, endpointPort) = await tryGetEndpointAsync().ConfigureAwait(false);
                 }
                 catch
                 {
@@ -256,12 +256,12 @@ namespace KimodoBridge.Editor
                     {
                         if (mode == ShutdownMode.DetachOnly)
                         {
-                            await runtimeService.DetachAsync(KimodoBackendType.Bridge, token);
+                            await runtimeService.DetachAsync(KimodoBackendType.Bridge, token).ConfigureAwait(false);
                             UnityEngine.Debug.Log("[Kimodo][BridgeShutdown] detached shared runtime service.");
                         }
                         else
                         {
-                            await runtimeService.StopAsync(KimodoBackendType.Bridge, token);
+                            await runtimeService.StopAsync(KimodoBackendType.Bridge, token).ConfigureAwait(false);
                             UnityEngine.Debug.Log("[Kimodo][BridgeShutdown] stopped shared runtime service.");
                         }
                     }
@@ -283,7 +283,7 @@ namespace KimodoBridge.Editor
                             endpointPort,
                             BridgeRuntimeSettings.DefaultStatusConnectTimeoutMs,
                             BridgeRuntimeSettings.DefaultStatusIoTimeoutMs,
-                            token);
+                            token).ConfigureAwait(false);
                         UnityEngine.Debug.Log($"[Kimodo][BridgeShutdown] sent quit to {endpointHost}:{endpointPort}.");
                     }
                     catch
@@ -294,7 +294,7 @@ namespace KimodoBridge.Editor
 
                 if (mode == ShutdownMode.StopAndDispose && endpointKnown)
                 {
-                    bool fullyStopped = await EnsureEndpointStoppedAfterShutdownAsync(endpointHost, endpointPort, token);
+                    bool fullyStopped = await EnsureEndpointStoppedAfterShutdownAsync(endpointHost, endpointPort, token).ConfigureAwait(false);
                     if (!fullyStopped)
                     {
                         throw new InvalidOperationException(
@@ -324,19 +324,19 @@ namespace KimodoBridge.Editor
                 host,
                 port,
                 connectTimeoutMs: 500,
-                token: token);
+                token: token).ConfigureAwait(false);
             if (!canConnect)
             {
                 return true;
             }
 
-            await Task.Delay(700, CancellationToken.None);
+            await Task.Delay(700, CancellationToken.None).ConfigureAwait(false);
 
             return !await BridgeRuntimeControl.CanConnectAsync(
                 host,
                 port,
                 connectTimeoutMs: 500,
-                token: token);
+                token: token).ConfigureAwait(false);
         }
 
         public void Dispose()

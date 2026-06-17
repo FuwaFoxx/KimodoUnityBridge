@@ -81,7 +81,7 @@ namespace KimodoBridge
                 protocolClient: protocolClient,
                 startupTimeoutMs: startupTimeoutMs,
                 pollIntervalMs: pollIntervalMs,
-                token: token);
+                token: token).ConfigureAwait(false);
         }
 
         public void DetachProcess()

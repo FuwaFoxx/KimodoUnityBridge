@@ -34,7 +34,7 @@ namespace KimodoBridge
                         host,
                         port,
                         BridgeRuntimeSettings.DefaultStatusConnectTimeoutMs,
-                        waitToken);
+                        waitToken).ConfigureAwait(false);
                     if (canConnect)
                     {
                         return;
@@ -47,7 +47,7 @@ namespace KimodoBridge
                     throw new Exception($"Bridge exited with code {exitCode}.");
                 }
 
-                await Task.Delay(Math.Max(BridgeRuntimeSettings.DefaultPollIntervalMs / 2, pollIntervalMs), waitToken);
+                await Task.Delay(Math.Max(BridgeRuntimeSettings.DefaultPollIntervalMs / 2, pollIntervalMs), waitToken).ConfigureAwait(false);
             }
         }
     }

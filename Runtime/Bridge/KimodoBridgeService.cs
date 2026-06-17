@@ -75,7 +75,7 @@ namespace KimodoBridge
                 host,
                 port,
                 settings.statusConnectTimeoutMs,
-                token);
+                token).ConfigureAwait(false);
             if (!canConnect)
             {
                 return false;
@@ -91,10 +91,10 @@ namespace KimodoBridge
         public async Task<string> StartAsync(Action<string> progress, CancellationToken token)
         {
             ThrowIfDisposed();
-            await lifecycleGate.WaitAsync(token);
+            await lifecycleGate.WaitAsync(token).ConfigureAwait(false);
             try
             {
-                return await StartCoreAsync(progress, token);
+                return await StartCoreAsync(progress, token).ConfigureAwait(false);
             }
             finally
             {
@@ -111,7 +111,7 @@ namespace KimodoBridge
             if (File.Exists(currentPortFilePath))
             {
                 if (BridgeEndpointResolver.TryReadServerEndpoint(settings.runtimeRoot, settings.hostFallback, out string host, out int port, out _) &&
-                    await BridgeRuntimeControl.CanConnectAsync(host, port, settings.statusConnectTimeoutMs, token))
+                    await BridgeRuntimeControl.CanConnectAsync(host, port, settings.statusConnectTimeoutMs, token).ConfigureAwait(false))
                 {
                     currentHost = host;
                     currentPort = port;
@@ -119,11 +119,11 @@ namespace KimodoBridge
                     return $"Ready - {settings.modelName} on {host}:{port}";
                 }
 
-                await InvalidateCurrentEndpointAsync();
+                await InvalidateCurrentEndpointAsync().ConfigureAwait(false);
                 TryDeleteServerPortFile();
             }
 
-            await InvalidateCurrentEndpointAsync();
+            await InvalidateCurrentEndpointAsync().ConfigureAwait(false);
             bool reusingExistingProcess = processManager.IsRunning;
             if (!reusingExistingProcess)
             {
@@ -149,7 +149,7 @@ namespace KimodoBridge
                     protocolClient,
                     settings.startupTimeoutMs,
                     settings.pollIntervalMs,
-                    token);
+                    token).ConfigureAwait(false);
 
                 if (!BridgeEndpointResolver.TryReadServerEndpoint(settings.runtimeRoot, settings.hostFallback, out string host, out int port, out string endpointError))
                 {
@@ -162,13 +162,13 @@ namespace KimodoBridge
             }
             catch (OperationCanceledException)
             {
-                await DetachCurrentConnectionAsync();
+                await DetachCurrentConnectionAsync().ConfigureAwait(false);
                 throw;
             }
             catch
             {
-                await InvalidateCurrentEndpointAsync();
-                await StopCoreAsync(CancellationToken.None, throwIfStillRunning: false);
+                await InvalidateCurrentEndpointAsync().ConfigureAwait(false);
+                await StopCoreAsync(CancellationToken.None, throwIfStillRunning: false).ConfigureAwait(false);
                 throw;
             }
         }
@@ -187,7 +187,7 @@ namespace KimodoBridge
             CancellationToken token)
         {
             ThrowIfDisposed();
-            await EnsureHealthyOrStartAsync(progress, token);
+            await EnsureHealthyOrStartAsync(progress, token).ConfigureAwait(false);
             Debug.Log(
                 $"[KimodoBridge] Generate request: host={currentHost}:{currentPort}, " +
                 $"promptLen={(prompt ?? string.Empty).Length}, duration={durationSeconds:F3}, " +
@@ -210,20 +210,20 @@ namespace KimodoBridge
                     segmentIndex,
                     transitionDurationSeconds,
                     progress,
-                    token);
+                    token).ConfigureAwait(false);
             }
             catch (OperationCanceledException)
             {
-                await DetachCurrentConnectionAsync();
+                await DetachCurrentConnectionAsync().ConfigureAwait(false);
                 throw;
             }
             catch (Exception ex) when (IsLikelyTransportFailure(ex))
             {
                 progress?.Invoke($"Bridge connection lost, restarting bridge... {ex.Message}");
                 Debug.LogWarning($"[KimodoBridge] Transport failure during generate. Restarting bridge once. {ex}");
-                await InvalidateCurrentEndpointAsync();
-                _ = await StartAsync(progress, token);
-                await EnsureHealthyOrThrowAsync(token);
+                await InvalidateCurrentEndpointAsync().ConfigureAwait(false);
+                _ = await StartAsync(progress, token).ConfigureAwait(false);
+                await EnsureHealthyOrThrowAsync(token).ConfigureAwait(false);
                 response = await SendGenerateRequestAsync(
                     prompt,
                     durationSeconds,
@@ -235,7 +235,7 @@ namespace KimodoBridge
                     segmentIndex,
                     transitionDurationSeconds,
                     progress,
-                    token);
+                    token).ConfigureAwait(false);
             }
 
             string status = response?.Value<string>("status") ?? string.Empty;
@@ -292,14 +292,14 @@ namespace KimodoBridge
             ThrowIfDisposed();
             if (!TryResolveCurrentEndpoint(out string host, out int port))
             {
-                await InvalidateCurrentEndpointAsync();
+                await InvalidateCurrentEndpointAsync().ConfigureAwait(false);
                 return false;
             }
 
-            bool ok = await protocolClient.PingAsync(host, port, token, acceptLoading);
+            bool ok = await protocolClient.PingAsync(host, port, token, acceptLoading).ConfigureAwait(false);
             if (!ok)
             {
-                await InvalidateCurrentEndpointAsync();
+                await InvalidateCurrentEndpointAsync().ConfigureAwait(false);
                 return false;
             }
 
@@ -311,10 +311,10 @@ namespace KimodoBridge
         public async Task StopAsync(CancellationToken token)
         {
             ThrowIfDisposed();
-            await lifecycleGate.WaitAsync(token);
+            await lifecycleGate.WaitAsync(token).ConfigureAwait(false);
             try
             {
-                await StopCoreAsync(token, throwIfStillRunning: true);
+                await StopCoreAsync(token, throwIfStillRunning: true).ConfigureAwait(false);
             }
             finally
             {
@@ -325,10 +325,10 @@ namespace KimodoBridge
         public async Task DetachAsync(CancellationToken token)
         {
             ThrowIfDisposed();
-            await lifecycleGate.WaitAsync(token);
+            await lifecycleGate.WaitAsync(token).ConfigureAwait(false);
             try
             {
-                await DetachCoreAsync();
+                await DetachCoreAsync().ConfigureAwait(false);
             }
             finally
             {
@@ -388,7 +388,7 @@ namespace KimodoBridge
             string endpointBeforePing = TryResolveCurrentEndpoint(out string host, out int port)
                 ? $"{host}:{port}"
                 : "(none)";
-            bool ok = await PingAsync(token, acceptLoading: true);
+            bool ok = await PingAsync(token, acceptLoading: true).ConfigureAwait(false);
             if (!ok)
             {
                 throw new Exception($"Bridge port is unreachable. endpoint={endpointBeforePing}");
@@ -397,32 +397,32 @@ namespace KimodoBridge
 
         private async Task EnsureHealthyOrStartAsync(Action<string> progress, CancellationToken token)
         {
-            bool ok = await PingAsync(token, acceptLoading: true);
+            bool ok = await PingAsync(token, acceptLoading: true).ConfigureAwait(false);
             if (ok)
             {
                 return;
             }
 
             progress?.Invoke("Bridge endpoint is unreachable, restarting bridge...");
-            _ = await StartAsync(progress, token);
-            await EnsureHealthyOrThrowAsync(token);
+            _ = await StartAsync(progress, token).ConfigureAwait(false);
+            await EnsureHealthyOrThrowAsync(token).ConfigureAwait(false);
         }
 
         private async Task StopCoreAsync(CancellationToken token, bool throwIfStillRunning)
         {
             StopLogPump();
-            await protocolClient.DetachAsync();
+            await protocolClient.DetachAsync().ConfigureAwait(false);
 
             bool endpointResolved = TryResolveCurrentEndpoint(out string host, out int port);
             if (endpointResolved)
             {
-                _ = await protocolClient.TrySendQuitAsync(host, port, token);
+                _ = await protocolClient.TrySendQuitAsync(host, port, token).ConfigureAwait(false);
             }
 
             bool stopped = true;
             if (endpointResolved)
             {
-                stopped = await WaitForEndpointToStopAsync(host, port, token);
+                stopped = await WaitForEndpointToStopAsync(host, port, token).ConfigureAwait(false);
             }
 
             processManager.DetachProcess();
@@ -439,7 +439,7 @@ namespace KimodoBridge
         private async Task DetachCoreAsync()
         {
             StopLogPump();
-            await protocolClient.DetachAsync();
+            await protocolClient.DetachAsync().ConfigureAwait(false);
             processManager.DetachProcess();
             currentPort = -1;
             currentHost = settings.hostFallback;
@@ -447,7 +447,7 @@ namespace KimodoBridge
 
         private async Task DetachCurrentConnectionAsync()
         {
-            await protocolClient.DetachAsync();
+            await protocolClient.DetachAsync().ConfigureAwait(false);
         }
 
         private static bool IsLikelyTransportFailure(Exception exception)
@@ -522,7 +522,7 @@ namespace KimodoBridge
         {
             currentPort = -1;
             currentHost = settings.hostFallback;
-            await protocolClient.DetachAsync();
+            await protocolClient.DetachAsync().ConfigureAwait(false);
         }
 
         private void StartLogPump(string logPath, Action<string> progress)
@@ -655,15 +655,15 @@ namespace KimodoBridge
             while (sw.ElapsedMilliseconds < StopWaitTimeoutMs)
             {
                 token.ThrowIfCancellationRequested();
-                if (!await BridgeRuntimeControl.CanConnectAsync(host, port, settings.statusConnectTimeoutMs, token))
+                if (!await BridgeRuntimeControl.CanConnectAsync(host, port, settings.statusConnectTimeoutMs, token).ConfigureAwait(false))
                 {
                     return true;
                 }
 
-                await Task.Delay(StopPollIntervalMs, token);
+                await Task.Delay(StopPollIntervalMs, token).ConfigureAwait(false);
             }
 
-            return !await BridgeRuntimeControl.CanConnectAsync(host, port, settings.statusConnectTimeoutMs, token);
+            return !await BridgeRuntimeControl.CanConnectAsync(host, port, settings.statusConnectTimeoutMs, token).ConfigureAwait(false);
         }
 
         private static IBridgePlatformProcess CreatePlatformProcess(BridgeRuntimeSettings settings)

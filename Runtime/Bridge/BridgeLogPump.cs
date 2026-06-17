@@ -105,7 +105,7 @@ namespace KimodoBridge
                 try { currentCts.Cancel(); } catch { }
             }
 
-            await ObserveStopAsync(currentPumpTask, currentCts, timeoutMs, token);
+            await ObserveStopAsync(currentPumpTask, currentCts, timeoutMs, token).ConfigureAwait(false);
         }
 
         public void Dispose()
@@ -125,7 +125,7 @@ namespace KimodoBridge
             {
                 if (currentPumpTask != null)
                 {
-                    Task completed = await Task.WhenAny(currentPumpTask, Task.Delay(Math.Max(10, timeoutMs), token));
+                    Task completed = await Task.WhenAny(currentPumpTask, Task.Delay(Math.Max(10, timeoutMs), token)).ConfigureAwait(false);
                     if (completed != currentPumpTask)
                     {
                         Debug.LogWarning("[KimodoBridge][LogPump] stop timeout.");
@@ -165,7 +165,7 @@ namespace KimodoBridge
             {
                 while (!token.IsCancellationRequested && !File.Exists(logPath))
                 {
-                    await Task.Delay(1000, token);
+                    await Task.Delay(1000, token).ConfigureAwait(false);
                 }
 
                 if (!File.Exists(logPath))
@@ -183,7 +183,7 @@ namespace KimodoBridge
                 int idleDelayMs = idlePollMinMs;
                 while (!token.IsCancellationRequested)
                 {
-                    string line = await reader.ReadLineAsync();
+                    string line = await reader.ReadLineAsync().ConfigureAwait(false);
                     if (line != null)
                     {
                         string trimmed = line.Trim();
@@ -206,7 +206,7 @@ namespace KimodoBridge
 
                     if (fs.Length > fs.Position)
                     {
-                        string tailChunk = await reader.ReadToEndAsync();
+                        string tailChunk = await reader.ReadToEndAsync().ConfigureAwait(false);
                         if (!string.IsNullOrWhiteSpace(tailChunk))
                         {
                             string[] parts = tailChunk.Split(new[] { '\r', '\n' }, StringSplitOptions.RemoveEmptyEntries);
@@ -224,7 +224,7 @@ namespace KimodoBridge
                         continue;
                     }
 
-                    await Task.Delay(idleDelayMs, token);
+                    await Task.Delay(idleDelayMs, token).ConfigureAwait(false);
                     idleDelayMs = Math.Min(idlePollMaxMs, idleDelayMs + idlePollMinMs);
                 }
             }

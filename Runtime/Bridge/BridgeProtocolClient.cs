@@ -42,7 +42,7 @@ namespace KimodoBridge
         {
             try
             {
-                JObject response = await SendAsync(host, port, new JObject { ["cmd"] = "ping" }, token);
+                JObject response = await SendAsync(host, port, new JObject { ["cmd"] = "ping" }, token).ConfigureAwait(false);
                 string status = response?.Value<string>("status") ?? string.Empty;
                 if (string.Equals(status, "pong", StringComparison.OrdinalIgnoreCase))
                 {
@@ -98,7 +98,7 @@ namespace KimodoBridge
             while (true)
             {
                 token.ThrowIfCancellationRequested();
-                JObject response = await SendAsync(host, port, request, token);
+                JObject response = await SendAsync(host, port, request, token).ConfigureAwait(false);
                 string status = response?.Value<string>("status") ?? string.Empty;
                 string message = response?.Value<string>("message") ?? string.Empty;
                 progress?.Invoke($"Bridge generate response status={status}{(string.IsNullOrWhiteSpace(message) ? string.Empty : $", message={message}")}");
@@ -112,7 +112,7 @@ namespace KimodoBridge
                         throw new TimeoutException($"Bridge model loading timeout (>{modelLoadingTimeoutMs}ms).");
                     }
 
-                    await Task.Delay(modelLoadingPollIntervalMs, token);
+                    await Task.Delay(modelLoadingPollIntervalMs, token).ConfigureAwait(false);
                     continue;
                 }
 
@@ -136,7 +136,7 @@ namespace KimodoBridge
         {
             try
             {
-                _ = await SendAsync(host, port, new JObject { ["cmd"] = "quit" }, token);
+                _ = await SendAsync(host, port, new JObject { ["cmd"] = "quit" }, token).ConfigureAwait(false);
                 return true;
             }
             catch
@@ -162,18 +162,18 @@ namespace KimodoBridge
                 throw new ArgumentNullException(nameof(request));
             }
 
-            await ioLock.WaitAsync(token);
+            await ioLock.WaitAsync(token).ConfigureAwait(false);
             try
             {
                 ThrowIfDisposed();
-                await EnsureSharedConnectionAsync(host, port, token);
+                await EnsureSharedConnectionAsync(host, port, token).ConfigureAwait(false);
                 token.ThrowIfCancellationRequested();
                 string line = request.ToString(Formatting.None);
-                await sharedWriter.WriteLineAsync(line);
+                await sharedWriter.WriteLineAsync(line).ConfigureAwait(false);
 
                 Task<string> readTask = sharedReader.ReadLineAsync();
                 Task timeoutTask = Task.Delay(ioTimeoutMs, token);
-                Task completed = await Task.WhenAny(readTask, timeoutTask);
+                Task completed = await Task.WhenAny(readTask, timeoutTask).ConfigureAwait(false);
                 if (completed != readTask)
                 {
                     token.ThrowIfCancellationRequested();
@@ -181,7 +181,7 @@ namespace KimodoBridge
                 }
 
                 token.ThrowIfCancellationRequested();
-                string responseLine = await readTask;
+                string responseLine = await readTask.ConfigureAwait(false);
                 if (string.IsNullOrWhiteSpace(responseLine))
                 {
                     throw new Exception("Empty bridge response.");
@@ -213,7 +213,7 @@ namespace KimodoBridge
 
         public async Task DetachAsync()
         {
-            await ioLock.WaitAsync();
+            await ioLock.WaitAsync().ConfigureAwait(false);
             try
             {
                 CloseSharedConnectionSync();
@@ -255,12 +255,12 @@ namespace KimodoBridge
             try
             {
                 Task waitTask = ioLock.WaitAsync();
-                Task completed = await Task.WhenAny(waitTask, Task.Delay(Math.Max(10, timeoutMs)));
+                Task completed = await Task.WhenAny(waitTask, Task.Delay(Math.Max(10, timeoutMs))).ConfigureAwait(false);
                 if (completed == waitTask)
                 {
                     try
                     {
-                        await waitTask;
+                        await waitTask.ConfigureAwait(false);
                     }
                     finally
                     {
@@ -303,14 +303,14 @@ namespace KimodoBridge
             connectCts.CancelAfter(connectTimeoutMs);
             Task connectTask = client.ConnectAsync(host, port);
             Task timeoutTask = Task.Delay(Timeout.Infinite, connectCts.Token);
-            Task completed = await Task.WhenAny(connectTask, timeoutTask);
+            Task completed = await Task.WhenAny(connectTask, timeoutTask).ConfigureAwait(false);
             if (completed != connectTask)
             {
                 token.ThrowIfCancellationRequested();
                 throw new TimeoutException($"Bridge connect timeout: {host}:{port}");
             }
 
-            await connectTask;
+            await connectTask.ConfigureAwait(false);
             NetworkStream ns = client.GetStream();
             ns.ReadTimeout = ioTimeoutMs;
             ns.WriteTimeout = ioTimeoutMs;

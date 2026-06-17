@@ -21,7 +21,7 @@ namespace KimodoBridge
             CancellationToken token = default)
         {
             using var client = new BridgeProtocolClient(connectTimeoutMs, ioTimeoutMs);
-            return await client.PingAsync(host, port, token, acceptLoading);
+            return await client.PingAsync(host, port, token, acceptLoading).ConfigureAwait(false);
         }
 
         public static bool CanConnect(
@@ -30,7 +30,7 @@ namespace KimodoBridge
             int connectTimeoutMs = BridgeRuntimeSettings.DefaultStatusConnectTimeoutMs,
             CancellationToken token = default)
         {
-            return CanConnectAsync(host, port, connectTimeoutMs, token).GetAwaiter().GetResult();
+            return CanConnectAsync(host, port, connectTimeoutMs, token).ConfigureAwait(false).GetAwaiter().GetResult();
         }
 
         public static async Task<bool> CanConnectAsync(
@@ -52,14 +52,14 @@ namespace KimodoBridge
             {
                 Task connectTask = client.ConnectAsync(host, port);
                 Task timeoutTask = Task.Delay(Timeout.Infinite, timeoutCts.Token);
-                Task completed = await Task.WhenAny(connectTask, timeoutTask);
+                Task completed = await Task.WhenAny(connectTask, timeoutTask).ConfigureAwait(false);
                 if (completed != connectTask)
                 {
                     token.ThrowIfCancellationRequested();
                     return false;
                 }
 
-                await connectTask;
+                await connectTask.ConfigureAwait(false);
                 return true;
             }
             catch (OperationCanceledException)
@@ -81,7 +81,7 @@ namespace KimodoBridge
             CancellationToken token = default)
         {
             using var client = new BridgeProtocolClient(connectTimeoutMs, ioTimeoutMs);
-            return await client.TrySendQuitAsync(host, port, token);
+            return await client.TrySendQuitAsync(host, port, token).ConfigureAwait(false);
         }
     }
 }
