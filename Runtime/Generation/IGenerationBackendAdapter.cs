@@ -11,6 +11,5 @@ namespace KimodoBridge
         Task<bool> PingAsync(CancellationToken token);
         Task DetachAsync(CancellationToken token);
         Task StopAsync(CancellationToken token);
-        Task KillAsync(CancellationToken token);
     }
 }

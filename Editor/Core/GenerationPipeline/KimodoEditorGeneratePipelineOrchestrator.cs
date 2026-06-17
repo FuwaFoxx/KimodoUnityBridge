@@ -3,6 +3,7 @@ using System.IO;
 using System.Threading.Tasks;
 using UnityEditor;
 using UnityEngine;
+using Process = System.Diagnostics.Process;
 
 namespace KimodoBridge.Editor
 {
@@ -253,7 +254,6 @@ namespace KimodoBridge.Editor
                     msg => request.Progress?.Invoke(KimodoGeneratePipelineStage.InvokeBackend, msg ?? string.Empty),
                     request.Token);
 
-                KimodoBridgeController.RequestServerStateRefresh(force: true);
                 return bridgeResult.motionJsonCompact;
             }
 
@@ -266,6 +266,7 @@ namespace KimodoBridge.Editor
                     modelName = modelName,
                     highVram = highVram,
                     modelsRoot = modelsRoot,
+                    ownerProcessId = Process.GetCurrentProcess().Id,
                     startupTimeoutMs = ComputeBridgeStartupTimeoutMs(kimodoRootPath, highVram, modelName, request.GenerationTimeoutSeconds),
                     preserveProcessOnCancellation = KimodoPlayableClipGenerationSettings.instance != null &&
                         KimodoPlayableClipGenerationSettings.instance.AlwaysKeepServerExperimental,

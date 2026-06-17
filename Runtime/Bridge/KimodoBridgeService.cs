@@ -5,6 +5,7 @@ using System.IO;
 using System.Threading;
 using System.Threading.Tasks;
 using UnityEngine;
+using Stopwatch = System.Diagnostics.Stopwatch;
 
 namespace KimodoBridge
 {
@@ -12,6 +13,8 @@ namespace KimodoBridge
     {
         private const int BridgeMessageLogPumpWaitFileTimeoutMs = 60000;
         private const int BridgeMessageLogPumpMissingFilePollMs = 90;
+        private const int StopPollIntervalMs = 150;
+        private const int StopWaitTimeoutMs = 3000;
 
         private readonly BridgeRuntimeSettings settings;
         private readonly BridgeProtocolClient protocolClient;
@@ -68,8 +71,12 @@ namespace KimodoBridge
                 return false;
             }
 
-            bool ok = await protocolClient.PingAsync(host, port, token, acceptLoading: true);
-            if (!ok)
+            bool canConnect = await BridgeRuntimeControl.CanConnectAsync(
+                host,
+                port,
+                settings.statusConnectTimeoutMs,
+                token);
+            if (!canConnect)
             {
                 return false;
             }
@@ -104,7 +111,7 @@ namespace KimodoBridge
             if (File.Exists(currentPortFilePath))
             {
                 if (BridgeEndpointResolver.TryReadServerEndpoint(settings.runtimeRoot, settings.hostFallback, out string host, out int port, out _) &&
-                    await protocolClient.PingAsync(host, port, token, acceptLoading: true))
+                    await BridgeRuntimeControl.CanConnectAsync(host, port, settings.statusConnectTimeoutMs, token))
                 {
                     currentHost = host;
                     currentPort = port;
@@ -126,7 +133,8 @@ namespace KimodoBridge
                     settings.highVram,
                     settings.forceSetup,
                     settings.modelsRoot,
-                    settings.idleTimeoutSeconds);
+                    settings.idleTimeoutSeconds,
+                    settings.ownerProcessId);
                 progress?.Invoke("Bridge process launched.");
             }
 
@@ -154,21 +162,13 @@ namespace KimodoBridge
             }
             catch (OperationCanceledException)
             {
-                await InvalidateCurrentEndpointAsync();
-                if (settings.preserveProcessOnCancellation)
-                {
-                    await DetachCoreAsync();
-                }
-                else
-                {
-                    await StopCoreAsync(CancellationToken.None);
-                }
+                await DetachCurrentConnectionAsync();
                 throw;
             }
             catch
             {
                 await InvalidateCurrentEndpointAsync();
-                await StopCoreAsync(CancellationToken.None);
+                await StopCoreAsync(CancellationToken.None, throwIfStillRunning: false);
                 throw;
             }
         }
@@ -212,12 +212,16 @@ namespace KimodoBridge
                     progress,
                     token);
             }
+            catch (OperationCanceledException)
+            {
+                await DetachCurrentConnectionAsync();
+                throw;
+            }
             catch (Exception ex) when (IsLikelyTransportFailure(ex))
             {
                 progress?.Invoke($"Bridge connection lost, restarting bridge... {ex.Message}");
                 Debug.LogWarning($"[KimodoBridge] Transport failure during generate. Restarting bridge once. {ex}");
                 await InvalidateCurrentEndpointAsync();
-                TryDeleteServerPortFile();
                 _ = await StartAsync(progress, token);
                 await EnsureHealthyOrThrowAsync(token);
                 response = await SendGenerateRequestAsync(
@@ -310,7 +314,7 @@ namespace KimodoBridge
             await lifecycleGate.WaitAsync(token);
             try
             {
-                await StopCoreAsync(token);
+                await StopCoreAsync(token, throwIfStillRunning: true);
             }
             finally
             {
@@ -325,20 +329,6 @@ namespace KimodoBridge
             try
             {
                 await DetachCoreAsync();
-            }
-            finally
-            {
-                lifecycleGate.Release();
-            }
-        }
-
-        public async Task KillAsync(CancellationToken token)
-        {
-            ThrowIfDisposed();
-            await lifecycleGate.WaitAsync(token);
-            try
-            {
-                await KillCoreAsync();
             }
             finally
             {
@@ -418,20 +408,32 @@ namespace KimodoBridge
             await EnsureHealthyOrThrowAsync(token);
         }
 
-        private async Task StopCoreAsync(CancellationToken token)
+        private async Task StopCoreAsync(CancellationToken token, bool throwIfStillRunning)
         {
             StopLogPump();
             await protocolClient.DetachAsync();
 
-            if (TryResolveCurrentEndpoint(out string host, out int port))
+            bool endpointResolved = TryResolveCurrentEndpoint(out string host, out int port);
+            if (endpointResolved)
             {
                 _ = await protocolClient.TrySendQuitAsync(host, port, token);
             }
 
-            processManager.KillProcessTree();
-            TryDeleteServerPortFile();
+            bool stopped = true;
+            if (endpointResolved)
+            {
+                stopped = await WaitForEndpointToStopAsync(host, port, token);
+            }
+
+            processManager.DetachProcess();
             currentPort = -1;
             currentHost = settings.hostFallback;
+
+            if (throwIfStillRunning && !stopped)
+            {
+                throw new InvalidOperationException(
+                    $"Bridge server still responsive at {host}:{port} after quit request.");
+            }
         }
 
         private async Task DetachCoreAsync()
@@ -443,14 +445,9 @@ namespace KimodoBridge
             currentHost = settings.hostFallback;
         }
 
-        private async Task KillCoreAsync()
+        private async Task DetachCurrentConnectionAsync()
         {
-            StopLogPump();
             await protocolClient.DetachAsync();
-            processManager.KillProcessTree();
-            TryDeleteServerPortFile();
-            currentPort = -1;
-            currentHost = settings.hostFallback;
         }
 
         private static bool IsLikelyTransportFailure(Exception exception)
@@ -479,6 +476,24 @@ namespace KimodoBridge
             }
 
             return false;
+        }
+
+        private void TryDeleteServerPortFile()
+        {
+            string path = string.IsNullOrWhiteSpace(currentPortFilePath)
+                ? BridgeEndpointResolver.GetServerPortFilePath(settings.runtimeRoot)
+                : currentPortFilePath;
+            try
+            {
+                if (File.Exists(path))
+                {
+                    File.Delete(path);
+                }
+            }
+            catch
+            {
+                // ignore cleanup failure
+            }
         }
 
         private bool TryResolveCurrentEndpoint(out string host, out int port)
@@ -629,22 +644,26 @@ namespace KimodoBridge
             sideLogPumps.Clear();
         }
 
-        private void TryDeleteServerPortFile()
+        private async Task<bool> WaitForEndpointToStopAsync(string host, int port, CancellationToken token)
         {
-            string path = string.IsNullOrWhiteSpace(currentPortFilePath)
-                ? BridgeEndpointResolver.GetServerPortFilePath(settings.runtimeRoot)
-                : currentPortFilePath;
-            try
+            if (string.IsNullOrWhiteSpace(host) || port <= 0)
             {
-                if (File.Exists(path))
+                return true;
+            }
+
+            Stopwatch sw = Stopwatch.StartNew();
+            while (sw.ElapsedMilliseconds < StopWaitTimeoutMs)
+            {
+                token.ThrowIfCancellationRequested();
+                if (!await BridgeRuntimeControl.CanConnectAsync(host, port, settings.statusConnectTimeoutMs, token))
                 {
-                    File.Delete(path);
+                    return true;
                 }
+
+                await Task.Delay(StopPollIntervalMs, token);
             }
-            catch
-            {
-                // ignore cleanup failure
-            }
+
+            return !await BridgeRuntimeControl.CanConnectAsync(host, port, settings.statusConnectTimeoutMs, token);
         }
 
         private static IBridgePlatformProcess CreatePlatformProcess(BridgeRuntimeSettings settings)

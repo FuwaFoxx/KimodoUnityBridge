@@ -30,8 +30,12 @@ namespace KimodoBridge
                 waitToken.ThrowIfCancellationRequested();
                 if (BridgeEndpointResolver.TryReadServerEndpoint(runtimeRoot, hostFallback, out string host, out int port, out _))
                 {
-                    bool ok = await protocolClient.PingAsync(host, port, waitToken, acceptLoading: true);
-                    if (ok)
+                    bool canConnect = await BridgeRuntimeControl.CanConnectAsync(
+                        host,
+                        port,
+                        BridgeRuntimeSettings.DefaultStatusConnectTimeoutMs,
+                        waitToken);
+                    if (canConnect)
                     {
                         return;
                     }

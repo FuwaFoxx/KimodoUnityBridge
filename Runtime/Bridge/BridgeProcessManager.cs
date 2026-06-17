@@ -9,7 +9,6 @@ namespace KimodoBridge
     {
         private readonly BridgeProcessLauncher launcher;
         private readonly BridgeStartupWaiter startupWaiter;
-        private readonly BridgeProcessTerminator terminator;
         private Process process;
         private int processId = -1;
         private bool disposed;
@@ -28,7 +27,6 @@ namespace KimodoBridge
 
             launcher = new BridgeProcessLauncher(platformProcess);
             startupWaiter = new BridgeStartupWaiter();
-            terminator = new BridgeProcessTerminator(platformProcess);
         }
 
         public bool IsRunning
@@ -48,7 +46,7 @@ namespace KimodoBridge
 
         public int ProcessId => processId;
 
-        public Process Start(string launcherPath, string modelName, bool highVram, bool forceSetup, string modelsRoot, int idleTimeoutSeconds)
+        public Process Start(string launcherPath, string modelName, bool highVram, bool forceSetup, string modelsRoot, int idleTimeoutSeconds, int ownerProcessId)
         {
             ThrowIfDisposed();
             if (IsRunning)
@@ -56,7 +54,7 @@ namespace KimodoBridge
                 throw new InvalidOperationException("Bridge process is already running.");
             }
 
-            Process proc = launcher.Start(launcherPath, modelName, highVram, forceSetup, modelsRoot, idleTimeoutSeconds);
+            Process proc = launcher.Start(launcherPath, modelName, highVram, forceSetup, modelsRoot, idleTimeoutSeconds, ownerProcessId);
             process = proc;
             processId = proc.Id;
             return proc;
@@ -86,11 +84,6 @@ namespace KimodoBridge
                 token: token);
         }
 
-        public void KillProcessTree()
-        {
-            terminator.KillProcessTree(ref process, ref processId);
-        }
-
         public void DetachProcess()
         {
             Process proc = process;
@@ -111,7 +104,7 @@ namespace KimodoBridge
             }
 
             disposed = true;
-            KillProcessTree();
+            DetachProcess();
         }
 
         private void ThrowIfDisposed()

@@ -62,12 +62,6 @@ namespace KimodoBridge
             return GetAdapter(backendType).StopAsync(token);
         }
 
-        public Task KillAsync(KimodoBackendType backendType, CancellationToken token)
-        {
-            ThrowIfDisposed();
-            return GetAdapter(backendType).KillAsync(token);
-        }
-
         public void Dispose()
         {
             if (disposed)

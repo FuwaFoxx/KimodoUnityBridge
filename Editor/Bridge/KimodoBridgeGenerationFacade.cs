@@ -1,9 +1,9 @@
 using System;
 using System.Collections.Generic;
-using System.Diagnostics;
 using System.IO;
 using System.Threading;
 using System.Threading.Tasks;
+using Process = System.Diagnostics.Process;
 
 namespace KimodoBridge.Editor
 {
@@ -12,7 +12,7 @@ namespace KimodoBridge.Editor
         internal enum ShutdownMode
         {
             DetachOnly = 0,
-            KillAndDispose = 1
+            StopAndDispose = 1
         }
 
         private KimodoRuntimeGenerationService sharedRuntimeGenerationService;
@@ -92,7 +92,7 @@ namespace KimodoBridge.Editor
 
         internal async Task CloseServerAsync(Func<Task<(bool hasEndpoint, string host, int port)>> tryGetEndpointAsync)
         {
-            await ShutdownAsync(ShutdownMode.KillAndDispose, tryGetEndpointAsync, CancellationToken.None);
+            await ShutdownAsync(ShutdownMode.StopAndDispose, tryGetEndpointAsync, CancellationToken.None);
         }
 
         internal void DetachSharedRuntimeGenerationService()
@@ -102,7 +102,7 @@ namespace KimodoBridge.Editor
 
         internal void DisposeSharedRuntimeGenerationService()
         {
-            _ = ShutdownAsync(ShutdownMode.KillAndDispose, null, CancellationToken.None);
+            _ = ShutdownAsync(ShutdownMode.StopAndDispose, null, CancellationToken.None);
         }
 
         internal bool TryGetAttachedServiceRuntimeRoot(out string runtimeRoot)
@@ -197,6 +197,7 @@ namespace KimodoBridge.Editor
                 statusConnectTimeoutMs = BridgeRuntimeSettings.DefaultStatusConnectTimeoutMs,
                 statusIoTimeoutMs = BridgeRuntimeSettings.DefaultStatusIoTimeoutMs,
                 idleTimeoutSeconds = editorSettings != null ? editorSettings.ServerIdleShutdownSeconds : 0,
+                ownerProcessId = Process.GetCurrentProcess().Id,
                 preserveProcessOnCancellation = editorSettings != null && editorSettings.AlwaysKeepServerExperimental
             };
         }
@@ -229,7 +230,7 @@ namespace KimodoBridge.Editor
             bool endpointKnown = false;
             string endpointHost = string.Empty;
             int endpointPort = -1;
-            if (mode == ShutdownMode.KillAndDispose && tryGetEndpointAsync != null)
+            if (mode == ShutdownMode.StopAndDispose && tryGetEndpointAsync != null)
             {
                 try
                 {
@@ -260,8 +261,8 @@ namespace KimodoBridge.Editor
                         }
                         else
                         {
-                            await runtimeService.KillAsync(KimodoBackendType.Bridge, token);
-                            UnityEngine.Debug.Log("[Kimodo][BridgeShutdown] killed shared runtime service.");
+                            await runtimeService.StopAsync(KimodoBackendType.Bridge, token);
+                            UnityEngine.Debug.Log("[Kimodo][BridgeShutdown] stopped shared runtime service.");
                         }
                     }
                     catch
@@ -273,7 +274,7 @@ namespace KimodoBridge.Editor
                         try { runtimeService.Dispose(); } catch { }
                     }
                 }
-                else if (mode == ShutdownMode.KillAndDispose && endpointKnown)
+                else if (mode == ShutdownMode.StopAndDispose && endpointKnown)
                 {
                     try
                     {
@@ -291,7 +292,7 @@ namespace KimodoBridge.Editor
                     }
                 }
 
-                if (mode == ShutdownMode.KillAndDispose && endpointKnown)
+                if (mode == ShutdownMode.StopAndDispose && endpointKnown)
                 {
                     bool fullyStopped = await EnsureEndpointStoppedAfterShutdownAsync(endpointHost, endpointPort, token);
                     if (!fullyStopped)
@@ -319,234 +320,28 @@ namespace KimodoBridge.Editor
                 return true;
             }
 
-            bool alive = await BridgeRuntimeControl.IsServerResponsiveAsync(
+            bool canConnect = await BridgeRuntimeControl.CanConnectAsync(
                 host,
                 port,
                 connectTimeoutMs: 500,
-                ioTimeoutMs: 800,
-                acceptLoading: true,
                 token: token);
-            if (!alive)
+            if (!canConnect)
             {
                 return true;
-            }
-
-            UnityEngine.Debug.LogWarning($"[Kimodo][BridgeShutdown] endpoint still alive at {host}:{port}, trying force-kill by port owner.");
-            bool forceKillTriggered = TryForceKillListeningProcessByPort(port);
-            if (!forceKillTriggered)
-            {
-                return false;
             }
 
             await Task.Delay(700, CancellationToken.None);
 
-            bool aliveAfterForceKill = await BridgeRuntimeControl.IsServerResponsiveAsync(
+            return !await BridgeRuntimeControl.CanConnectAsync(
                 host,
                 port,
                 connectTimeoutMs: 500,
-                ioTimeoutMs: 800,
-                acceptLoading: true,
                 token: token);
-            if (!aliveAfterForceKill)
-            {
-                TryDeleteServerPortByEndpoint(host, port);
-                UnityEngine.Debug.Log($"[Kimodo][BridgeShutdown] force-kill succeeded for {host}:{port}.");
-                return true;
-            }
-
-            UnityEngine.Debug.LogWarning($"[Kimodo][BridgeShutdown] endpoint still alive after force-kill at {host}:{port}.");
-            return false;
-        }
-
-        private static void TryDeleteServerPortByEndpoint(string host, int port)
-        {
-            if (port <= 0)
-            {
-                return;
-            }
-
-            try
-            {
-                string runtimeRoot = KimodoBridgeRuntimeInstallFacade.GetRuntimeRootPath();
-                if (string.IsNullOrWhiteSpace(runtimeRoot))
-                {
-                    return;
-                }
-
-                string serverPortPath = BridgeEndpointResolver.GetServerPortFilePath(runtimeRoot);
-                if (!File.Exists(serverPortPath))
-                {
-                    return;
-                }
-
-                if (!BridgeEndpointResolver.TryReadServerEndpointFromFile(
-                        serverPortPath,
-                        string.IsNullOrWhiteSpace(host) ? "127.0.0.1" : host,
-                        out string fileHost,
-                        out int filePort,
-                        out _))
-                {
-                    File.Delete(serverPortPath);
-                    return;
-                }
-
-                if (filePort == port)
-                {
-                    File.Delete(serverPortPath);
-                }
-            }
-            catch
-            {
-                // ignore cleanup failure
-            }
-        }
-
-        private static bool TryForceKillListeningProcessByPort(int port)
-        {
-            if (port <= 0)
-            {
-                return false;
-            }
-
-            if (UnityEngine.Application.platform != UnityEngine.RuntimePlatform.WindowsEditor &&
-                UnityEngine.Application.platform != UnityEngine.RuntimePlatform.WindowsPlayer)
-            {
-                return false;
-            }
-
-            HashSet<int> pids = QueryListeningPidsByPortOnWindows(port);
-            if (pids.Count == 0)
-            {
-                UnityEngine.Debug.LogWarning($"[Kimodo][BridgeShutdown] no listening PID found for port {port}.");
-                return false;
-            }
-
-            bool anyKilled = false;
-            foreach (int pid in pids)
-            {
-                if (pid <= 0)
-                {
-                    continue;
-                }
-
-                try
-                {
-                    var psi = new ProcessStartInfo
-                    {
-                        FileName = "taskkill.exe",
-                        Arguments = $"/PID {pid} /T /F",
-                        UseShellExecute = false,
-                        CreateNoWindow = true,
-                        RedirectStandardOutput = true,
-                        RedirectStandardError = true
-                    };
-
-                    using Process killer = Process.Start(psi);
-                    if (killer != null)
-                    {
-                        killer.WaitForExit(5000);
-                        anyKilled = true;
-                        UnityEngine.Debug.Log($"[Kimodo][BridgeShutdown] taskkill by port {port}, pid={pid}, exit={killer.ExitCode}");
-                    }
-                }
-                catch (Exception ex)
-                {
-                    UnityEngine.Debug.LogWarning($"[Kimodo][BridgeShutdown] taskkill failed for pid={pid}: {ex.Message}");
-                }
-            }
-
-            return anyKilled;
-        }
-
-        private static HashSet<int> QueryListeningPidsByPortOnWindows(int port)
-        {
-            var result = new HashSet<int>();
-            try
-            {
-                var psi = new ProcessStartInfo
-                {
-                    FileName = "netstat.exe",
-                    Arguments = "-ano -p tcp",
-                    UseShellExecute = false,
-                    CreateNoWindow = true,
-                    RedirectStandardOutput = true,
-                    RedirectStandardError = true
-                };
-
-                using Process p = Process.Start(psi);
-                if (p == null)
-                {
-                    return result;
-                }
-
-                string output = p.StandardOutput.ReadToEnd();
-                p.WaitForExit(5000);
-
-                string[] lines = output.Split(new[] { '\r', '\n' }, StringSplitOptions.RemoveEmptyEntries);
-                for (int i = 0; i < lines.Length; i++)
-                {
-                    string line = lines[i].Trim();
-                    if (!line.StartsWith("TCP", StringComparison.OrdinalIgnoreCase))
-                    {
-                        continue;
-                    }
-
-                    string[] columns = line.Split((char[])null, StringSplitOptions.RemoveEmptyEntries);
-                    if (columns.Length < 5)
-                    {
-                        continue;
-                    }
-
-                    string localAddress = columns[1];
-                    string state = columns[3];
-                    string pidText = columns[4];
-
-                    if (!string.Equals(state, "LISTENING", StringComparison.OrdinalIgnoreCase) &&
-                        !string.Equals(state, "LISTEN", StringComparison.OrdinalIgnoreCase))
-                    {
-                        continue;
-                    }
-
-                    if (!TryParsePortFromEndpoint(localAddress, out int localPort) || localPort != port)
-                    {
-                        continue;
-                    }
-
-                    if (int.TryParse(pidText, out int pid) && pid > 0)
-                    {
-                        result.Add(pid);
-                    }
-                }
-            }
-            catch
-            {
-                // ignore
-            }
-
-            return result;
-        }
-
-        private static bool TryParsePortFromEndpoint(string endpoint, out int port)
-        {
-            port = -1;
-            if (string.IsNullOrWhiteSpace(endpoint))
-            {
-                return false;
-            }
-
-            int index = endpoint.LastIndexOf(':');
-            if (index < 0 || index >= endpoint.Length - 1)
-            {
-                return false;
-            }
-
-            string portText = endpoint.Substring(index + 1);
-            return int.TryParse(portText, out port) && port > 0 && port <= 65535;
         }
 
         public void Dispose()
         {
-            _ = ShutdownAsync(ShutdownMode.KillAndDispose, null, CancellationToken.None);
+            _ = ShutdownAsync(ShutdownMode.StopAndDispose, null, CancellationToken.None);
         }
     }
 }

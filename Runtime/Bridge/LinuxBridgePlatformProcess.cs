@@ -12,7 +12,7 @@ namespace KimodoBridge
             return Application.platform == RuntimePlatform.LinuxEditor || Application.platform == RuntimePlatform.LinuxPlayer;
         }
 
-        public ProcessStartInfo BuildLauncherStartInfo(string launcherPath, string modelName, bool highVram, bool forceSetup, string modelsRoot, int idleTimeoutSeconds)
+        public ProcessStartInfo BuildLauncherStartInfo(string launcherPath, string modelName, bool highVram, bool forceSetup, string modelsRoot, int idleTimeoutSeconds, int ownerProcessId)
         {
             string ext = Path.GetExtension(launcherPath)?.ToLowerInvariant() ?? string.Empty;
             if (ext != ".sh" && ext != ".bat")
@@ -38,46 +38,6 @@ namespace KimodoBridge
                 CreateNoWindow = true,
                 WorkingDirectory = Path.GetDirectoryName(launcherPath) ?? Environment.CurrentDirectory
             };
-        }
-
-        public void KillProcessTreeByPid(int pid)
-        {
-            if (pid <= 0)
-            {
-                return;
-            }
-
-            try
-            {
-                using Process killer = Process.Start(new ProcessStartInfo
-                {
-                    FileName = "pkill",
-                    Arguments = $"-TERM -P {pid}",
-                    UseShellExecute = false,
-                    CreateNoWindow = true
-                });
-                killer?.WaitForExit(2000);
-            }
-            catch
-            {
-                // ignore
-            }
-
-            try
-            {
-                using Process killMain = Process.Start(new ProcessStartInfo
-                {
-                    FileName = "kill",
-                    Arguments = $"-TERM {pid}",
-                    UseShellExecute = false,
-                    CreateNoWindow = true
-                });
-                killMain?.WaitForExit(2000);
-            }
-            catch
-            {
-                // ignore
-            }
         }
 
         private static void EnsureExecutableByBash(string launcherPath)

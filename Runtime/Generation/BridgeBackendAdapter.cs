@@ -67,11 +67,6 @@ namespace KimodoBridge
             return bridgeService.StopAsync(token);
         }
 
-        public Task KillAsync(CancellationToken token)
-        {
-            return bridgeService.KillAsync(token);
-        }
-
         public void Dispose()
         {
             bridgeService?.Dispose();

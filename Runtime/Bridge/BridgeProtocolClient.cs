@@ -167,6 +167,7 @@ namespace KimodoBridge
             {
                 ThrowIfDisposed();
                 await EnsureSharedConnectionAsync(host, port, token);
+                token.ThrowIfCancellationRequested();
                 string line = request.ToString(Formatting.None);
                 await sharedWriter.WriteLineAsync(line);
 
@@ -175,9 +176,11 @@ namespace KimodoBridge
                 Task completed = await Task.WhenAny(readTask, timeoutTask);
                 if (completed != readTask)
                 {
+                    token.ThrowIfCancellationRequested();
                     throw new TimeoutException("Bridge read timeout.");
                 }
 
+                token.ThrowIfCancellationRequested();
                 string responseLine = await readTask;
                 if (string.IsNullOrWhiteSpace(responseLine))
                 {
@@ -191,6 +194,11 @@ namespace KimodoBridge
                 }
 
                 return obj;
+            }
+            catch (OperationCanceledException)
+            {
+                CloseSharedConnectionSync();
+                throw;
             }
             catch
             {

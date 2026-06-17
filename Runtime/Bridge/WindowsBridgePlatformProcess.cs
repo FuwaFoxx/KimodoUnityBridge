@@ -12,7 +12,7 @@ namespace KimodoBridge
             return Application.platform == RuntimePlatform.WindowsEditor || Application.platform == RuntimePlatform.WindowsPlayer;
         }
 
-        public ProcessStartInfo BuildLauncherStartInfo(string launcherPath, string modelName, bool highVram, bool forceSetup, string modelsRoot, int idleTimeoutSeconds)
+        public ProcessStartInfo BuildLauncherStartInfo(string launcherPath, string modelName, bool highVram, bool forceSetup, string modelsRoot, int idleTimeoutSeconds, int ownerProcessId)
         {
             string ext = Path.GetExtension(launcherPath)?.ToLowerInvariant() ?? string.Empty;
             if (ext != ".bat" && ext != ".cmd")
@@ -26,7 +26,8 @@ namespace KimodoBridge
                 ? string.Empty
                 : $" --models-root {QuoteForCmd(modelsRoot.Trim())}";
             string forceSetupArg = forceSetup ? " --force-setup" : string.Empty;
-            string args = $"--model {qModel}{(highVram ? " --highvram" : string.Empty)}{modelsArg}{forceSetupArg} --output file";
+            string watchPidArg = ownerProcessId > 0 ? $" --watchpid {ownerProcessId}" : string.Empty;
+            string args = $"--model {qModel}{(highVram ? " --highvram" : string.Empty)}{modelsArg}{forceSetupArg}{watchPidArg} --output file";
             string idleTimeoutSet = $"set KIMODO_IDLE_TIMEOUT_SEC={Math.Max(0, idleTimeoutSeconds)}";
 
             return new ProcessStartInfo
@@ -50,31 +51,5 @@ namespace KimodoBridge
             return $"\"{escaped}\"";
         }
 
-        public void KillProcessTreeByPid(int pid)
-        {
-            if (pid <= 0)
-            {
-                return;
-            }
-
-            try
-            {
-                var psi = new ProcessStartInfo
-                {
-                    FileName = "taskkill.exe",
-                    Arguments = $"/PID {pid} /T /F",
-                    UseShellExecute = false,
-                    CreateNoWindow = true,
-                    RedirectStandardError = false,
-                    RedirectStandardOutput = false
-                };
-                using Process killer = Process.Start(psi);
-                killer?.WaitForExit(5000);
-            }
-            catch
-            {
-                // ignore
-            }
-        }
     }
 }

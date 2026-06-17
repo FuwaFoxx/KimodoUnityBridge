@@ -5,6 +5,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using TimelineInject;
 using UnityEngine;
+using Process = System.Diagnostics.Process;
 
 namespace KimodoBridge
 {
@@ -475,6 +476,7 @@ namespace KimodoBridge
                     highVram = highVram,
                     forceSetup = forceSetup,
                     modelsRoot = string.IsNullOrWhiteSpace(modelsRoot) ? null : Path.GetFullPath(modelsRoot),
+                    ownerProcessId = Process.GetCurrentProcess().Id,
                     startupTimeoutMs = Mathf.Max(
                         BridgeRuntimeSettings.DefaultStartupTimeoutMs,
                         Mathf.RoundToInt(Mathf.Max(1f, startupTimeoutMinutes) * 60f * 1000f))

@@ -44,6 +44,7 @@ namespace KimodoBridge
         public int logPumpIdlePollMaxMs = DefaultLogPumpIdlePollMaxMs;
         public bool enableWindows = true;
         public bool enableLinux = true;
+        public int ownerProcessId;
 
         public void Validate()
         {
@@ -71,6 +72,7 @@ namespace KimodoBridge
             statusConnectTimeoutMs = Math.Max(250, statusConnectTimeoutMs);
             statusIoTimeoutMs = Math.Max(250, statusIoTimeoutMs);
             idleTimeoutSeconds = Math.Max(0, idleTimeoutSeconds);
+            ownerProcessId = Math.Max(0, ownerProcessId);
             logPumpWaitFileTimeoutMs = Math.Max(1000, logPumpWaitFileTimeoutMs);
             logPumpMissingFilePollMinMs = Math.Max(30, logPumpMissingFilePollMinMs);
             logPumpMissingFilePollMaxMs = Math.Max(logPumpMissingFilePollMinMs, logPumpMissingFilePollMaxMs);

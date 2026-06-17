@@ -1,3 +1,5 @@
+using System;
+using System.Net.Sockets;
 using System.Threading;
 using System.Threading.Tasks;
 
@@ -20,6 +22,55 @@ namespace KimodoBridge
         {
             using var client = new BridgeProtocolClient(connectTimeoutMs, ioTimeoutMs);
             return await client.PingAsync(host, port, token, acceptLoading);
+        }
+
+        public static bool CanConnect(
+            string host,
+            int port,
+            int connectTimeoutMs = BridgeRuntimeSettings.DefaultStatusConnectTimeoutMs,
+            CancellationToken token = default)
+        {
+            return CanConnectAsync(host, port, connectTimeoutMs, token).GetAwaiter().GetResult();
+        }
+
+        public static async Task<bool> CanConnectAsync(
+            string host,
+            int port,
+            int connectTimeoutMs = BridgeRuntimeSettings.DefaultStatusConnectTimeoutMs,
+            CancellationToken token = default)
+        {
+            if (string.IsNullOrWhiteSpace(host) || port <= 0 || port > 65535)
+            {
+                return false;
+            }
+
+            using var client = new TcpClient();
+            using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(token);
+            timeoutCts.CancelAfter(Math.Max(100, connectTimeoutMs));
+
+            try
+            {
+                Task connectTask = client.ConnectAsync(host, port);
+                Task timeoutTask = Task.Delay(Timeout.Infinite, timeoutCts.Token);
+                Task completed = await Task.WhenAny(connectTask, timeoutTask);
+                if (completed != connectTask)
+                {
+                    token.ThrowIfCancellationRequested();
+                    return false;
+                }
+
+                await connectTask;
+                return true;
+            }
+            catch (OperationCanceledException)
+            {
+                token.ThrowIfCancellationRequested();
+                return false;
+            }
+            catch
+            {
+                return false;
+            }
         }
 
         public static async Task<bool> TrySendQuitAsync(

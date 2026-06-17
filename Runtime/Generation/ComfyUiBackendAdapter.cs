@@ -93,11 +93,6 @@ namespace KimodoBridge
             return Task.CompletedTask;
         }
 
-        public Task KillAsync(CancellationToken token)
-        {
-            return Task.CompletedTask;
-        }
-
         public void Dispose()
         {
             // no retained resources

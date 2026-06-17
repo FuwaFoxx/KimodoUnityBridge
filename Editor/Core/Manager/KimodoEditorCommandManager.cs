@@ -265,7 +265,6 @@ namespace KimodoBridge.Editor
                     break;
                 case KimodoBridgeOperation.RefreshStatus:
                     EmitProgress(command, "Refreshing bridge status...");
-                    KimodoBridgeController.RequestServerStateRefresh(force: true);
                     break;
                 case KimodoBridgeOperation.EnsureRuntimeRoot:
                     EmitProgress(command, "Creating runtime root...");
@@ -278,7 +277,6 @@ namespace KimodoBridge.Editor
                     throw new NotSupportedException($"Unsupported bridge operation: {command.Operation}");
             }
 
-            KimodoBridgeController.RequestServerStateRefresh(force: true);
             ServerStatusSnapshot snapshot = KimodoBridgeController.GetServerStatusSnapshot();
             if (command.Operation == KimodoBridgeOperation.Stop && snapshot.Running)
             {

@@ -13,7 +13,7 @@ namespace KimodoBridge
             this.platformProcess = platformProcess ?? throw new ArgumentNullException(nameof(platformProcess));
         }
 
-        internal Process Start(string launcherPath, string modelName, bool highVram, bool forceSetup, string modelsRoot, int idleTimeoutSeconds)
+        internal Process Start(string launcherPath, string modelName, bool highVram, bool forceSetup, string modelsRoot, int idleTimeoutSeconds, int ownerProcessId)
         {
             if (string.IsNullOrWhiteSpace(launcherPath))
             {
@@ -32,7 +32,8 @@ namespace KimodoBridge
                 highVram,
                 forceSetup,
                 modelsRoot,
-                idleTimeoutSeconds);
+                idleTimeoutSeconds,
+                ownerProcessId);
 
             return StartWithLogging(psi);
         }

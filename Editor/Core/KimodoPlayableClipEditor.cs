@@ -295,7 +295,7 @@ namespace KimodoBridge.Editor
                 return;
             }
 
-            KimodoBridgeController.RequestServerStateRefresh(forceRefresh);
+            _ = forceRefresh;
             ServerStatusSnapshot snapshot = KimodoBridgeController.GetServerStatusSnapshot();
             bridgeStatusReady = snapshot.Ready;
             bridgeRunningCached = snapshot.Running;

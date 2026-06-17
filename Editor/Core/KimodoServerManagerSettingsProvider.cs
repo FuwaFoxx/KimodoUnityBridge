@@ -76,7 +76,6 @@ namespace KimodoBridge.Editor
             SubscribeManagerEvents();
             Refresh();
             detectHintUntilTime = EditorApplication.timeSinceStartup + 2.0;
-            KimodoBridgeController.RequestServerStateRefresh(force: true);
         }
 
         public override void OnDeactivate()
@@ -637,14 +636,8 @@ namespace KimodoBridge.Editor
                 return;
             }
 
-            KimodoBridgeController.RequestServerStateRefresh(forceRefresh);
+            _ = forceRefresh;
             ServerStatusSnapshot snapshot = KimodoBridgeController.GetServerStatusSnapshot();
-            if (!snapshot.Ready)
-            {
-                serverState = ServerState.Disabled;
-                return;
-            }
-
             serverHost = snapshot.Host;
             serverPort = snapshot.Port;
             serverState = snapshot.Running ? ServerState.Enabled : ServerState.Disabled;
