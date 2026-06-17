@@ -163,17 +163,9 @@ namespace KimodoBridge
         {
             try
             {
-                DateTime waitUntil = DateTime.UtcNow.AddMilliseconds(waitFileTimeoutMs);
-                int missingFileDelayMs = missingFilePollMinMs;
                 while (!token.IsCancellationRequested && !File.Exists(logPath))
                 {
-                    if (DateTime.UtcNow >= waitUntil)
-                    {
-                        return;
-                    }
-
-                    await Task.Delay(missingFileDelayMs, token);
-                    missingFileDelayMs = Math.Min(missingFilePollMaxMs, missingFileDelayMs + missingFilePollMinMs);
+                    await Task.Delay(1000, token);
                 }
 
                 if (!File.Exists(logPath))
