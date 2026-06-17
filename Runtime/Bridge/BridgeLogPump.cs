@@ -19,7 +19,7 @@ namespace KimodoBridge
 
         public void Start(string logPath, Action<string> onLine, BridgeRuntimeSettings settings = null)
         {
-            Start(logPath, onLine, settings, null, null, null);
+            Start(logPath, onLine, settings, null, null, null, null);
         }
 
         public void Start(
@@ -28,7 +28,8 @@ namespace KimodoBridge
             BridgeRuntimeSettings settings,
             int? waitFileTimeoutMsOverride,
             int? missingFilePollMinMsOverride,
-            int? missingFilePollMaxMsOverride)
+            int? missingFilePollMaxMsOverride,
+            bool? readFromStartOverride)
         {
             Stop();
             if (string.IsNullOrWhiteSpace(logPath) || onLine == null)
@@ -41,6 +42,7 @@ namespace KimodoBridge
             int missingFilePollMaxMs = missingFilePollMaxMsOverride ?? settings?.logPumpMissingFilePollMaxMs ?? BridgeRuntimeSettings.DefaultLogPumpMissingFilePollMaxMs;
             int idlePollMinMs = settings?.logPumpIdlePollMinMs ?? BridgeRuntimeSettings.DefaultLogPumpIdlePollMinMs;
             int idlePollMaxMs = settings?.logPumpIdlePollMaxMs ?? BridgeRuntimeSettings.DefaultLogPumpIdlePollMaxMs;
+            bool readFromStart = readFromStartOverride ?? false;
 
             var newCts = new CancellationTokenSource();
             SynchronizationContext newContext = SynchronizationContext.Current;
@@ -53,7 +55,8 @@ namespace KimodoBridge
                 Math.Max(30, missingFilePollMinMs),
                 Math.Max(Math.Max(30, missingFilePollMinMs), missingFilePollMaxMs),
                 Math.Max(10, idlePollMinMs),
-                Math.Max(Math.Max(10, idlePollMinMs), idlePollMaxMs)));
+                Math.Max(Math.Max(10, idlePollMinMs), idlePollMaxMs),
+                readFromStart));
 
             lock (gate)
             {
@@ -155,7 +158,8 @@ namespace KimodoBridge
             int missingFilePollMinMs,
             int missingFilePollMaxMs,
             int idlePollMinMs,
-            int idlePollMaxMs)
+            int idlePollMaxMs,
+            bool readFromStart)
         {
             try
             {
@@ -178,7 +182,7 @@ namespace KimodoBridge
                 }
 
                 using var fs = new FileStream(logPath, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete);
-                if (fs.CanSeek)
+                if (fs.CanSeek && !readFromStart)
                 {
                     fs.Seek(0, SeekOrigin.End);
                 }

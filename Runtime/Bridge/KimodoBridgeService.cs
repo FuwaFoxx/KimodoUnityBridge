@@ -536,7 +536,7 @@ namespace KimodoBridge
                 BridgeMessageLogPumpMissingFilePollMs);
             StartSideLogPumpIfDifferent(Path.Combine(settings.runtimeRoot, "log", "run_server.log"), "[RunServer]", mainLogFullPath, progress);
             StartSideLogPumpIfDifferent(Path.Combine(settings.runtimeRoot, "log", "setup.log"), "[Setup]", mainLogFullPath, progress);
-            StartSideLogPumpIfDifferent(Path.Combine(settings.runtimeRoot, "log", "download_model.log"), "[Download]", mainLogFullPath, progress);
+            StartSideLogPumpIfDifferent(Path.Combine(settings.runtimeRoot, "log", "download_model.log"), "[Download]", mainLogFullPath, progress, readFromStartOverride: true);
         }
 
         private void StopLogPump()
@@ -551,7 +551,8 @@ namespace KimodoBridge
             Action<string> progress,
             int? waitFileTimeoutMsOverride = null,
             int? missingFilePollMinMsOverride = null,
-            int? missingFilePollMaxMsOverride = null)
+            int? missingFilePollMaxMsOverride = null,
+            bool? readFromStartOverride = null)
         {
             if (string.IsNullOrWhiteSpace(logPath))
             {
@@ -565,7 +566,7 @@ namespace KimodoBridge
                 string msg = $"{tag} {line}";
                 progress?.Invoke(msg);
                 Debug.Log(msg);
-            }, settings, waitFileTimeoutMsOverride, missingFilePollMinMsOverride, missingFilePollMaxMsOverride);
+            }, settings, waitFileTimeoutMsOverride, missingFilePollMinMsOverride, missingFilePollMaxMsOverride, readFromStartOverride);
         }
 
         private void StartSideLogPumpIfDifferent(
@@ -575,7 +576,8 @@ namespace KimodoBridge
             Action<string> progress,
             int? waitFileTimeoutMsOverride = null,
             int? missingFilePollMinMsOverride = null,
-            int? missingFilePollMaxMsOverride = null)
+            int? missingFilePollMaxMsOverride = null,
+            bool? readFromStartOverride = null)
         {
             string sideLogFullPath = GetNormalizedPathOrEmpty(logPath);
             if (!string.IsNullOrWhiteSpace(mainLogFullPath) &&
@@ -585,7 +587,7 @@ namespace KimodoBridge
                 return;
             }
 
-            StartSideLogPump(logPath, tag, progress, waitFileTimeoutMsOverride, missingFilePollMinMsOverride, missingFilePollMaxMsOverride);
+            StartSideLogPump(logPath, tag, progress, waitFileTimeoutMsOverride, missingFilePollMinMsOverride, missingFilePollMaxMsOverride, readFromStartOverride);
         }
 
         private static string GetNormalizedPathOrEmpty(string path)
