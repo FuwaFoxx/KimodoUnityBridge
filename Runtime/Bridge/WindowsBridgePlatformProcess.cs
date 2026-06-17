@@ -20,11 +20,11 @@ namespace KimodoBridge
                 throw new NotSupportedException($"Windows launcher must be .bat/.cmd, got: {ext}");
             }
 
-            string qLauncher = QuoteForCmd(launcherPath);
-            string qModel = QuoteForCmd(string.IsNullOrWhiteSpace(modelName) ? "Kimodo-SOMA-RP-v1" : modelName.Trim());
+            string qLauncher = QuoteForNestedCmd(launcherPath);
+            string qModel = QuoteForNestedCmd(string.IsNullOrWhiteSpace(modelName) ? "Kimodo-SOMA-RP-v1" : modelName.Trim());
             string modelsArg = string.IsNullOrWhiteSpace(modelsRoot)
                 ? string.Empty
-                : $" --models-root {QuoteForCmd(modelsRoot.Trim())}";
+                : $" --models-root {QuoteForNestedCmd(modelsRoot.Trim())}";
             string forceSetupArg = forceSetup ? " --force-setup" : string.Empty;
             string watchPidArg = ownerProcessId > 0 ? $" --watchpid {ownerProcessId}" : string.Empty;
             string args = $"--model {qModel}{(highVram ? " --highvram" : string.Empty)}{modelsArg}{forceSetupArg}{watchPidArg} --output file";
@@ -33,11 +33,16 @@ namespace KimodoBridge
             return new ProcessStartInfo
             {
                 FileName = "cmd.exe",
-                Arguments = $"/d /c \"set KIMODO_SERVER_WINDOW_STYLE=Hidden && {idleTimeoutSet} && call {qLauncher} {args}\"",
+                Arguments = $"/d /s /c \"\"set KIMODO_SERVER_WINDOW_STYLE=Hidden && {idleTimeoutSet} && call {qLauncher} {args}\"\"",
                 UseShellExecute = false,
                 CreateNoWindow = true,
                 WorkingDirectory = Path.GetDirectoryName(launcherPath) ?? Environment.CurrentDirectory
             };
+        }
+
+        private static string QuoteForNestedCmd(string value)
+        {
+            return QuoteForCmd(value).Replace("\"", "\"\"");
         }
 
         private static string QuoteForCmd(string value)
