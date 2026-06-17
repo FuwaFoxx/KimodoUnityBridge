@@ -1,5 +1,9 @@
 using System;
 using System.IO;
+using System.IO.Compression;
+using System.Net;
+using UnityEditor;
+using UnityEngine;
 using PackageInfo = UnityEditor.PackageManager.PackageInfo;
 
 namespace KimodoBridge.Editor
@@ -7,6 +11,11 @@ namespace KimodoBridge.Editor
     internal static class KimodoServerRuntimeUtil
     {
         internal static string RuntimeRootOverrideForTests { get; set; }
+
+        // GitHub source used to bootstrap the runtime when the local package template is missing.
+        private const string RuntimeRepoUrl = "https://github.com/OneYoungMean/NvlabKimodoQuickServer";
+        private const string RuntimeRepoArchiveUrl = "https://github.com/OneYoungMean/NvlabKimodoQuickServer/archive/refs/heads/main.zip";
+        private const string ManualDownloadFileName = "下载说明_DOWNLOAD_REQUIRED.txt";
 
         internal static readonly string[] SupportedModelNames =
         {
@@ -86,12 +95,168 @@ namespace KimodoBridge.Editor
                 : (Directory.Exists(candidate2) ? candidate2 : candidate3);
             if (!Directory.Exists(templateRoot))
             {
-                return false;
+                // The package template is unavailable (e.g. the "NvlabKimodoQuickServer~" folder
+                // was not shipped with the package). Fall back to downloading it from GitHub, and
+                // if that fails, leave a placeholder folder with manual download instructions.
+                return TryBootstrapRuntimeRootFromGitHub(runtimeRoot);
             }
 
             Directory.CreateDirectory(runtimeRoot);
             CopyDirectoryRecursive(templateRoot, runtimeRoot);
             return true;
+        }
+
+        internal static bool TryBootstrapRuntimeRootFromGitHub(string runtimeRoot)
+        {
+            if (TryDownloadRuntimeRootFromGitHub(runtimeRoot, out string downloadError))
+            {
+                Debug.Log($"[Kimodo] Downloaded runtime from {RuntimeRepoUrl} to '{runtimeRoot}'.");
+                return true;
+            }
+
+            // Download failed: create an empty folder with an instruction file and reveal it so the
+            // user knows to download the runtime manually and place it here.
+            Debug.LogError($"[Kimodo] Failed to download runtime from {RuntimeRepoUrl}: {downloadError}");
+            CreateManualDownloadPlaceholder(runtimeRoot, downloadError);
+            return false;
+        }
+
+        private static bool TryDownloadRuntimeRootFromGitHub(string runtimeRoot, out string error)
+        {
+            error = string.Empty;
+            string tempZip = Path.Combine(Path.GetTempPath(), "NvlabKimodoQuickServer-" + Guid.NewGuid().ToString("N") + ".zip");
+            string tempExtract = Path.Combine(Path.GetTempPath(), "NvlabKimodoQuickServer-" + Guid.NewGuid().ToString("N"));
+            try
+            {
+                EditorUtility.DisplayProgressBar("Kimodo", $"Downloading runtime from GitHub...\n{RuntimeRepoArchiveUrl}", 0.3f);
+
+                // GitHub archive endpoints require TLS 1.2 and redirect to codeload.github.com.
+                ServicePointManager.SecurityProtocol |= SecurityProtocolType.Tls12;
+                using (var client = new WebClient())
+                {
+                    client.Headers.Add("User-Agent", "KimodoUnityBridge");
+                    client.DownloadFile(RuntimeRepoArchiveUrl, tempZip);
+                }
+
+                EditorUtility.DisplayProgressBar("Kimodo", "Extracting runtime...", 0.7f);
+                if (Directory.Exists(tempExtract))
+                {
+                    Directory.Delete(tempExtract, recursive: true);
+                }
+                ZipFile.ExtractToDirectory(tempZip, tempExtract);
+
+                // The GitHub archive wraps everything in a single top-level "<repo>-<branch>" folder.
+                string extractedRoot = ResolveArchiveContentRoot(tempExtract);
+                if (extractedRoot == null)
+                {
+                    error = "Downloaded archive did not contain the expected content.";
+                    return false;
+                }
+
+                Directory.CreateDirectory(runtimeRoot);
+                CopyDirectoryRecursive(extractedRoot, runtimeRoot);
+                return true;
+            }
+            catch (Exception ex)
+            {
+                error = ex.Message;
+                // Avoid leaving a half-written runtime folder around on failure.
+                TryDeleteDirectoryQuiet(runtimeRoot);
+                return false;
+            }
+            finally
+            {
+                EditorUtility.ClearProgressBar();
+                TryDeleteFileQuiet(tempZip);
+                TryDeleteDirectoryQuiet(tempExtract);
+            }
+        }
+
+        private static string ResolveArchiveContentRoot(string extractRoot)
+        {
+            if (!Directory.Exists(extractRoot))
+            {
+                return null;
+            }
+
+            string[] topDirs = Directory.GetDirectories(extractRoot);
+            string[] topFiles = Directory.GetFiles(extractRoot);
+            if (topDirs.Length == 1 && topFiles.Length == 0)
+            {
+                return topDirs[0];
+            }
+
+            return extractRoot;
+        }
+
+        private static void CreateManualDownloadPlaceholder(string runtimeRoot, string downloadError)
+        {
+            try
+            {
+                Directory.CreateDirectory(runtimeRoot);
+                string instructionPath = Path.Combine(runtimeRoot, ManualDownloadFileName);
+                string content =
+                    "Kimodo 运行时缺失 / Kimodo runtime is missing\r\n" +
+                    "==============================================\r\n\r\n" +
+                    "自动下载失败 / Automatic download failed:\r\n" +
+                    "    " + downloadError + "\r\n\r\n" +
+                    "请手动从下面的仓库下载，并将其内容（不含顶层文件夹）放到此目录：\r\n" +
+                    "Please manually download from the repository below and place its contents\r\n" +
+                    "(without the top-level folder) into this directory:\r\n\r\n" +
+                    "    " + RuntimeRepoUrl + "\r\n" +
+                    "    " + RuntimeRepoArchiveUrl + "\r\n\r\n" +
+                    "目标目录 / Target directory:\r\n" +
+                    "    " + runtimeRoot + "\r\n\r\n" +
+                    "完成后请删除本说明文件并重试。\r\n" +
+                    "After placing the files, delete this file and try again.\r\n";
+                File.WriteAllText(instructionPath, content);
+
+                EditorUtility.DisplayDialog(
+                    "Kimodo 运行时下载失败 / Runtime download failed",
+                    "无法自动下载 Kimodo 运行时。\r\n\r\n" +
+                    "Could not download the Kimodo runtime automatically.\r\n\r\n" +
+                    "请前往 GitHub 手动下载并放入已打开的目录：\r\n" +
+                    "Please download it from GitHub manually and place it into the opened folder:\r\n\r\n" +
+                    RuntimeRepoUrl + "\r\n\r\n" +
+                    runtimeRoot,
+                    "OK");
+
+                EditorUtility.RevealInFinder(runtimeRoot);
+            }
+            catch (Exception ex)
+            {
+                Debug.LogError($"[Kimodo] Failed to create manual download placeholder at '{runtimeRoot}': {ex.Message}");
+            }
+        }
+
+        private static void TryDeleteFileQuiet(string path)
+        {
+            try
+            {
+                if (File.Exists(path))
+                {
+                    File.Delete(path);
+                }
+            }
+            catch
+            {
+                // ignore
+            }
+        }
+
+        private static void TryDeleteDirectoryQuiet(string path)
+        {
+            try
+            {
+                if (Directory.Exists(path))
+                {
+                    Directory.Delete(path, recursive: true);
+                }
+            }
+            catch
+            {
+                // ignore
+            }
         }
 
         internal static void CopyDirectoryRecursive(string sourceDir, string destinationDir)
