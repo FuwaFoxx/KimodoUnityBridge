@@ -579,13 +579,6 @@ namespace KimodoBridge
                 BridgeMessageLogPumpMissingFilePollMs);
             StartSideLogPumpIfDifferent(Path.Combine(settings.runtimeRoot, "log", "run_server.log"), "[RunServer]", mainLogFullPath, progress);
             StartSideLogPumpIfDifferent(Path.Combine(settings.runtimeRoot, "log", "setup.log"), "[Setup]", mainLogFullPath, progress);
-            // Download log is rotated per run, so replay the fresh file from the beginning.
-            StartSideLogPumpIfDifferent(
-                Path.Combine(settings.runtimeRoot, "log", "download_model.log"),
-                "[Download]",
-                mainLogFullPath,
-                progress,
-                readFromStartOverride: true);
         }
 
         private void StopLogPump()

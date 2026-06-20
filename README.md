@@ -13,8 +13,8 @@ It contains two coupled parts:
 - Project settings panel: `Project/Kimodo Server Manager`.
 
 2. Runtime template (`NvlabKimodoQuickServer~`)
-- Environment setup scripts.
-- Model download/update scripts.
+- Runtime bootstrap and launcher scripts.
+- Internal setup/model preparation managed by the runtime entrypoint.
 - Bridge startup scripts.
 - End-to-end TCP example scripts.
 
@@ -22,10 +22,9 @@ It contains two coupled parts:
 
 Only the new pipeline is supported:
 
-- Setup: `bash\setup.bat`
-- Download models: `bash\download_model.bat`
-- Start server: `run_server.bat` (or wrapper `bash\start_server.bat`)
+- Start server: `run_server.bat` (or compatibility wrapper `bash\start_server.bat` / `bash\start_server.sh`)
 - Example test: `example\example_run_server_tpose.bat`
+- Setup and model preparation are handled internally by the runtime entrypoint; Unity bridge does not call standalone setup/download scripts directly.
 
 Legacy offline scripts are not part of the supported startup path.
 
@@ -38,9 +37,10 @@ Typical sequence:
 
 ```bat
 cd /d C:\nvlab\KimodoUnityBridge\NvlabKimodoQuickServer~
-bash\setup.bat --output console
 run_server.bat --model Kimodo-SOMA-RP-v1 --output console
 ```
+
+The first launch will bootstrap setup automatically if needed.
 
 Or run the end-to-end example:
 
@@ -59,7 +59,7 @@ Unity bridge runtime behavior:
 - `run_server.bat`
 - `bash\start_server.bat`
 - `bash\start_server.sh`
-4. If a legacy start/setup script is detected in runtime root, code throws an exception.
+4. If a legacy offline script is detected in runtime root, code throws an exception.
 
 ## 5) Server Protocol
 
@@ -86,26 +86,26 @@ Runtime start parameters (new pipeline):
 - `--highvram`
 - `--output console|file`
 - `--log <path>`
-- `--force-setup`
+- `--force-setup` (force internal setup rebuild before launch)
 
 Model aliases accepted by runtime scripts include `soma`, `g1`, `smplx`, `soma-seed`.
 
 ## 7) Runtime Artifacts to Monitor
 
 Under runtime root (`NvlabKimodoQuickServer` or template root while testing):
-- `.setup_new.lock`
 - `.setup.complete`
+- `.setup.lock`
 - `serverport`
 - `log\setup.log`
-- `log\download_model.log`
 - `log\run_server.log`
+- `log\bridge_server.log`
+- `log\watchdog.log`
 
 ## 8) Automation Notes
 
 For automation agents:
 
 1. Prefer invoking:
-- `bash\setup.bat`
 - `run_server.bat`
 - `example\example_run_server_tpose.bat`
 2. Treat `serverport` as source-of-truth endpoint.
