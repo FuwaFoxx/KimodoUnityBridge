@@ -63,14 +63,14 @@ jobs:
           $version = "${{ steps.package_version.outputs.version }}"
 
           if ([string]::IsNullOrWhiteSpace($env:INPUT_RELEASE_NOTES)) {
-            @"
-# $tag
-
-- Package version: $version
-- Source branch: $env:GITHUB_REF_NAME
-- QuickServer ref: $env:INPUT_QUICKSERVER_REF
-- Workflow run: $env:GITHUB_SERVER_URL/$env:GITHUB_REPOSITORY/actions/runs/$env:GITHUB_RUN_ID
-"@ | Set-Content -Path $notesPath -Encoding utf8
+            @(
+              "# $tag"
+              ""
+              "- Package version: $version"
+              "- Source branch: $env:GITHUB_REF_NAME"
+              "- QuickServer ref: $env:INPUT_QUICKSERVER_REF"
+              "- Workflow run: $env:GITHUB_SERVER_URL/$env:GITHUB_REPOSITORY/actions/runs/$env:GITHUB_RUN_ID"
+            ) | Set-Content -Path $notesPath -Encoding utf8
           }
           else {
             $env:INPUT_RELEASE_NOTES | Set-Content -Path $notesPath -Encoding utf8
