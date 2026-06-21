@@ -91,45 +91,33 @@ namespace KimodoBridge
             request["loop_hint"] = loopHint;
             request["segment_index"] = segmentIndex;
             request["transition_duration"] = transitionDurationSeconds;
+
+            await WaitUntilModelReadyAsync(host, port, progress, token).ConfigureAwait(false);
             progress?.Invoke(
                 $"Bridge generate request sent: duration={durationSeconds:F3}s, steps={diffusionSteps}, seed={(seed.HasValue ? seed.Value.ToString() : "null")}.");
+            JObject response = await SendAsync(host, port, request, token).ConfigureAwait(false);
+            string status = response?.Value<string>("status") ?? string.Empty;
+            string message = response?.Value<string>("message") ?? string.Empty;
+            progress?.Invoke($"Bridge generate response status={status}{(string.IsNullOrWhiteSpace(message) ? string.Empty : $", message={message}")}");
 
-            DateTime waitStart = DateTime.UtcNow;
-            while (true)
+            if (string.Equals(status, "loading", StringComparison.OrdinalIgnoreCase))
             {
-                token.ThrowIfCancellationRequested();
-                JObject response = await SendAsync(host, port, request, token).ConfigureAwait(false);
-                string status = response?.Value<string>("status") ?? string.Empty;
-                string message = response?.Value<string>("message") ?? string.Empty;
-                progress?.Invoke($"Bridge generate response status={status}{(string.IsNullOrWhiteSpace(message) ? string.Empty : $", message={message}")}");
-
-                if (string.Equals(status, "loading", StringComparison.OrdinalIgnoreCase))
-                {
-                    string msg = response.Value<string>("message") ?? "Model is loading.";
-                    progress?.Invoke($"Bridge loading model... {msg}");
-                    if ((DateTime.UtcNow - waitStart).TotalMilliseconds > modelLoadingTimeoutMs)
-                    {
-                        throw new TimeoutException($"Bridge model loading timeout (>{modelLoadingTimeoutMs}ms).");
-                    }
-
-                    await Task.Delay(modelLoadingPollIntervalMs, token).ConfigureAwait(false);
-                    continue;
-                }
-
-                if (string.Equals(status, "error", StringComparison.OrdinalIgnoreCase))
-                {
-                    string errorMessage = response.Value<string>("message") ?? "Bridge generation failed.";
-                    string traceback = response.Value<string>("traceback");
-                    if (!string.IsNullOrWhiteSpace(traceback))
-                    {
-                        throw new Exception($"{errorMessage}\n{traceback}");
-                    }
-
-                    throw new Exception(errorMessage);
-                }
-
-                return response;
+                throw new Exception("Bridge returned loading after ready check.");
             }
+
+            if (string.Equals(status, "error", StringComparison.OrdinalIgnoreCase))
+            {
+                string errorMessage = response.Value<string>("message") ?? "Bridge generation failed.";
+                string traceback = response.Value<string>("traceback");
+                if (!string.IsNullOrWhiteSpace(traceback))
+                {
+                    throw new Exception($"{errorMessage}\n{traceback}");
+                }
+
+                throw new Exception(errorMessage);
+            }
+
+            return response;
         }
 
         public async Task<bool> TrySendQuitAsync(string host, int port, CancellationToken token)
@@ -374,6 +362,65 @@ namespace KimodoBridge
             sharedClient = client;
             sharedHost = host;
             sharedPort = port;
+        }
+
+        private async Task WaitUntilModelReadyAsync(string host, int port, Action<string> progress, CancellationToken token)
+        {
+            DateTime waitStart = DateTime.UtcNow;
+            string lastLoadingMessage = null;
+            while (true)
+            {
+                token.ThrowIfCancellationRequested();
+                JObject response = await SendAsync(host, port, new JObject { ["cmd"] = "ping" }, token).ConfigureAwait(false);
+                string status = response?.Value<string>("status") ?? string.Empty;
+                string message = response?.Value<string>("message") ?? string.Empty;
+
+                if (string.Equals(status, "pong", StringComparison.OrdinalIgnoreCase) ||
+                    string.Equals(status, "ready", StringComparison.OrdinalIgnoreCase))
+                {
+                    if (lastLoadingMessage != null)
+                    {
+                        progress?.Invoke("Bridge model ready.");
+                    }
+
+                    return;
+                }
+
+                if (string.Equals(status, "loading", StringComparison.OrdinalIgnoreCase) ||
+                    string.Equals(status, "initializing", StringComparison.OrdinalIgnoreCase))
+                {
+                    string loadingMessage = string.IsNullOrWhiteSpace(message) ? "Model is loading." : message;
+                    if (!string.Equals(lastLoadingMessage, loadingMessage, StringComparison.Ordinal))
+                    {
+                        progress?.Invoke($"Bridge waiting for model ready... {loadingMessage}");
+                        lastLoadingMessage = loadingMessage;
+                    }
+
+                    if ((DateTime.UtcNow - waitStart).TotalMilliseconds > modelLoadingTimeoutMs)
+                    {
+                        throw new TimeoutException($"Bridge model loading timeout (>{modelLoadingTimeoutMs}ms).");
+                    }
+
+                    await Task.Delay(modelLoadingPollIntervalMs, token).ConfigureAwait(false);
+                    continue;
+                }
+
+                if (string.Equals(status, "error", StringComparison.OrdinalIgnoreCase))
+                {
+                    string errorMessage = response.Value<string>("message") ?? "Bridge readiness check failed.";
+                    string traceback = response.Value<string>("traceback");
+                    if (!string.IsNullOrWhiteSpace(traceback))
+                    {
+                        throw new Exception($"{errorMessage}\n{traceback}");
+                    }
+
+                    throw new Exception(errorMessage);
+                }
+
+                throw new Exception(
+                    $"Unexpected bridge ping status while waiting for ready: {status}" +
+                    $"{(string.IsNullOrWhiteSpace(message) ? string.Empty : $". message={message}")}");
+            }
         }
 
         private void CloseSharedConnectionSync()

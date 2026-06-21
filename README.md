@@ -111,4 +111,13 @@ For automation agents:
 3. Protocol flow:
 - ping until ready/loading resolves -> generate -> quit.
 
+## 9) Package Build
+
+The repository includes a GitHub Actions workflow at `.github/workflows/package-runtime.yml` that:
+
+1. Exports the tracked files from this repo.
+2. Clones `OneYoungMean/NvlabKimodoQuickServer`.
+3. Copies that repo into `NvlabKimodoQuickServer~`.
+4. Packages the result as `dist/KimodoUnityBridge.zip`.
+
 
