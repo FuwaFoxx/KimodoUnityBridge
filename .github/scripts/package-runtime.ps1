@@ -17,6 +17,37 @@ function Ensure-Command {
 
 Ensure-Command git
 Ensure-Command robocopy
+Ensure-Command tar
+
+function Remove-PathIfExists {
+    param([string]$Path)
+
+    if (-not (Test-Path -LiteralPath $Path)) {
+        return
+    }
+
+    $item = Get-Item -LiteralPath $Path -Force
+    if ($item.PSIsContainer) {
+        [System.IO.Directory]::Delete($item.FullName, $true)
+        return
+    }
+
+    [System.IO.File]::Delete($item.FullName)
+}
+
+function Get-GitHubZipballUrl {
+    param(
+        [string]$RepoUrl,
+        [string]$Ref
+    )
+
+    $match = [regex]::Match($RepoUrl, 'github\.com[:/](?<owner>[^/]+)/(?<repo>[^/.]+?)(?:\.git)?$')
+    if (-not $match.Success) {
+        throw "Only GitHub repository URLs are supported: $RepoUrl"
+    }
+
+    return "https://api.github.com/repos/$($match.Groups['owner'].Value)/$($match.Groups['repo'].Value)/zipball/$Ref"
+}
 
 $scriptRoot = (Resolve-Path $PSScriptRoot).Path
 $repoRoot = (Resolve-Path (Join-Path $scriptRoot "..\..")).Path
@@ -29,11 +60,13 @@ if ([string]::IsNullOrWhiteSpace($OutputZip)) {
     $OutputZip = Join-Path $repoRoot "dist\KimodoUnityBridge.zip"
 }
 
-$tempRoot = Join-Path ([System.IO.Path]::GetTempPath()) ("kimodo-package-" + [Guid]::NewGuid().ToString("N"))
+$tempRoot = Join-Path ([System.IO.Path]::GetPathRoot($repoRoot)) ("kpack-" + [Guid]::NewGuid().ToString("N"))
 $repoArchive = Join-Path $tempRoot "repo.zip"
 $stagingRoot = Join-Path $tempRoot "staging"
-$quickServerSource = Join-Path $tempRoot "NvlabKimodoQuickServer-source"
+$quickServerArchive = Join-Path $tempRoot "quickserver.zip"
+$quickServerExtract = Join-Path $tempRoot "quickserver-extract"
 $runtimeRoot = Join-Path $stagingRoot "NvlabKimodoQuickServer~"
+$quickServerZipballUrl = Get-GitHubZipballUrl -RepoUrl $QuickServerRepo -Ref $QuickServerRef
 
 Write-Host "Repo root: $repoRoot"
 Write-Host "QuickServer ref: $QuickServerRef"
@@ -53,19 +86,24 @@ try {
 
     $githubDir = Join-Path $stagingRoot ".github"
     if (Test-Path $githubDir) {
-        Remove-Item -LiteralPath $githubDir -Recurse -Force
+        Remove-PathIfExists -Path $githubDir
     }
 
-    Write-Host "Cloning external runtime repo..."
-    & git clone --depth 1 --branch $QuickServerRef $QuickServerRepo $quickServerSource
-    if ($LASTEXITCODE -ne 0) {
-        throw "git clone failed with exit code $LASTEXITCODE"
+    Write-Host "Downloading external runtime archive..."
+    Invoke-WebRequest -Uri $quickServerZipballUrl -OutFile $quickServerArchive -Headers @{ "User-Agent" = "KimodoUnityBridge-Packager" }
+
+    New-Item -ItemType Directory -Force -Path $quickServerExtract | Out-Null
+    Expand-Archive -LiteralPath $quickServerArchive -DestinationPath $quickServerExtract -Force
+
+    $quickServerContentRoot = Get-ChildItem -LiteralPath $quickServerExtract -Directory | Select-Object -First 1
+    if ($null -eq $quickServerContentRoot) {
+        throw "Downloaded runtime archive did not contain a top-level directory."
     }
 
     New-Item -ItemType Directory -Force -Path $runtimeRoot | Out-Null
 
     Write-Host "Copying runtime repo into NvlabKimodoQuickServer~..."
-    & robocopy $quickServerSource $runtimeRoot /MIR /XD ".git" /R:2 /W:1 /NFL /NDL /NJH /NJS /NP | Out-Null
+    & robocopy $quickServerContentRoot.FullName $runtimeRoot /MIR /R:2 /W:1 /NFL /NDL /NJH /NJS /NP | Out-Null
     if ($LASTEXITCODE -ge 8) {
         throw "robocopy failed with exit code $LASTEXITCODE"
     }
@@ -76,16 +114,22 @@ try {
     }
 
     if (Test-Path $OutputZip) {
-        Remove-Item -LiteralPath $OutputZip -Force
+        Remove-PathIfExists -Path $OutputZip
     }
 
     Write-Host "Creating zip archive..."
-    Compress-Archive -Path (Join-Path $stagingRoot "*") -DestinationPath $OutputZip -Force
+    & tar -a -cf $OutputZip -C $stagingRoot .
+    if ($LASTEXITCODE -ne 0) {
+        throw "tar failed with exit code $LASTEXITCODE"
+    }
 
     Write-Host "Package ready: $OutputZip"
 }
 finally {
-    if (Test-Path $tempRoot) {
-        Remove-Item -LiteralPath $tempRoot -Recurse -Force -ErrorAction SilentlyContinue
+    try {
+        Remove-PathIfExists -Path $tempRoot
+    }
+    catch {
+        Write-Warning ("Failed to remove temporary path: " + $tempRoot + " - " + $_.Exception.Message)
     }
 }
