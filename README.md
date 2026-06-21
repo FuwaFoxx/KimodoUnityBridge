@@ -123,4 +123,17 @@ The repository includes a GitHub Actions workflow at `.github/workflows/package-
 Pushes to `main` also auto-increment the patch part of `package.json` version.
 Example: `1.2.3` -> `1.2.4`. Major and minor version changes remain manual.
 
+## 10) Release Build
+
+The repository also includes a manual release workflow at `.github/workflows/release-runtime.yml`.
+
+Use it when you want a formal GitHub Release instead of only an Actions artifact:
+
+1. Open `Actions`.
+2. Select `release-runtime`.
+3. Run it from `main`.
+4. It reads the current `package.json` version, for example `1.1.2`.
+5. It builds `KimodoUnityBridge-v1.1.2.zip`.
+6. It creates or updates GitHub Release `v1.1.2` and uploads that zip as a Release asset.
+
 
