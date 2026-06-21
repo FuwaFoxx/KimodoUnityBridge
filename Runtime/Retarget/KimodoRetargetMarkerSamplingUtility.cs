@@ -159,7 +159,7 @@ namespace KimodoBridge
 
             if (!KimodoProfileSkeletonUtility.TryResolveProfileSkeleton(
                     resolvedModelName,
-                    targetCache.skeletonRoot,
+                    targetCache,
                     out string[] jointNames,
                     out int[] parentIndices,
                     out Transform[] jointTransforms,

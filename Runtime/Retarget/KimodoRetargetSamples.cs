@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using UnityEngine;
 
 namespace KimodoBridge
@@ -44,6 +45,10 @@ namespace KimodoBridge
         public float humanScale;
         public string[] bonePaths;
         public Transform[] boneTransforms;
+        public Dictionary<string, Transform> bonePathMap;
+        public Dictionary<string, Transform> uniqueNameMap;
+        public HashSet<string> ambiguousNames;
+        public Dictionary<HumanBodyBones, Transform> humanBoneTransforms;
         public Vector3[] bindLocalPositions;
         public Quaternion[] bindLocalRotations;
         public int boneCount;
@@ -81,6 +86,10 @@ namespace KimodoBridge
             humanScale = 0f;
             bonePaths = null;
             boneTransforms = null;
+            bonePathMap = null;
+            uniqueNameMap = null;
+            ambiguousNames = null;
+            humanBoneTransforms = null;
             bindLocalPositions = null;
             bindLocalRotations = null;
             boneCount = 0;

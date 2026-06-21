@@ -93,18 +93,16 @@ namespace KimodoBridge
 
         internal static Transform ResolveHumanBoneTransform(SkeletonCache cache, HumanBodyBones bone)
         {
-            if (cache?.animator == null)
+            if (cache == null)
             {
                 return null;
             }
 
-            if (cache.animator.avatar != null)
+            if (cache.humanBoneTransforms != null &&
+                cache.humanBoneTransforms.TryGetValue(bone, out Transform cached) &&
+                cached != null)
             {
-                Transform resolved = cache.animator.GetBoneTransform(bone);
-                if (resolved != null)
-                {
-                    return resolved;
-                }
+                return cached;
             }
 
             if (!KimodoRetargetCoreUtility.IsValidHumanoid(cache.avatar))
@@ -120,6 +118,11 @@ namespace KimodoBridge
                 if (!string.Equals(humanBone.humanName, humanName, StringComparison.Ordinal))
                 {
                     continue;
+                }
+
+                if (KimodoRetargetAvatarUtility.TryGetUniqueCachedTransformByName(cache, humanBone.boneName, out Transform resolved, out _))
+                {
+                    return resolved;
                 }
 
                 return KimodoRetargetAvatarUtility.FindTransformByName(cache.skeletonRoot, humanBone.boneName);

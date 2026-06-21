@@ -85,7 +85,15 @@ namespace KimodoBridge
             }
 
             string canonicalRootBoneName = ResolveSkeletonRootBoneName(avatar);
-            if (!TryBuildBoneNameTable(root.transform, canonicalRootBoneName, out string[] bonePaths, out error))
+            if (!TryBuildTransformCaches(
+                    root.transform,
+                    canonicalRootBoneName,
+                    out string[] bonePaths,
+                    out Transform[] boneTransforms,
+                    out Dictionary<string, Transform> bonePathMap,
+                    out Dictionary<string, Transform> uniqueNameMap,
+                    out HashSet<string> ambiguousNames,
+                    out error))
             {
                 UnityEngine.Object.DestroyImmediate(root);
                 return false;
@@ -111,7 +119,11 @@ namespace KimodoBridge
                 poseHandler = new HumanPoseHandler(avatar, root.transform),
                 humanScale = Mathf.Max(1e-6f, animator.humanScale),
                 bonePaths = bonePaths,
-                boneTransforms = BuildBoneTransforms(root.transform, bonePaths, canonicalRootBoneName),
+                boneTransforms = boneTransforms,
+                bonePathMap = bonePathMap,
+                uniqueNameMap = uniqueNameMap,
+                ambiguousNames = ambiguousNames,
+                humanBoneTransforms = BuildHumanBoneTransformMap(avatar, animator, uniqueNameMap),
                 boneCount = bonePaths.Length
             };
 
@@ -209,6 +221,70 @@ namespace KimodoBridge
             return true;
         }
 
+        private static bool TryBuildTransformCaches(
+            Transform root,
+            string canonicalRootBoneName,
+            out string[] bonePaths,
+            out Transform[] boneTransforms,
+            out Dictionary<string, Transform> bonePathMap,
+            out Dictionary<string, Transform> uniqueNameMap,
+            out HashSet<string> ambiguousNames,
+            out string error)
+        {
+            error = string.Empty;
+            bonePaths = Array.Empty<string>();
+            boneTransforms = Array.Empty<Transform>();
+            bonePathMap = new Dictionary<string, Transform>(StringComparer.Ordinal);
+            uniqueNameMap = new Dictionary<string, Transform>(StringComparer.OrdinalIgnoreCase);
+            ambiguousNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            if (root == null)
+            {
+                error = "Target root is null.";
+                return false;
+            }
+
+            Transform[] all = root.GetComponentsInChildren<Transform>(true);
+            var paths = new List<string>(all.Length);
+            var transforms = new List<Transform>(all.Length);
+            for (int i = 0; i < all.Length; i++)
+            {
+                Transform current = all[i];
+                string path = CalculateTransformPath(current, root, canonicalRootBoneName);
+                if (string.IsNullOrEmpty(path))
+                {
+                    continue;
+                }
+
+                paths.Add(path);
+                transforms.Add(current);
+                bonePathMap[path] = current;
+
+                string name = current.name;
+                if (string.IsNullOrWhiteSpace(name))
+                {
+                    continue;
+                }
+
+                if (ambiguousNames.Contains(name))
+                {
+                    continue;
+                }
+
+                if (uniqueNameMap.TryGetValue(name, out Transform existing) && existing != current)
+                {
+                    uniqueNameMap.Remove(name);
+                    ambiguousNames.Add(name);
+                    continue;
+                }
+
+                uniqueNameMap[name] = current;
+            }
+
+            bonePaths = paths.ToArray();
+            boneTransforms = transforms.ToArray();
+            return true;
+        }
+
         public static Transform[] BuildBoneTransforms(Transform root, string[] bonePaths, string canonicalRootBoneName)
         {
             if (bonePaths == null)
@@ -284,6 +360,28 @@ namespace KimodoBridge
             return null;
         }
 
+        internal static bool TryGetUniqueCachedTransformByName(
+            SkeletonCache cache,
+            string name,
+            out Transform result,
+            out bool ambiguous)
+        {
+            result = null;
+            ambiguous = false;
+            if (cache?.uniqueNameMap == null || string.IsNullOrWhiteSpace(name))
+            {
+                return false;
+            }
+
+            if (cache.ambiguousNames != null && cache.ambiguousNames.Contains(name))
+            {
+                ambiguous = true;
+                return false;
+            }
+
+            return cache.uniqueNameMap.TryGetValue(name, out result) && result != null;
+        }
+
         public static bool TryFindUniqueTransformByName(
             Transform root,
             string name,
@@ -317,6 +415,61 @@ namespace KimodoBridge
             }
 
             return result != null;
+        }
+
+        private static Dictionary<HumanBodyBones, Transform> BuildHumanBoneTransformMap(
+            Avatar avatar,
+            Animator animator,
+            Dictionary<string, Transform> uniqueNameMap)
+        {
+            var map = new Dictionary<HumanBodyBones, Transform>();
+            if (!KimodoRetargetCoreUtility.IsValidHumanoid(avatar))
+            {
+                return map;
+            }
+
+            Array values = Enum.GetValues(typeof(HumanBodyBones));
+            for (int i = 0; i < values.Length; i++)
+            {
+                HumanBodyBones bone = (HumanBodyBones)values.GetValue(i);
+                if (bone == HumanBodyBones.LastBone)
+                {
+                    continue;
+                }
+
+                Transform transform = animator != null && animator.avatar != null
+                    ? animator.GetBoneTransform(bone)
+                    : null;
+                if (transform != null)
+                {
+                    map[bone] = transform;
+                }
+            }
+
+            HumanBone[] humanBones = avatar.humanDescription.human;
+            for (int i = 0; i < humanBones.Length; i++)
+            {
+                HumanBone humanBone = humanBones[i];
+                if (!Enum.TryParse(humanBone.humanName, out HumanBodyBones bone) || bone == HumanBodyBones.LastBone)
+                {
+                    continue;
+                }
+
+                if (map.ContainsKey(bone))
+                {
+                    continue;
+                }
+
+                if (uniqueNameMap != null &&
+                    !string.IsNullOrWhiteSpace(humanBone.boneName) &&
+                    uniqueNameMap.TryGetValue(humanBone.boneName, out Transform transform) &&
+                    transform != null)
+                {
+                    map[bone] = transform;
+                }
+            }
+
+            return map;
         }
 
         public static bool TryGetProfileRootJointTransform(
