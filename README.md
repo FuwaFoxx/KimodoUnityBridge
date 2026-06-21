@@ -116,8 +116,11 @@ For automation agents:
 The repository includes a GitHub Actions workflow at `.github/workflows/package-runtime.yml` that:
 
 1. Exports the tracked files from this repo.
-2. Clones `OneYoungMean/NvlabKimodoQuickServer`.
+2. Downloads `OneYoungMean/NvlabKimodoQuickServer`.
 3. Copies that repo into `NvlabKimodoQuickServer~`.
 4. Packages the result as `dist/KimodoUnityBridge.zip`.
+
+Pushes to `main` also auto-increment the patch part of `package.json` version.
+Example: `1.2.3` -> `1.2.4`. Major and minor version changes remain manual.
 
 
