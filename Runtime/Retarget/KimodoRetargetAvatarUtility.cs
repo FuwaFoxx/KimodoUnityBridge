@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using TimelineInject;
 using UnityEngine;
 
@@ -194,33 +195,6 @@ namespace KimodoBridge
             return "Hips";
         }
 
-        public static bool TryBuildBoneNameTable(Transform root, string canonicalRootBoneName, out string[] boneNames, out string error)
-        {
-            error = string.Empty;
-            boneNames = null;
-            if (root == null)
-            {
-                error = "Target root is null.";
-                return false;
-            }
-
-            Transform[] all = root.GetComponentsInChildren<Transform>(true);
-            var names = new List<string>(all.Length);
-            for (int i = 0; i < all.Length; i++)
-            {
-                string path = CalculateTransformPath(all[i], root, canonicalRootBoneName);
-                if (string.IsNullOrEmpty(path))
-                {
-                    continue;
-                }
-
-                names.Add(path);
-            }
-
-            boneNames = names.ToArray();
-            return true;
-        }
-
         private static bool TryBuildTransformCaches(
             Transform root,
             string canonicalRootBoneName,
@@ -244,12 +218,13 @@ namespace KimodoBridge
             }
 
             Transform[] all = root.GetComponentsInChildren<Transform>(true);
+            var allDic= all.ToDictionary( x=>x.transform, x => x.name);
             var paths = new List<string>(all.Length);
             var transforms = new List<Transform>(all.Length);
             for (int i = 0; i < all.Length; i++)
             {
                 Transform current = all[i];
-                string path = CalculateTransformPath(current, root, canonicalRootBoneName);
+                string path = CalculateTransformPath(current, root, canonicalRootBoneName, allDic);
                 if (string.IsNullOrEmpty(path))
                 {
                     continue;
@@ -558,7 +533,7 @@ namespace KimodoBridge
             return true;
         }
 
-        public static string CalculateTransformPath(Transform target, Transform root, string canonicalRootBoneName)
+        public static string CalculateTransformPath(Transform target, Transform root, string canonicalRootBoneName, Dictionary<Transform,string> allDic)
         {
             if (target == null || root == null)
             {
@@ -574,7 +549,7 @@ namespace KimodoBridge
             Transform current = target;
             while (current != null && current != root)
             {
-                names.Add(current.name);
+                names.Add(allDic[current]);
                 current = current.parent;
             }
 

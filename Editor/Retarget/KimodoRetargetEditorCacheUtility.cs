@@ -15,9 +15,10 @@ namespace KimodoBridge.Editor
             {
                 return false;
             }
+            return clip.length > 0;
 
-            return AnimationUtility.GetCurveBindings(clip).Length > 0 ||
-                AnimationUtility.GetObjectReferenceCurveBindings(clip).Length > 0;
+            //return AnimationUtility.GetCurveBindings(clip).Length > 0 ||
+              //  AnimationUtility.GetObjectReferenceCurveBindings(clip).Length > 0;
         }
 
         internal static bool TryLoadStrictNamedCache(
