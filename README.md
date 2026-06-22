@@ -15,34 +15,32 @@
 
 
 # KimodoUnityBridge
-![](https://z3.ax1x.com/2021/09/29/44E1Gn.png) 
+![[](https://github.com/OneYoungMean/KimodoUnityBridge/blob/main/Manual/Kimodo%20Unity%20Bridge_01.png)
 
 **开箱即用，完全运行在本地的免费 AI 人形动画生成系统**. 
 * 基于 https://github.com/nv-tlabs/kimodo 
-* 基于 https://github.com/OneYoungMean/NvlabKimodoQuickServer(感谢[Aero-Ex](https://gist.github.com/Aero-Ex} 他的文档解决了我很大问题)
+* 基于 https://github.com/OneYoungMean/NvlabKimodoQuickServer(感谢[Aero-Ex](https://gist.github.com/Aero-Ex) 他的文档解决了我很大问题)
 * 兼容CPU/GPU模式运行（CUDA大约5秒，CPU大约1一分钟）兼容Windows/Linux平台.
 * 完全本地部署，你无需为任何内容付任何费用（也不必为此感到自责）！
 * 一款开源AI插件, 可以根据提示词生成你想要的人物角色动画！
-
-* ![](https://z3.ax1x.com/2021/09/29/45i1LF.gif)
-![](https://z3.ax1x.com/2021/09/29/44EJMV.gif)
-![](https://z3.ax1x.com/2021/09/29/44Kfn1.gif)  
-
-[更多演示视频](https://www.bilibili.com/video/BV1wP4y187xE/)  
 
 ## 特性
 
 - **即开即用的设计** 你无需担心该项目需要安装各种前置依赖/环境配置/设备限制等问题,作者已经完整测试过了，你也不用担心安装导致本地环境被破坏或者残留文件，所有的内容都是即开即用/即删即走的！
 
-- **完整的Kimodo特性** Kimodo仓库提供的提示词/Fullbody约束/2D平面约束等内容，我们都支持！不用担心你错过了任何内容！
+- **完整的Kimodo特性** Kimodo仓库提供的提示词/Fullbody约束/2D平面Constraint等内容，我们都支持！不用担心你错过了任何内容！**所有的动画都有完整的RootMotion** ！
 
-- **完整的Retarget支持** 产生的动画现在会根据你的角色自适应，如果你的角色是Generic的，那么它就只会给你骨骼动画，Humanoid的就会给你肌肉动画，无需担心各种动画Transition的问题！
+- **自适应Retarget动画** 产生的动画现在会根据你的角色自适应，如果你的角色是Generic的，那么它就只会给你骨骼动画，Humanoid的就会给你肌肉动画，无需担心各种动画Transition的问题！
 
 - **极其低的学习曲线!** 作者已经帮你们把门槛踏平了!无需任何复杂的添加与操作,只需要输入提示词，放置约束，点击generate 然后等待结果生成就可以了！
 
 - **runtime功能支持!** Kimodo Bridge Server现在支持 Runtime运行了！如果你的GPU足够的好（3080即以上）你就可以** 实时生成动画！**
 
 - **高度自由的Constraint功能!** 你可以从一段已有的动画当中创建pose constraint，也可以手动创建一个pose constraint并编辑它们。你甚至可以生成一些kimodo动画，然后从里面挑选合适的姿势，放下constraint marker 采样它们！
+
+- **贴近实际的新功能**  KimodoUnityBridge支持收尾帧约束/自动匹配上一个动画末尾等独特功能，你可以用这些功能很方便做出长动画/Loop动画/过渡动画等效果！
+
+- **Animator Tool路线** 我们的目标不仅仅是在timeline上使用，我们更希望能为用户提供Animator当中的各种功能，很快你就能看到一键优化状态机动画！一键优化过渡动画！甚至是基于Motion Matching的完整动画管线，我们都在考虑当中！
 
 - **简洁的操作界面!** 是的,我们已经将大部分能够优化的操作界面已经优化掉了,现在不会再有多余的选项出现,并且你可以直接在inspector看到统计的数据.  
 
@@ -68,6 +66,6 @@
 [省略掉的吐槽很辛苦的话]
 [省略掉的吐槽自己如何摆烂的话]
 [省略掉的小声BB的话]
-加油嗷~
+肴核既尽，不知东方之既白
 ```
 
