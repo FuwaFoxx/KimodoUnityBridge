@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using TimelineInject;
 using UnityEditor;
 using UnityEngine;
+using UnityEngine.Playables;
 using UnityEngine.Rendering;
 
 namespace KimodoBridge.Editor
@@ -52,7 +53,7 @@ namespace KimodoBridge.Editor
 
         private static readonly Dictionary<string, PoseCacheEntry> Entries = new Dictionary<string, PoseCacheEntry>(StringComparer.Ordinal);
 
-        private const float NonConstraintAlpha = 0.7f;
+        private const float NonConstraintAlpha = 1.0f;
         private const float HighlightAlpha = 1.0f;
         private static readonly Color NonConstraintColor = new Color(1f, 1f, 1f, NonConstraintAlpha);
         private static readonly Color HighlightColor = new Color(1f, 0f, 0f, HighlightAlpha);
@@ -61,6 +62,7 @@ namespace KimodoBridge.Editor
         {
             AssemblyReloadEvents.beforeAssemblyReload += DestroyAll;
             EditorApplication.playModeStateChanged += OnPlayModeStateChanged;
+            EditorApplication.update += CleanupStaleEntriesOnEditorUpdate;
             EditorApplication.quitting += DestroyAll;
         }
 
@@ -319,6 +321,62 @@ namespace KimodoBridge.Editor
             DestroyAll();
         }
 
+        private static void CleanupStaleEntriesOnEditorUpdate()
+        {
+            if (Entries.Count == 0)
+            {
+                return;
+            }
+
+            var keysToRemove = new List<string>();
+            foreach (KeyValuePair<string, PoseCacheEntry> kv in Entries)
+            {
+                PoseCacheEntry entry = kv.Value;
+                if (IsEntryStale(entry))
+                {
+                    keysToRemove.Add(kv.Key);
+                }
+            }
+
+            for (int i = 0; i < keysToRemove.Count; i++)
+            {
+                string key = keysToRemove[i];
+                if (!Entries.TryGetValue(key, out PoseCacheEntry entry))
+                {
+                    continue;
+                }
+
+                DestroyEntry(entry);
+                Entries.Remove(key);
+            }
+
+            if (keysToRemove.Count > 0)
+            {
+                SceneView.RepaintAll();
+            }
+        }
+
+        private static bool IsEntryStale(PoseCacheEntry entry)
+        {
+            if (entry == null)
+            {
+                return true;
+            }
+
+            if (entry.Root == null || entry.Root.gameObject == null)
+            {
+                return true;
+            }
+
+            PlayableAsset playableAsset = EditorUtility.InstanceIDToObject(entry.ClipId) as PlayableAsset;
+            if (playableAsset == null)
+            {
+                return true;
+            }
+
+            return KimodoTimelineClipResolver.FindTimelineClipForAsset(playableAsset) == null;
+        }
+
         private static bool TryGetOrCreateEntry(PoseCacheRenderContext context, string entryId, out PoseCacheEntry entry, out string error)
         {
             entry = null;
@@ -569,17 +627,14 @@ namespace KimodoBridge.Editor
                 mat.SetColor("_Color", c);
             }
 
-            bool configuredTransparentMode = false;
             if (mat.HasProperty("_Surface"))
             {
-                mat.SetFloat("_Surface", 1f);
-                configuredTransparentMode = true;
+                mat.SetFloat("_Surface", 0f);
             }
 
             if (mat.HasProperty("_Mode"))
             {
-                mat.SetFloat("_Mode", 3f);
-                configuredTransparentMode = true;
+                mat.SetFloat("_Mode", 0f);
             }
 
             if (mat.HasProperty("_AlphaClip"))
@@ -589,30 +644,23 @@ namespace KimodoBridge.Editor
 
             if (mat.HasProperty("_SrcBlend"))
             {
-                mat.SetInt("_SrcBlend", (int)BlendMode.SrcAlpha);
+                mat.SetInt("_SrcBlend", (int)BlendMode.One);
             }
 
             if (mat.HasProperty("_DstBlend"))
             {
-                mat.SetInt("_DstBlend", (int)BlendMode.OneMinusSrcAlpha);
+                mat.SetInt("_DstBlend", (int)BlendMode.Zero);
             }
 
             if (mat.HasProperty("_ZWrite"))
             {
-                mat.SetInt("_ZWrite", 0);
+                mat.SetInt("_ZWrite", 1);
             }
 
-            if (configuredTransparentMode)
-            {
-                mat.SetOverrideTag("RenderType", "Transparent");
-                mat.renderQueue = (int)RenderQueue.Transparent;
-                mat.EnableKeyword("_SURFACE_TYPE_TRANSPARENT");
-                mat.EnableKeyword("_ALPHABLEND_ON");
-            }
-            else
-            {
-                mat.renderQueue = -1;
-            }
+            mat.SetOverrideTag("RenderType", "Opaque");
+            mat.renderQueue = (int)RenderQueue.Geometry;
+            mat.DisableKeyword("_SURFACE_TYPE_TRANSPARENT");
+            mat.DisableKeyword("_ALPHABLEND_ON");
         }
 
     }

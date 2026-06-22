@@ -107,10 +107,14 @@ namespace KimodoBridge.Editor
                 return false;
             }
 
+            double sourceSampleTime = KimodoMarkerSamplingUtility.ResolveSourceClipSampleTime(
+                context.SourceClip,
+                timelineTime);
+
             if (!KimodoRetargetToolsEditor.TrySampleMarkerForClip(
                     context.CurrentClip,
                     markerType,
-                    timelineTime,
+                    sourceSampleTime,
                     context.SourceAvatar,
                     null,
                     context.Animator,

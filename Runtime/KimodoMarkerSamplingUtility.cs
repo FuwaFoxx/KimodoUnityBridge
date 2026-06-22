@@ -178,6 +178,23 @@ namespace KimodoBridge
             return localSampleTime;
         }
 
+        public static double ResolveSourceClipSampleTime(TimelineClip timelineClip, double globalTime)
+        {
+            if (timelineClip == null)
+            {
+                return Math.Max(0.0, globalTime);
+            }
+
+            double localSampleTime = ClampLocalSampleTime(timelineClip, globalTime);
+            double sourceSampleTime = timelineClip.clipIn + (localSampleTime * timelineClip.timeScale);
+            if (sourceSampleTime < 0.0)
+            {
+                return 0.0;
+            }
+
+            return sourceSampleTime;
+        }
+
         internal static bool TrySampleMarkerFromProfileSkeletonRaw(
             Animator animator,
             Transform skeletonRoot,

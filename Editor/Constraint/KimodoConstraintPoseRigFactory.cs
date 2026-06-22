@@ -228,7 +228,11 @@ namespace KimodoBridge.Editor
 
         private static Material CreatePreviewMaterial()
         {
-            Shader shader = Shader.Find("Universal Render Pipeline/Lit");
+            Shader shader = Shader.Find("HDRP/Lit");
+            if (shader == null)
+            {
+                shader = Shader.Find("Universal Render Pipeline/Lit");
+            }
             if (shader == null)
             {
                 shader = Shader.Find("Standard");
@@ -266,15 +270,43 @@ namespace KimodoBridge.Editor
                 mat.SetColor("_Color", c);
             }
 
-            bool configuredTransparentMode = false;
             if (mat.HasProperty("_Surface"))
             {
-                mat.SetFloat("_Surface", 1f);
-                configuredTransparentMode = true;
+                mat.SetFloat("_Surface", 0f);
             }
+
+            if (mat.HasProperty("_Mode"))
+            {
+                mat.SetFloat("_Mode", 0f);
+            }
+
+            if (mat.HasProperty("_AlphaClip"))
+            {
+                mat.SetFloat("_AlphaClip", 0f);
+            }
+
+            if (mat.HasProperty("_SrcBlend"))
+            {
+                mat.SetInt("_SrcBlend", (int)BlendMode.One);
+            }
+
+            if (mat.HasProperty("_DstBlend"))
+            {
+                mat.SetInt("_DstBlend", (int)BlendMode.Zero);
+            }
+
+            if (mat.HasProperty("_ZWrite"))
+            {
+                mat.SetInt("_ZWrite", 1);
+            }
+
+            mat.SetOverrideTag("RenderType", "Opaque");
+            mat.renderQueue = (int)RenderQueue.Geometry;
+            mat.DisableKeyword("_SURFACE_TYPE_TRANSPARENT");
+            mat.DisableKeyword("_ALPHABLEND_ON");
         }
 
-        private const float NonConstraintAlpha = 0.7f;
+        private const float NonConstraintAlpha = 1.0f;
         private static readonly Color NonConstraintColor = new Color(1f, 1f, 1f, NonConstraintAlpha);
     }
 }

@@ -453,11 +453,11 @@ namespace KimodoBridge.Editor
             }
 
             double sampleTime = marker.time;
-            double localSampleTime = KimodoMarkerSamplingUtility.ClampLocalSampleTime(clipRange, sampleTime);
+            double sourceSampleTime = KimodoMarkerSamplingUtility.ResolveSourceClipSampleTime(clipRange, sampleTime);
             if (!KimodoRetargetToolsEditor.TrySampleMarkerForClip(
                     sourceClip,
                     marker.ConstraintType,
-                    localSampleTime,
+                    sourceSampleTime,
                     sourceAvatar,
                     null,
                     animator,

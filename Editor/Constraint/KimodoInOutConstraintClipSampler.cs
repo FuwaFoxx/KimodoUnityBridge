@@ -1,5 +1,6 @@
 using TimelineInject;
 using UnityEngine;
+using UnityEngine.Timeline;
 
 namespace KimodoBridge.Editor
 {
@@ -71,6 +72,7 @@ namespace KimodoBridge.Editor
             double endConstraintTime = KimodoInOutConstraintTimingUtility.ResolveConstraintEndSampleTimeSeconds(generatedFrameCount);
             if (!TrySampleBoundaryPose(
                     request.CurrentClip,
+                    request.CurrentTimelineClip,
                     request.SourceAvatar,
                     request.ModelName,
                     0.0,
@@ -83,6 +85,7 @@ namespace KimodoBridge.Editor
 
             if (!TrySampleBoundaryPose(
                     request.CurrentClip,
+                    request.CurrentTimelineClip,
                     request.SourceAvatar,
                     request.ModelName,
                     1.0,
@@ -122,6 +125,7 @@ namespace KimodoBridge.Editor
             {
                 if (!TrySampleBoundaryPose(
                         request.PreviousClip,
+                        request.PreviousTimelineClip,
                         request.SourceAvatar,
                         request.ModelName,
                         1.0,
@@ -139,6 +143,7 @@ namespace KimodoBridge.Editor
             {
                 if (!TrySampleBoundaryPose(
                         request.NextClip,
+                        request.NextTimelineClip,
                         request.SourceAvatar,
                         request.ModelName,
                         0.0,
@@ -162,6 +167,7 @@ namespace KimodoBridge.Editor
 
         private static bool TrySampleBoundaryPose(
             AnimationClip sourceClip,
+            TimelineClip timelineClip,
             Avatar sourceAvatar,
             string modelName,
             double normalizedTime,
@@ -178,7 +184,10 @@ namespace KimodoBridge.Editor
                 return false;
             }
 
-            double clipSampleTime = KimodoInOutConstraintTimingUtility.ResolveClipSampleTime(sourceClip, normalizedTime);
+            double clipSampleTime = KimodoInOutConstraintTimingUtility.ResolveTimelineClipSampleTime(
+                timelineClip,
+                sourceClip,
+                normalizedTime);
             if (!KimodoRetargetToolsEditor.TrySampleMarkerForClip(
                     sourceClip,
                     FullBodyConstraintType,
