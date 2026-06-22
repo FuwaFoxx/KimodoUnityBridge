@@ -1,3 +1,4 @@
+using TimelineInject;
 using UnityEditor;
 using UnityEngine;
 
@@ -90,6 +91,7 @@ namespace KimodoBridge.Editor
                 if (KimodoConstraintMarkerEditorUtility.TryBuildRenderContextForMarker(marker, out PoseCacheRenderContext context, out _))
                 {
                     KimodoConstraintPoseCache.SetGroupState(context, visible: true, selectable: true);
+                    KimodoConstraintPoseCache.ClearTransformChanges(context);
                 }
             }
             EditorApplication.update += OnEditorUpdate;
@@ -148,6 +150,39 @@ namespace KimodoBridge.Editor
             if (!marker.useOverride)
             {
                 lastError = "override is disabled.";
+            }
+            else if (KimodoConstraintMarkerEditorUtility.TryBuildRenderContextForMarker(marker, out PoseCacheRenderContext context, out _))
+            {
+                if (KimodoConstraintPoseCache.HasAnyTransformChanges(context))
+                {
+                    if (!KimodoConstraintPoseCache.TryBuildSampleFromContext(
+                            context,
+                            marker.ConstraintType,
+                            marker.time,
+                            out KimodoMarkerSampleResult sample,
+                            out string sampleError))
+                    {
+                        lastError = string.IsNullOrWhiteSpace(sampleError) ? "sample writeback failed." : sampleError;
+                    }
+                    else if (!KimodoMarkerSamplingEditorUtility.TryWriteConstraintMarkerSample(
+                                 marker,
+                                 sample,
+                                 keepOverrideEnabled: true,
+                                 out string writeError))
+                    {
+                        lastError = string.IsNullOrWhiteSpace(writeError) ? "marker writeback failed." : writeError;
+                    }
+                    else if (!KimodoConstraintMarkerEditorUtility.TryRenderMarkerToPoseCache(marker, out string poseError))
+                    {
+                        lastError = string.IsNullOrWhiteSpace(poseError) ? "pose cache update failed." : poseError;
+                    }
+                    else
+                    {
+                        lastError = string.Empty;
+                    }
+
+                    KimodoConstraintPoseCache.ClearTransformChanges(context);
+                }
             }
 
             Repaint();

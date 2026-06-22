@@ -373,6 +373,12 @@ namespace KimodoBridge.Editor
                 return false;
             }
 
+            // Non-clip state motions can still generate; they just cannot contribute sampled constraints.
+            if (sourceClip == null)
+            {
+                return true;
+            }
+
             string modelName = KimodoPlayableClip.NormalizeBridgeModelName(bridgeModelName);
             AnimationClip previousClip = null;
             AnimationClip currentClip = sourceClip;
@@ -596,11 +602,6 @@ namespace KimodoBridge.Editor
             if (selectedState != null)
             {
                 sourceClip = selectedState.motion as AnimationClip;
-                if (sourceClip == null)
-                {
-                    error = "State motion is not an AnimationClip.";
-                    return false;
-                }
                 return true;
             }
 

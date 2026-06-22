@@ -47,6 +47,39 @@ namespace KimodoBridge
         private const string KimodoFolderName = "NvlabKimodoQuickServer~";
         private const float MinGenerationDurationSeconds = 1f;
         private const float MaxGenerationDurationSeconds = 10f;
+        private static readonly string[] RandomMotionPrompts =
+        {
+            "A woman walks and says hello.",
+            "A person waves with a friendly smile.",
+            "A person walks forward at an easy pace.",
+            "A woman turns around and greets someone.",
+            "A person jogs lightly in place.",
+            "A person takes a few steps and looks around.",
+            "A woman walks forward and raises one hand.",
+            "A person steps sideways and keeps balance.",
+            "A person walks in a small circle.",
+            "A woman pauses and gestures while talking.",
+            "A person walks forward and nods politely.",
+            "A person sways to a gentle rhythm.",
+            "A woman takes small quick steps.",
+            "A person marches in place with relaxed arms.",
+            "A person pivots and points ahead.",
+            "A woman waves both hands in excitement.",
+            "A person steps back and then forward again.",
+            "A person stretches arms and shifts weight.",
+            "A woman walks confidently and looks ahead.",
+            "A person makes a cheerful hand gesture.",
+            "A person takes careful steps to the side.",
+            "A woman walks and lightly swings her arms.",
+            "A person turns the torso and looks left and right.",
+            "A person bounces gently with upbeat energy.",
+            "A woman walks up and gives a small salute.",
+            "A person gestures as if introducing something.",
+            "A person takes a step forward and waves.",
+            "A woman moves with calm rhythmic footwork.",
+            "A person rotates in place with relaxed posture.",
+            "A person walks and briefly reaches out a hand."
+        };
 
         private KimodoRuntimeGenerationService generationService;
         private CancellationTokenSource lifetimeCts;
@@ -588,11 +621,17 @@ namespace KimodoBridge
             Rect fieldRect = new Rect(
                 panelRect.x + 12f,
                 panelRect.y + 14f,
-                Mathf.Max(0f, panelRect.width - buttonWidth - 36f),
+                Mathf.Max(0f, panelRect.width - buttonWidth * 2f - 44f),
                 fieldHeight);
 
             Rect resetButtonRect = new Rect(
                 panelRect.xMax - buttonWidth - 12f,
+                fieldRect.y,
+                buttonWidth,
+                fieldHeight);
+
+            Rect randomButtonRect = new Rect(
+                resetButtonRect.x - buttonWidth - 8f,
                 fieldRect.y,
                 buttonWidth,
                 fieldHeight);
@@ -618,6 +657,11 @@ namespace KimodoBridge
             GUI.SetNextControlName("KimodoPromptInput");
             promptDraft = GUI.TextField(fieldRect, promptDraft ?? string.Empty);
 
+            if (GUI.Button(randomButtonRect, "Random"))
+            {
+                ApplyRandomPrompt();
+            }
+
             float currentDurationSeconds = GetGenerationDurationSeconds();
             GUI.Label(sliderLabelRect, "Segment Length");
             float nextDurationSeconds = GUI.HorizontalSlider(
@@ -635,6 +679,17 @@ namespace KimodoBridge
             {
                 ResetDemo();
             }
+        }
+
+        private void ApplyRandomPrompt()
+        {
+            if (RandomMotionPrompts == null || RandomMotionPrompts.Length == 0)
+            {
+                promptDraft = ResolveInitialPrompt();
+                return;
+            }
+
+            promptDraft = RandomMotionPrompts[UnityEngine.Random.Range(0, RandomMotionPrompts.Length)];
         }
 
         private void DrawStatusPanel(float margin)
