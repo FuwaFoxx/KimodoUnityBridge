@@ -3,7 +3,6 @@ using System.Collections.Generic;
 using TimelineInject;
 using UnityEditor;
 using UnityEngine;
-using UnityEngine.Playables;
 using UnityEngine.Rendering;
 
 namespace KimodoBridge.Editor
@@ -62,7 +61,6 @@ namespace KimodoBridge.Editor
         {
             AssemblyReloadEvents.beforeAssemblyReload += DestroyAll;
             EditorApplication.playModeStateChanged += OnPlayModeStateChanged;
-            EditorApplication.update += CleanupStaleEntriesOnEditorUpdate;
             EditorApplication.quitting += DestroyAll;
         }
 
@@ -173,6 +171,84 @@ namespace KimodoBridge.Editor
             }
 
             SceneView.RepaintAll();
+        }
+
+        internal static bool HasAnyTransformChanges(PoseCacheRenderContext context)
+        {
+            if (!TryGetFirstEntryForContext(context, out PoseCacheEntry entry) || entry?.Root == null)
+            {
+                return false;
+            }
+
+            Transform[] transforms = entry.Root.GetComponentsInChildren<Transform>(true);
+            for (int i = 0; i < transforms.Length; i++)
+            {
+                Transform t = transforms[i];
+                if (t != null && t.hasChanged)
+                {
+                    return true;
+                }
+            }
+
+            return false;
+        }
+
+        internal static void ClearTransformChanges(PoseCacheRenderContext context)
+        {
+            if (!TryGetFirstEntryForContext(context, out PoseCacheEntry entry) || entry?.Root == null)
+            {
+                return;
+            }
+
+            Transform[] transforms = entry.Root.GetComponentsInChildren<Transform>(true);
+            for (int i = 0; i < transforms.Length; i++)
+            {
+                Transform t = transforms[i];
+                if (t != null)
+                {
+                    t.hasChanged = false;
+                }
+            }
+        }
+
+        internal static bool TryBuildSampleFromContext(
+            PoseCacheRenderContext context,
+            string markerType,
+            double sampleTime,
+            out KimodoMarkerSampleResult sample,
+            out string error)
+        {
+            sample = null;
+            error = string.Empty;
+
+            if (!TryGetFirstEntryForContext(context, out PoseCacheEntry entry) || entry?.Root == null)
+            {
+                error = "pose cache context has no active entry.";
+                return false;
+            }
+
+            if (!KimodoProfileSkeletonUtility.TryResolveProfileSkeleton(
+                    context.ModelName,
+                    entry.Root,
+                    out string[] jointNames,
+                    out int[] parentIndices,
+                    out Transform[] jointTransforms,
+                    out error))
+            {
+                return false;
+            }
+
+            return KimodoMarkerSamplingUtility.TrySampleMarkerFromProfileSkeletonRaw(
+                animator: null,
+                skeletonRoot: entry.Root,
+                modelName: context.ModelName,
+                globalTime: sampleTime,
+                markerType: markerType,
+                jointNamesOverride: jointNames,
+                parentIndicesOverride: parentIndices,
+                jointsOverride: jointTransforms,
+                out sample,
+                out error);
         }
 
         internal static void DestroyEntriesForItemId(string entryId, PoseCacheRenderContext? keepContext = null)
@@ -321,62 +397,6 @@ namespace KimodoBridge.Editor
             DestroyAll();
         }
 
-        private static void CleanupStaleEntriesOnEditorUpdate()
-        {
-            if (Entries.Count == 0)
-            {
-                return;
-            }
-
-            var keysToRemove = new List<string>();
-            foreach (KeyValuePair<string, PoseCacheEntry> kv in Entries)
-            {
-                PoseCacheEntry entry = kv.Value;
-                if (IsEntryStale(entry))
-                {
-                    keysToRemove.Add(kv.Key);
-                }
-            }
-
-            for (int i = 0; i < keysToRemove.Count; i++)
-            {
-                string key = keysToRemove[i];
-                if (!Entries.TryGetValue(key, out PoseCacheEntry entry))
-                {
-                    continue;
-                }
-
-                DestroyEntry(entry);
-                Entries.Remove(key);
-            }
-
-            if (keysToRemove.Count > 0)
-            {
-                SceneView.RepaintAll();
-            }
-        }
-
-        private static bool IsEntryStale(PoseCacheEntry entry)
-        {
-            if (entry == null)
-            {
-                return true;
-            }
-
-            if (entry.Root == null || entry.Root.gameObject == null)
-            {
-                return true;
-            }
-
-            PlayableAsset playableAsset = EditorUtility.InstanceIDToObject(entry.ClipId) as PlayableAsset;
-            if (playableAsset == null)
-            {
-                return true;
-            }
-
-            return KimodoTimelineClipResolver.FindTimelineClipForAsset(playableAsset) == null;
-        }
-
         private static bool TryGetOrCreateEntry(PoseCacheRenderContext context, string entryId, out PoseCacheEntry entry, out string error)
         {
             entry = null;
@@ -419,6 +439,27 @@ namespace KimodoBridge.Editor
             Entries[key] = entry;
             SetEntrySelectable(entry, false);
             return true;
+        }
+
+        private static bool TryGetFirstEntryForContext(PoseCacheRenderContext context, out PoseCacheEntry entry)
+        {
+            entry = null;
+            string contextKey = context.ContextKey;
+            foreach (KeyValuePair<string, PoseCacheEntry> kv in Entries)
+            {
+                if (!kv.Key.StartsWith(contextKey + ":", StringComparison.Ordinal))
+                {
+                    continue;
+                }
+
+                if (kv.Value != null && kv.Value.Root != null)
+                {
+                    entry = kv.Value;
+                    return true;
+                }
+            }
+
+            return false;
         }
 
         private static void DestroyEntry(PoseCacheEntry entry)
