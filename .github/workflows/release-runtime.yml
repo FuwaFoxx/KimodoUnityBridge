@@ -115,6 +115,8 @@ jobs:
             "exists=false" >> $env:GITHUB_OUTPUT
           }
 
+          $global:LASTEXITCODE = 0
+
       - name: Create GitHub Release
         if: steps.release_state.outputs.exists != 'true'
         shell: pwsh
