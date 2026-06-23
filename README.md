@@ -28,29 +28,29 @@
 
 ## 安装
 1. 通过Unity Package Manager 安装:
-   a. 复制https://github.com/OneYoungMean/KimodoUnityBridge.git  
-   b. 打开项目中的packagemanager，点击add package from git url...并填入信息  
-   c. 等待完成，如果一切正常，你会在菜单栏看到kimodo的菜单.  
-   <img width="1061" height="526" alt="Unity_uAULwLfP7W" src="https://github.com/user-attachments/assets/5f18b33e-4a21-42cf-8acd-57c0e548d44d" />
-2. 通过安装包安装：
-   a. 下载https://github.com/OneYoungMean/KimodoUnityBridge/releases/download/v1.1.10/KimodoUnityBridge-v1.1.10.zip （如果有更新的版本先下载更新的，我还在研究怎么打latest version）
-   b. 解压到项目/Packages目录下面
-   c. 切换回unity等待完成，如果一切正常，你会在菜单栏看到kimodo的菜单.
-3. 下载FullDemo
-   a.下载https://github.com/OneYoungMean/KimodoUnityBridge_FullDemo 项目(Download Zip就可以）
-   b.运行项目查看效果
-   c.项目组件放在KimodoUnityBridge_FullDemo/Packages目录下
+   a. 复制https://github.com/OneYoungMean/KimodoUnityBridge.git   
+   b. 打开项目中的packagemanager，点击add package from git url...并填入  
+   c. 等待完成，如果一切正常，你会在菜单栏看到kimodo的菜单.   
+   <img width="1061" height="526" alt="Unity_uAULwLfP7W" src="https://github.com/user-attachments/assets/5f18b33e-4a21-42cf-8acd-57c0e548d44d" />  
+2. 通过安装包安装：  
+   a. 下载https://github.com/OneYoungMean/KimodoUnityBridge/releases/download/v1.1.10/KimodoUnityBridge-v1.1.10.zip （如果有更新的版本先下载更新的，我还在研究怎么打latest version）  
+   b. 解压到项目/Packages目录下面  
+   c. 切换回unity等待完成，如果一切正常，你会在菜单栏看到kimodo的菜单.  
+3. 下载FullDemo  
+   a.下载https://github.com/OneYoungMean/KimodoUnityBridge_FullDemo 项目(Download Zip就可以）  
+   b.运行项目查看效果  
+   c.项目组件放在KimodoUnityBridge_FullDemo/Packages目录下  
    
-## 快速开始
-**首次运行生成动画，脚本会自己下载模型+配置环境（大概需要10G），请耐心等待，如遇报错（一般是网络波动造成的),请重新生成即可解决**
-1. 点击Packge Manager 转到Kimdo Unity Animation Tool界面
-2. 点击sample一栏，并点击箭头指向的import按钮
-3. 在Project当中找到刚导入的lightSample场景并打开
-4. 在场景中找到Timeline游戏对象，打开上面挂载的PlayableDirector脚本当中的timeline资产
-5. 在timeline 窗口当中选择一个timeline clip
-6. 在inspector面板中点击生成(建议勾选一下random，不然动画会和原来一样）
-7. 运行查看效果
-<img width="3840" height="2064" alt="微信图片_20260623111822_83_24" src="https://github.com/user-attachments/assets/3d01af83-712c-45a9-99f6-8f33fa8dba6e" />
+## 快速开始  
+**首次运行生成动画，脚本会自己下载模型+配置环境（大概需要10G），请耐心等待，如遇报错（一般是网络波动造成的),请重新生成即可解决**  
+1. 点击Packge Manager 转到Kimdo Unity Animation Tool界面  
+2. 点击sample一栏，并点击箭头指向的import按钮  
+3. 在Project当中找到刚导入的lightSample场景并打开  
+4. 在场景中找到Timeline游戏对象，打开上面挂载的PlayableDirector脚本当中的timeline资产  
+5. 在timeline 窗口当中选择一个timeline clip  
+6. 在inspector面板中点击生成(建议勾选一下random，不然动画会和原来一样）  
+7. 运行查看效果  
+<img width="3840" height="2064" alt="微信图片_20260623111822_83_24" src="https://github.com/user-attachments/assets/3d01af83-712c-45a9-99f6-8f33fa8dba6e" />  
 ***
 
 ## 要求
