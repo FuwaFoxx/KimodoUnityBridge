@@ -21,7 +21,7 @@
 
 **开箱即用，完全运行在本地的免费 AI 人形动画生成系统**. 
 * 基于 https://github.com/nv-tlabs/kimodo 
-* 基于 https://github.com/OneYoungMean/NvlabKimodoQuickServer(感谢[Aero-Ex](https://gist.github.com/Aero-Ex) 他的文档解决了我很大问题)
+* 基于 https://github.com/OneYoungMean/NvlabKimodoQuickServer (感谢[Aero-Ex](https://gist.github.com/Aero-Ex) 他的文档解决了我很大问题)
 * CPU/GPU模式自适应（CUDA大约5秒，CPU大约1一分钟）兼容Windows/Linux平台.
 * 完全本地部署，你无需为任何内容付任何费用（也不必为此感到自责）！
 * 一款开源AI插件, 可以根据提示词生成你想要的人物角色动画！
