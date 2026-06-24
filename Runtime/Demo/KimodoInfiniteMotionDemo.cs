@@ -105,6 +105,7 @@ namespace KimodoBridge
         private int currentCharacterStateIndex = -1;
         private Coroutine characterSwitchCoroutine;
         private bool preserveNextConstraintPoseOnStart;
+        private int generationRequestVersion;
 
         private sealed class TransformSnapshot
         {
@@ -402,6 +403,7 @@ namespace KimodoBridge
             }
 
             generationInFlight = true;
+            int requestVersion = generationRequestVersion;
             try
             {
                 string prompt = ResolvePrompt();
@@ -461,6 +463,16 @@ namespace KimodoBridge
                         allowPartialJoints))
                 {
                     throw new InvalidOperationException(tailError);
+                }
+
+                if (requestVersion != generationRequestVersion || token.IsCancellationRequested)
+                {
+                    if (verboseLogging)
+                    {
+                        Debug.Log($"[KimodoInfiniteMotionDemo] Discard stale segment {segmentIndex} generation result.");
+                    }
+
+                    return;
                 }
 
                 KimodoMarkerSampleResult constraintTailPose = effectiveTailPose.Clone();
@@ -597,32 +609,27 @@ namespace KimodoBridge
 
         public async Task ResetDemoAsync()
         {
-            bool wasActive = running || startRequested || generationService != null;
-            if (wasActive)
-            {
-                await StopDemoAsync();
-            }
-
-            RestoreInitialTransformSnapshots();
-            KimodoMarkerSampleResult defaultPose = KimodoMarkerSamplingUtility.CreateDefaultMarkerSample(
-                modelName,
-                profileSkeletonRoot,
-                FullBodyConstraintType);
+            promptDraft = ResolveInitialPrompt();
             nextConstraintPose = null;
             preserveNextConstraintPoseOnStart = false;
+            generationRequestVersion++;
+            lastGenerationWaitStatusSegment = -1;
+            motionPlayer.ClearQueue();
 
-            if (!ApplyMarkerSampleImmediately(defaultPose, out string applyError) && verboseLogging)
+            if (!running || generationService == null || lifetimeCts == null || lifetimeCts.IsCancellationRequested)
             {
-                Debug.LogWarning($"[KimodoInfiniteMotionDemo] Apply default pose failed: {applyError}");
+                UpdateStatus("Prompt reset.");
+                return;
             }
 
-            InitializeCharacterConstraintStates();
-            UpdateStatus("Reset to initial transforms.");
-
-            if (wasActive)
+            if (generationInFlight)
             {
-                await StartDemoAsync();
+                UpdateStatus("Prompt reset. Waiting for current generation to finish.");
+                return;
             }
+
+            UpdateStatus("Prompt reset. Generating fresh segment.");
+            await GenerateNextSegmentAsync(lifetimeCts.Token);
         }
 
         private void DrawPromptBar()
@@ -872,6 +879,17 @@ namespace KimodoBridge
             {
                 RestoreSnapshot(initialHumanoidSnapshots[i]);
             }
+        }
+
+        private void CancelCharacterSwitch()
+        {
+            if (characterSwitchCoroutine == null)
+            {
+                return;
+            }
+
+            StopCoroutine(characterSwitchCoroutine);
+            characterSwitchCoroutine = null;
         }
 
         private void InitializeCharacterConstraintStates()
