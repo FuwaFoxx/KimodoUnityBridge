@@ -60,8 +60,11 @@ namespace KimodoBridge.Editor
                 return null;
             }
 
-            PlayableDirector director = TimelineEditor.inspectedDirector;
-            if (director == null)
+            if (!KimodoTimelineInOutConstraintContextUtility.TryResolveDirector(
+                    sourceClip,
+                    track,
+                    out PlayableDirector director,
+                    out _))
             {
                 return null;
             }

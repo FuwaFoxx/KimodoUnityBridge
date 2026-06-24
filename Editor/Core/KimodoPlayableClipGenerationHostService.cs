@@ -166,15 +166,20 @@ namespace KimodoBridge.Editor
                 return;
             }
 
-            if (TimelineEditor.inspectedDirector == null)
-            {
-                Debug.LogWarning($"[Kimodo][TimelineOffset] skipped for '{playableClip.name}': Timeline inspected director is null.");
-                return;
-            }
-
             if (timelineClip == null)
             {
                 Debug.LogWarning($"[Kimodo][TimelineOffset] skipped for '{playableClip.name}': timeline clip not found.");
+                return;
+            }
+
+            TrackAsset track = timelineClip.GetParentTrack();
+            if (!KimodoTimelineInOutConstraintContextUtility.TryResolveDirector(
+                    timelineClip,
+                    track,
+                    out _,
+                    out string directorError))
+            {
+                Debug.LogWarning($"[Kimodo][TimelineOffset] skipped for '{playableClip.name}': {directorError}");
                 return;
             }
 

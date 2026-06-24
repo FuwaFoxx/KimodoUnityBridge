@@ -19,6 +19,53 @@ namespace KimodoBridge.Editor
             constraintsJson = string.Empty;
             error = string.Empty;
 
+            if (mode == KimodoInOutConstraintMode.None)
+            {
+                if (!KimodoTimelineConstraintMarkerSampler.TryBuildOverrideMarkerSamplesWithoutTimelineSampling(
+                        sourceClip,
+                        out List<KimodoMarkerSampleResult> overrideSamples,
+                        out bool requiresTimelineSampling,
+                        out error))
+                {
+                    return false;
+                }
+
+                if (!requiresTimelineSampling)
+                {
+                    if (overrideSamples.Count == 0)
+                    {
+                        return true;
+                    }
+
+                    var overrideOnlyRequest = new KimodoInOutConstraintRequest
+                    {
+                        Mode = mode,
+                        GenerationFrames = KimodoInOutConstraintTimingUtility.ClampFrameCount(generationFrames),
+                        ExportClipStartSeconds = sourceClip.start,
+                        ExportClipDurationSeconds = sourceClip.duration,
+                        NormalizeConstraintOrigin = false,
+                        ManualSamples = overrideSamples
+                    };
+
+                    if (!KimodoInOutConstraintComposer.TryBuild(
+                            overrideOnlyRequest,
+                            out KimodoInOutConstraintResult overrideOnlyResult,
+                            out string overrideOnlyWarning,
+                            out error))
+                    {
+                        return false;
+                    }
+
+                    if (!string.IsNullOrWhiteSpace(overrideOnlyWarning))
+                    {
+                        Debug.LogWarning($"[Kimodo][InOutConstraint] {overrideOnlyWarning}");
+                    }
+
+                    constraintsJson = overrideOnlyResult != null ? overrideOnlyResult.ConstraintsJson ?? string.Empty : string.Empty;
+                    return true;
+                }
+            }
+
             if (!KimodoTimelineInOutConstraintContextUtility.TryResolve(
                     sourceClip,
                     out KimodoTimelineInOutConstraintContext context,
