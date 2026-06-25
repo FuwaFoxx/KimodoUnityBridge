@@ -31,8 +31,8 @@ namespace KimodoBridge.Editor
             int clampedSteps = Mathf.Clamp(steps, 1, 1000);
             string constraintsJson = BuildBoundaryFullBodyConstraintsJson(startPose, endPose, clampedFrames);
 
-            string runtimeRoot = KimodoBridgeController.ResolveRuntimeRootOrThrow();
-            string launcherPath = KimodoBridgeController.ResolveStartScriptOrThrow(runtimeRoot);
+            string runtimeRoot = KimodoBridgePipeline.ResolveRuntimeRootOrThrow();
+            string launcherPath = KimodoBridgePipeline.ResolveStartScriptOrThrow(runtimeRoot);
 
             string resolvedModelName = string.IsNullOrWhiteSpace(modelName)
                 ? "Kimodo-SOMA-RP-v1"
@@ -56,29 +56,25 @@ namespace KimodoBridge.Editor
                 constraints_json = constraintsJson
             };
 
-            var pipelineRequest = new KimodoGeneratePipelineRequest
+            var pipelineRequest = new KimodoBridgeControllerRequest
             {
-                BackendType = KimodoBackendType.Bridge,
                 RuntimeSettings = KimodoEditorRuntimeGeneratePipeline.BuildRuntimeSettings(
                     runtimeRoot,
                     launcherPath,
                     resolvedModelName,
                     highVram ? KimodoBridgeVramMode.High : KimodoBridgeVramMode.Low,
                     modelsRoot,
-                    settings != null ? settings.GenerationTimeoutSeconds : 120f,
-                    comfyHost: "127.0.0.1",
-                    comfyPort: 8188),
+                    settings != null ? settings.GenerationTimeoutSeconds : 120f),
                 GenerationRequest = request
             };
 
-            IKimodoGeneratePipeline pipeline = new KimodoGeneratePipeline();
-            KimodoGeneratePipelineResult result = await pipeline.ExecuteAsync(
+            IKimodoGeneratePipeline pipeline = new KimodoBridgeController();
+            KimodoBridgeControllerResult result = await pipeline.ExecuteAsync(
                 pipelineRequest,
                 (_, message) => progress?.Invoke(message),
                 token);
             return new KimodoGenerationResultDto
             {
-                backendType = result.BackendType,
                 rawStatus = result.RawStatus,
                 message = result.Message,
                 motionJsonCompact = result.MotionJsonCompact

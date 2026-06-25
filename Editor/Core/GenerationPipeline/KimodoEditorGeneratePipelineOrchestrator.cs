@@ -26,9 +26,9 @@ namespace KimodoBridge.Editor
 
             string modelName = string.IsNullOrWhiteSpace(request.ModelName) ? DefaultModelName : request.ModelName.Trim();
             ThrowIfCanceled(request);
-            request.Progress?.Invoke(KimodoGeneratePipelineStage.InvokeBackend, "Generating motion...");
+            request.Progress?.Invoke(KimodoBridgeControllerStage.InvokeBackend, "Generating motion...");
 
-            KimodoGeneratePipelineResult runtimeResult = await ExecuteRuntimePipelineAsync(request, prompt, modelName);
+            KimodoBridgeControllerResult runtimeResult = await ExecuteRuntimePipelineAsync(request, prompt, modelName);
             string motionJson = runtimeResult.MotionJsonCompact;
             if (string.IsNullOrWhiteSpace(motionJson))
             {
@@ -43,7 +43,7 @@ namespace KimodoBridge.Editor
             }
 
             ThrowIfCanceled(request);
-            request.Progress?.Invoke(KimodoGeneratePipelineStage.Bake, "Baking animation...");
+            request.Progress?.Invoke(KimodoBridgeControllerStage.Bake, "Baking animation...");
             if (!KimodoRetargetToolsEditor.BakeIntoClip(
                     request.TargetClip,
                     motionJson,
@@ -68,7 +68,7 @@ namespace KimodoBridge.Editor
             {
                 TryFilterGeneratedBoneClip(request.TargetClip, request.TargetRetargetAvatar, request.CurveFilterOptions);
                 KimodoEditorClipWritebackService.FlushWritebackAssets();
-                request.Progress?.Invoke(KimodoGeneratePipelineStage.Retarget, "Skipping retarget: binding hierarchy already matches clip bindings.");
+                request.Progress?.Invoke(KimodoBridgeControllerStage.Retarget, "Skipping retarget: binding hierarchy already matches clip bindings.");
                 return Complete(request, prompt, motionJson, request.TargetClip, rawBoneClip);
             }
 
@@ -78,7 +78,7 @@ namespace KimodoBridge.Editor
             }
 
             ThrowIfCanceled(request);
-            request.Progress?.Invoke(KimodoGeneratePipelineStage.Retarget, "Retargeting...");
+            request.Progress?.Invoke(KimodoBridgeControllerStage.Retarget, "Retargeting...");
             if (!KimodoRetargetToolsEditor.TryBakeMuscleClipToClip(
                     request.TargetClip,
                     request.OriginRetargetAvatar,
@@ -133,20 +133,20 @@ namespace KimodoBridge.Editor
             return Complete(request, prompt, motionJson, request.TargetClip, rawBoneClip);
         }
 
-        internal static async Task<KimodoGeneratePipelineResult> ExecuteRuntimePipelineAsync(
+        internal static async Task<KimodoBridgeControllerResult> ExecuteRuntimePipelineAsync(
             KimodoEditorGenerateRequest request,
             string prompt,
             string modelName)
         {
-            KimodoGeneratePipelineRequest pipelineRequest = CreateRuntimePipelineRequest(request, prompt, modelName);
-            IKimodoGeneratePipeline pipeline = new KimodoGeneratePipeline();
+            KimodoBridgeControllerRequest pipelineRequest = CreateRuntimePipelineRequest(request, prompt, modelName);
+            IKimodoGeneratePipeline pipeline = new KimodoBridgeController();
             return await pipeline.ExecuteAsync(
                 pipelineRequest,
                 (stage, message) => request.Progress?.Invoke(stage, message),
                 request.Token);
         }
 
-        internal static KimodoGeneratePipelineRequest CreateRuntimePipelineRequest(
+        internal static KimodoBridgeControllerRequest CreateRuntimePipelineRequest(
             KimodoEditorGenerateRequest request,
             string prompt,
             string modelName)
@@ -156,8 +156,8 @@ namespace KimodoBridge.Editor
                 throw new ArgumentNullException(nameof(request));
             }
 
-            string kimodoRootPath = KimodoBridgeController.ResolveRuntimeRootOrThrow();
-            string launcherPath = KimodoBridgeController.ResolveStartScriptOrThrow(kimodoRootPath);
+            string kimodoRootPath = KimodoBridgePipeline.ResolveRuntimeRootOrThrow();
+            string launcherPath = KimodoBridgePipeline.ResolveStartScriptOrThrow(kimodoRootPath);
             string modelsRoot = string.IsNullOrWhiteSpace(request.ModelsRoot) ? string.Empty : Path.GetFullPath(request.ModelsRoot.Trim());
 
             var generationRequest = new KimodoGenerationRequestDto
@@ -169,20 +169,15 @@ namespace KimodoBridge.Editor
                 constraints_json = request.ConstraintsJson ?? string.Empty
             };
 
-            return new KimodoGeneratePipelineRequest
+            return new KimodoBridgeControllerRequest
             {
-                BackendType = request.GenerationBackend == KimodoGenerationBackend.KimodoBridge
-                    ? KimodoBackendType.Bridge
-                    : KimodoBackendType.ComfyUi,
                 RuntimeSettings = BuildRuntimeSettings(
                     kimodoRootPath,
                     launcherPath,
                     modelName,
                     request.BridgeVramMode,
                     modelsRoot,
-                    request.GenerationTimeoutSeconds,
-                    request.ComfyHost,
-                    request.ComfyPort),
+                    request.GenerationTimeoutSeconds),
                 GenerationRequest = generationRequest
             };
         }
@@ -193,9 +188,7 @@ namespace KimodoBridge.Editor
             string modelName,
             KimodoBridgeVramMode bridgeVramMode,
             string modelsRoot,
-            float generationTimeoutSeconds,
-            string comfyHost,
-            int comfyPort)
+            float generationTimeoutSeconds)
         {
             bool highVram = bridgeVramMode == KimodoBridgeVramMode.High;
             return new KimodoRuntimeGenerationSettings
@@ -214,11 +207,7 @@ namespace KimodoBridge.Editor
                     idleTimeoutSeconds = KimodoPlayableClipGenerationSettings.instance != null
                         ? KimodoPlayableClipGenerationSettings.instance.ServerIdleShutdownSeconds
                         : 0
-                },
-                comfyHost = string.IsNullOrWhiteSpace(comfyHost) ? "127.0.0.1" : comfyHost.Trim(),
-                comfyPort = comfyPort,
-                comfyTimeoutSeconds = generationTimeoutSeconds,
-                comfyWorkflowResourceName = "kimodo-unity-workflow"
+                }
             };
         }
 
@@ -230,8 +219,8 @@ namespace KimodoBridge.Editor
             AnimationClip rawBoneClip)
         {
             ThrowIfCanceled(request);
-            request.Progress?.Invoke(KimodoGeneratePipelineStage.Finalize, "Finalizing generated assets...");
-            request.Progress?.Invoke(KimodoGeneratePipelineStage.Completed, "Generation complete.");
+            request.Progress?.Invoke(KimodoBridgeControllerStage.Finalize, "Finalizing generated assets...");
+            request.Progress?.Invoke(KimodoBridgeControllerStage.Completed, "Generation complete.");
 
             return new KimodoEditorGenerateResult
             {
@@ -335,7 +324,7 @@ namespace KimodoBridge.Editor
             int timeoutMs = requestedMs;
 
             ModelSetupStatus modelStatus =
-                KimodoBridgeController.EvaluateModelSetupStatus(runtimeRoot, highVram, modelName, modelsRootOverride: null);
+                KimodoBridgePipeline.EvaluateModelSetupStatus(runtimeRoot, highVram, modelName, modelsRootOverride: null);
             if (modelStatus.Missing)
             {
                 int minutes = modelStatus.EstimatedMinutes;

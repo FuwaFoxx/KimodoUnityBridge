@@ -8,7 +8,6 @@ namespace KimodoBridge.Editor
     {
         public string Prompt;
         public string ModelName;
-        public KimodoGenerationBackend GenerationBackend;
         public KimodoBridgeVramMode BridgeVramMode;
         public float DurationSeconds;
         public int DiffusionSteps;
@@ -22,12 +21,10 @@ namespace KimodoBridge.Editor
         public KimodoCurveFilterOptions CurveFilterOptions;
         public bool SkipRetarget;
         public string ModelsRoot = string.Empty;
-        public string ComfyHost = "127.0.0.1";
-        public int ComfyPort = 8188;
         public float GenerationTimeoutSeconds = 600f;
         public AnimationClip TargetClip;
         public AnimationClip RawBoneClip;
-        public Action<KimodoGeneratePipelineStage, string> Progress;
+        public Action<KimodoBridgeControllerStage, string> Progress;
         public CancellationToken Token;
     }
 

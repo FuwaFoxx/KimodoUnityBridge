@@ -16,7 +16,6 @@ namespace KimodoBridge.Editor
         private string lastStatus = string.Empty;
         private string lastError = string.Empty;
         private bool isGenerating;
-        private KimodoGenerationBackend generationBackend = KimodoGenerationBackend.KimodoBridge;
         private string bridgeModelName = KimodoPlayableClip.DefaultBridgeModelName;
         private KimodoBridgeVramMode bridgeVramMode = KimodoBridgeVramMode.Low;
         private string motionPrompt = string.Empty;
@@ -108,7 +107,6 @@ namespace KimodoBridge.Editor
                     position.width,
                     position.height,
                     previewPanel,
-                    ref generationBackend,
                     ref bridgeModelName,
                     ref bridgeVramMode,
                     ref motionPrompt,
@@ -441,14 +439,13 @@ namespace KimodoBridge.Editor
             int generationFrameCount,
             int effectiveSeed,
             CancellationToken token,
-            Action<KimodoGeneratePipelineStage, string> progress)
+            Action<KimodoBridgeControllerStage, string> progress)
         {
             string resolvedModelName = KimodoPlayableClip.NormalizeBridgeModelName(bridgeModelName);
             return new KimodoEditorGenerateRequest
             {
                 Prompt = motionPrompt,
                 ModelName = resolvedModelName,
-                GenerationBackend = generationBackend,
                 BridgeVramMode = bridgeVramMode,
                 DurationSeconds = generationFrameCount / KimodoPlayableClip.FIXED_FRAME_RATE,
                 DiffusionSteps = diffusionSteps,
@@ -460,8 +457,6 @@ namespace KimodoBridge.Editor
                     explicitRetargetAvatar,
                     modelName),
                 ModelsRoot = KimodoPlayableClipGenerationSettings.instance.LocalModelsPath?.Trim() ?? string.Empty,
-                ComfyHost = string.Empty,
-                ComfyPort = 8188,
                 GenerationTimeoutSeconds = KimodoPlayableClipGenerationSettings.instance.GenerationTimeoutSeconds,
                 Progress = progress,
                 Token = token

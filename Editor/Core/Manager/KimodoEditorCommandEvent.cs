@@ -4,7 +4,7 @@ namespace KimodoBridge.Editor
 {
     public readonly struct KimodoEditorCommandProgressEvent
     {
-        public KimodoEditorCommandProgressEvent(IKimodoEditorCommand command, string message, KimodoGeneratePipelineStage stage = KimodoGeneratePipelineStage.None)
+        public KimodoEditorCommandProgressEvent(IKimodoEditorCommand command, string message, KimodoBridgeControllerStage stage = KimodoBridgeControllerStage.None)
         {
             Command = command;
             Message = message ?? string.Empty;
@@ -15,7 +15,7 @@ namespace KimodoBridge.Editor
 
         public string Message { get; }
 
-        public KimodoGeneratePipelineStage Stage { get; }
+        public KimodoBridgeControllerStage Stage { get; }
     }
 
     public readonly struct KimodoEditorCommandCompletedEvent

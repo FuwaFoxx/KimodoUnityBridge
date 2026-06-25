@@ -13,9 +13,6 @@ namespace KimodoBridge.Editor
     {
         private const double RepaintIntervalSeconds = 0.2d;
 
-        private SerializedProperty generationBackend;
-        private SerializedProperty comfyuiIP;
-        private SerializedProperty comfyuiPort;
         private SerializedProperty bridgeModelName;
         private SerializedProperty bridgeVramMode;
         private SerializedProperty motionPrompt;
@@ -59,9 +56,6 @@ namespace KimodoBridge.Editor
         private void InitializeSerializedBindings()
         {
             clip = (KimodoPlayableClip)target;
-            generationBackend = serializedObject.FindProperty("generationBackend");
-            comfyuiIP = serializedObject.FindProperty("comfyuiIP");
-            comfyuiPort = serializedObject.FindProperty("comfyuiPort");
             bridgeModelName = serializedObject.FindProperty("bridgeModelName");
             bridgeVramMode = serializedObject.FindProperty("bridgeVramMode");
             motionPrompt = serializedObject.FindProperty("motionPrompt");
@@ -90,7 +84,6 @@ namespace KimodoBridge.Editor
         {
             InitializeSerializedBindings();
             serializedObject.UpdateIfRequiredOrScript();
-            generationBackend.intValue = (int)KimodoGenerationBackend.KimodoBridge;
             motionPrompt.stringValue = prompt ?? string.Empty;
             generationFrames.intValue = Mathf.Clamp(generationFramesValue, KimodoPlayableClip.MIN_FRAMES, KimodoPlayableClip.MAX_FRAMES);
             diffusionSteps.intValue = Mathf.Clamp(diffusionStepsValue, 1, 1000);
@@ -132,39 +125,24 @@ namespace KimodoBridge.Editor
         {
             EditorGUILayout.LabelField("Generate Motion", EditorStyles.boldLabel);
             EditorGUILayout.BeginVertical("box");
-            if (generationBackend != null)
+            if (bridgeModelName != null)
             {
-                EditorGUILayout.PropertyField(generationBackend, new GUIContent("Backend"));
+                DrawBridgeModelSelector();
+            }
+            if (bridgeVramMode != null)
+            {
+                EditorGUILayout.PropertyField(
+                    bridgeVramMode,
+                    new GUIContent("VRAM Mode", "Low: quantized text encoder (~4G). High: full Llama+LLM2Vec (~16G)."));
             }
 
-            bool useBridge = clip.generationBackend == KimodoGenerationBackend.KimodoBridge;
-            if (useBridge)
-            {
-                if (bridgeModelName != null)
-                {
-                    DrawBridgeModelSelector();
-                }
-                if (bridgeVramMode != null)
-                {
-                    EditorGUILayout.PropertyField(
-                        bridgeVramMode,
-                        new GUIContent("VRAM Mode", "Low: quantized text encoder (~4G). High: full Llama+LLM2Vec (~16G)."));
-                }
+            int encoderVramGb = clip.bridgeVramMode == KimodoBridgeVramMode.High ? 16 : 4;
+            int totalVramGb = 2 + encoderVramGb;
+            EditorGUILayout.HelpBox(
+                $"Estimated VRAM for selected mode: ~{totalVramGb} GB (core 2 GB + encoder {encoderVramGb} GB).",
+                MessageType.Info);
 
-                int encoderVramGb = clip.bridgeVramMode == KimodoBridgeVramMode.High ? 16 : 4;
-                int totalVramGb = 2 + encoderVramGb;
-                EditorGUILayout.HelpBox(
-                    $"Estimated VRAM for selected mode: ~{totalVramGb} GB (core 2 GB + encoder {encoderVramGb} GB).",
-                    MessageType.Info);
-            }
-            else
-            {
-                comfyuiIP.stringValue = EditorGUILayout.TextField("ComfyUI IP", comfyuiIP.stringValue);
-                comfyuiPort.intValue = EditorGUILayout.IntField("ComfyUI Port", comfyuiPort.intValue);
-                EditorGUILayout.HelpBox("Workflow source is fixed to Runtime/Resources/kimodo-unity-workflow.json.", MessageType.Info);
-            }
-
-            EditorGUILayout.LabelField(new GUIContent("Prompt", "Natural-language motion prompt sent to the selected generation backend."));
+            EditorGUILayout.LabelField(new GUIContent("Prompt", "Natural-language motion prompt sent to Kimodo Bridge."));
             motionPrompt.stringValue = EditorGUILayout.TextArea(motionPrompt.stringValue, GUILayout.Height(60));
 
             int oldFrames = generationFrames.intValue;
@@ -211,7 +189,7 @@ namespace KimodoBridge.Editor
 
             bool disableGenerate =
                 isGenerating ||
-                KimodoBridgeController.IsRuntimeMaintenanceInProgress ||
+                KimodoBridgePipeline.IsRuntimeMaintenanceInProgress ||
                 EditorCompilationStateGate.IsCompilingOrReloading;
             GUI.enabled = !disableGenerate;
             if (GUILayout.Button(new GUIContent("Generate & Bake", "Generate motion using current settings and bake result back into this playable clip."), GUILayout.Height(32)))
@@ -233,24 +211,18 @@ namespace KimodoBridge.Editor
             }
             GUI.enabled = true;
 
-            if (useBridge)
+            DrawEstimatedSetupTimeHint();
+
+            if (!bridgeStatusReady)
             {
-                DrawEstimatedSetupTimeHint();
+                EditorGUILayout.LabelField("Bridge status: checking...", EditorStyles.miniLabel);
             }
 
-            if (useBridge)
+            if (!bridgeRunningCached && bridgePortDiscoveredCached)
             {
-                if (!bridgeStatusReady)
-                {
-                    EditorGUILayout.LabelField("Bridge status: checking...", EditorStyles.miniLabel);
-                }
-
-                if (!bridgeRunningCached && bridgePortDiscoveredCached)
-                {
-                    EditorGUILayout.HelpBox(
-                        "Bridge process is not running, but endpoint file still exists. This is usually a stale serverport record.",
-                        MessageType.None);
-                }
+                EditorGUILayout.HelpBox(
+                    "Bridge process is not running, but endpoint file still exists. This is usually a stale serverport record.",
+                    MessageType.None);
             }
 
             if (!string.IsNullOrWhiteSpace(lastStatus))
@@ -293,13 +265,13 @@ namespace KimodoBridge.Editor
 
         private void PullBridgeStatusSnapshot(bool forceRefresh)
         {
-            if (clip == null || clip.generationBackend != KimodoGenerationBackend.KimodoBridge)
+            if (clip == null)
             {
                 return;
             }
 
             _ = forceRefresh;
-            ServerStatusSnapshot snapshot = KimodoBridgeController.GetServerStatusSnapshot();
+            ServerStatusSnapshot snapshot = KimodoBridgePipeline.GetServerStatusSnapshot();
             bridgeStatusReady = snapshot.Ready;
             bridgeRunningCached = snapshot.Running;
             bridgePortDiscoveredCached = snapshot.HasPort;
@@ -363,7 +335,7 @@ namespace KimodoBridge.Editor
         private void DrawBridgeModelSelector()
         {
             string current = KimodoPlayableClip.NormalizeBridgeModelName(bridgeModelName.stringValue);
-            string[] options = KimodoBridgeController.SupportedModelNames;
+            string[] options = KimodoBridgePipeline.SupportedModelNames;
             int idx = Array.IndexOf(options, current);
             if (idx < 0)
             {
@@ -376,11 +348,11 @@ namespace KimodoBridge.Editor
 
         private void DrawEstimatedSetupTimeHint()
         {
-            string runtimeRoot = KimodoBridgeController.GetRuntimeRootPath();
+            string runtimeRoot = KimodoBridgePipeline.GetRuntimeRootPath();
             bool highVram = clip != null && clip.bridgeVramMode == KimodoBridgeVramMode.High;
             string modelName = clip == null ? KimodoPlayableClip.DefaultBridgeModelName : KimodoPlayableClip.NormalizeBridgeModelName(clip.bridgeModelName);
             string modelsRootOverride = KimodoPlayableClipGenerationSettings.instance.LocalModelsPath?.Trim();
-            if (!KimodoBridgeController.TryGetModelMissingSetupMinutes(runtimeRoot, highVram, modelName, modelsRootOverride, out int minutes))
+            if (!KimodoBridgePipeline.TryGetModelMissingSetupMinutes(runtimeRoot, highVram, modelName, modelsRootOverride, out int minutes))
             {
                 return;
             }

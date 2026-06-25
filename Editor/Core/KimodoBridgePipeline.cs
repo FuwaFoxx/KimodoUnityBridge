@@ -55,7 +55,7 @@ namespace KimodoBridge.Editor
     }
 
     [InitializeOnLoad]
-    internal static class KimodoBridgeController
+    internal static class KimodoBridgePipeline
     {
         private enum ShutdownMode
         {
@@ -76,7 +76,7 @@ namespace KimodoBridge.Editor
         private static int shutdownTicket;
         private static int runtimeMaintenanceDepth;
 
-        static KimodoBridgeController()
+        static KimodoBridgePipeline()
         {
             EditorApplication.delayCall += RecoverBridgeAfterDomainReload;
             AssemblyReloadEvents.beforeAssemblyReload += HandleBeforeAssemblyReload;

@@ -162,7 +162,7 @@ namespace KimodoBridge.Editor
             }
 
             state.Token.ThrowIfCancellationRequested();
-            EmitProgress(eventCommand, "Generating and baking...", KimodoGeneratePipelineStage.Validate);
+            EmitProgress(eventCommand, "Generating and baking...", KimodoBridgeControllerStage.Validate);
 
             string prompt = string.IsNullOrWhiteSpace(promptOverride) ? (clip.motionPrompt ?? string.Empty) : promptOverride.Trim();
             if (string.IsNullOrWhiteSpace(prompt))
@@ -243,7 +243,7 @@ namespace KimodoBridge.Editor
             state.Dispose();
         }
 
-        private static void EmitProgress(IKimodoEditorCommand command, string message, KimodoGeneratePipelineStage stage = KimodoGeneratePipelineStage.None)
+        private static void EmitProgress(IKimodoEditorCommand command, string message, KimodoBridgeControllerStage stage = KimodoBridgeControllerStage.None)
         {
             CommandProgress?.Invoke(new KimodoEditorCommandProgressEvent(command, message, stage));
         }
