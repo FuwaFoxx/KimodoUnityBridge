@@ -15,16 +15,12 @@ namespace KimodoBridge.Editor
         public string ConstraintsJson;
         public Func<AnimationClip> CreateTargetClip;
         public Func<AnimationClip, string, KimodoEditorGenerateOutputPlan> ResolveOutputPlan;
-        public Avatar OriginRetargetAvatar;
-        public Avatar TargetRetargetAvatar;
-        public bool ExportMuscleClip;
-        public KimodoCurveFilterOptions CurveFilterOptions;
-        public bool SkipRetarget;
+        public KimodoEditorGenerateOutputPlan OutputPlan;
         public string ModelsRoot = string.Empty;
         public float GenerationTimeoutSeconds = 600f;
         public AnimationClip TargetClip;
         public AnimationClip RawBoneClip;
-        public Action<KimodoBridgeControllerStage, string> Progress;
+        public Action<KimodoBridgeCommandStage, string> Progress;
         public CancellationToken Token;
     }
 

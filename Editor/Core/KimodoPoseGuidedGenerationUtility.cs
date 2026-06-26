@@ -56,7 +56,7 @@ namespace KimodoBridge.Editor
                 constraints_json = constraintsJson
             };
 
-            var pipelineRequest = new KimodoBridgeControllerRequest
+            var pipelineRequest = new KimodoBridgeCommandRequest
             {
                 RuntimeSettings = KimodoEditorRuntimeGeneratePipeline.BuildRuntimeSettings(
                     runtimeRoot,
@@ -68,8 +68,8 @@ namespace KimodoBridge.Editor
                 GenerationRequest = request
             };
 
-            IKimodoGeneratePipeline pipeline = new KimodoBridgeController();
-            KimodoBridgeControllerResult result = await pipeline.ExecuteAsync(
+            IKimodoGeneratePipeline pipeline = new KimodoBridgeCommand();
+            KimodoBridgeCommandResult result = await pipeline.ExecuteAsync(
                 pipelineRequest,
                 (_, message) => progress?.Invoke(message),
                 token);

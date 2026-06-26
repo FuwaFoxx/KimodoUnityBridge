@@ -41,7 +41,6 @@ namespace KimodoBridge.Editor
         private bool bridgePortDiscoveredCached;
         private bool bridgeStatusReady;
         private bool showAdvancedFoldout = true;
-        private bool managerSubscribed;
         private double lastRepaintTime;
         private bool repaintQueued;
 
@@ -50,7 +49,7 @@ namespace KimodoBridge.Editor
             InitializeSerializedBindings();
             showAdvancedFoldout = KimodoPlayableClipGenerationSettings.instance.AdvancedCurveFilterFoldout;
             PullBridgeStatusSnapshot(forceRefresh: true);
-            SubscribeManagerEvents();
+            SyncRequestHandleState();
         }
 
         private void InitializeSerializedBindings()
@@ -94,7 +93,6 @@ namespace KimodoBridge.Editor
 
         private void OnDisable()
         {
-            UnsubscribeManagerEvents();
             TryHideConstraintPreview();
             EditorUtility.ClearProgressBar();
             repaintQueued = false;
@@ -109,6 +107,7 @@ namespace KimodoBridge.Editor
             }
 
             PullBridgeStatusSnapshot(forceRefresh: false);
+            SyncRequestHandleState();
             serializedObject.UpdateIfRequiredOrScript();
             DrawGenerationSection();
             DrawBakeSection();
@@ -146,15 +145,15 @@ namespace KimodoBridge.Editor
             motionPrompt.stringValue = EditorGUILayout.TextArea(motionPrompt.stringValue, GUILayout.Height(60));
 
             int oldFrames = generationFrames.intValue;
-            float minDurationSeconds = KimodoInOutConstraintTimingUtility.FrameCountToDurationSeconds(KimodoPlayableClip.MIN_FRAMES);
-            float maxDurationSeconds = KimodoInOutConstraintTimingUtility.FrameCountToDurationSeconds(KimodoPlayableClip.MAX_FRAMES);
-            float oldDurationSeconds = KimodoInOutConstraintTimingUtility.FrameCountToDurationSeconds(oldFrames);
+            float minDurationSeconds = KimodoInOutConstraintAdapter.FrameCountToDurationSeconds(KimodoPlayableClip.MIN_FRAMES);
+            float maxDurationSeconds = KimodoInOutConstraintAdapter.FrameCountToDurationSeconds(KimodoPlayableClip.MAX_FRAMES);
+            float oldDurationSeconds = KimodoInOutConstraintAdapter.FrameCountToDurationSeconds(oldFrames);
             float newDurationSeconds = EditorGUILayout.Slider(
                 new GUIContent("Duration (s)", "Target generated clip length in seconds. Internally uses the fixed Kimodo sample rate and also syncs timeline clip duration when changed."),
                 oldDurationSeconds,
                 minDurationSeconds,
                 maxDurationSeconds);
-            int newFrames = KimodoInOutConstraintTimingUtility.DurationSecondsToFrameCount(newDurationSeconds);
+            int newFrames = KimodoInOutConstraintAdapter.DurationSecondsToFrameCount(newDurationSeconds);
             if (newFrames != oldFrames)
             {
                 generationFrames.intValue = newFrames;
@@ -183,7 +182,7 @@ namespace KimodoBridge.Editor
             }
             DrawConstraintPreviewIfNeeded();
 
-            float seconds = KimodoInOutConstraintTimingUtility.FrameCountToDurationSeconds(generationFrames.intValue);
+            float seconds = KimodoInOutConstraintAdapter.FrameCountToDurationSeconds(generationFrames.intValue);
             EditorGUILayout.LabelField($"Duration: {seconds:F2}s", EditorStyles.miniLabel);
             DrawConstraintReferenceList();
 
@@ -194,20 +193,53 @@ namespace KimodoBridge.Editor
             GUI.enabled = !disableGenerate;
             if (GUILayout.Button(new GUIContent("Generate & Bake", "Generate motion using current settings and bake result back into this playable clip."), GUILayout.Height(32)))
             {
-                bool accepted = KimodoEditorCommandManager.Dispatch(
-                    new GeneratePlayableClipCommand(clip));
+                bool accepted = EditorGenerateSessionRunner.Start(
+                    clip,
+                    $"clip:{clip.GetInstanceID()}",
+                    KimodoEditorCommandKind.GeneratePlayableClip,
+                    async (session, token) =>
+                    {
+                        string prompt = clip.motionPrompt ?? string.Empty;
+                        KimodoEditorGenerateRequest request = KimodoPlayableClipGenerationHostService.BuildRequest(
+                            clip,
+                            prompt,
+                            externalConstraint: null,
+                            token);
+                        try
+                        {
+                            request.Progress = (stage, message) =>
+                            {
+                                EditorGenerateSessionRunner.UpdateProgress(clip, session.RequestId, stage, message);
+                            };
+
+                            KimodoEditorGenerateResult result = await KimodoEditorRuntimeGeneratePipeline.ExecuteAsync(request);
+                            token.ThrowIfCancellationRequested();
+                            KimodoPlayableClipGenerationHostService.FinalizeGeneration(clip, request, result);
+                            return (IKimodoEditorCommandResult)result;
+                        }
+                        catch
+                        {
+                            KimodoPlayableClipGenerationHostService.CleanupFailedGeneration(request);
+                            throw;
+                        }
+                    },
+                    out _,
+                    out string error);
                 if (accepted)
                 {
                     isGenerating = true;
                     lastError = string.Empty;
                     lastStatus = "Queued generation...";
                 }
+                else
+                {
+                    lastError = error;
+                }
             }
             GUI.enabled = isGenerating;
             if (GUILayout.Button(new GUIContent("Cancel", "Cancel the current generation command for this clip."), GUILayout.Height(24)))
             {
-                KimodoEditorCommandManager.Dispatch(
-                    new CancelPlayableClipGenerationCommand(clip));
+                EditorGenerateSessionRunner.Cancel(clip);
             }
             GUI.enabled = true;
 
@@ -359,124 +391,6 @@ namespace KimodoBridge.Editor
             EditorGUILayout.HelpBox($"Model missing detected, update required, approximately {minutes} minutes.", MessageType.None);
         }
 
-        private void SubscribeManagerEvents()
-        {
-            if (managerSubscribed)
-            {
-                return;
-            }
-
-            KimodoEditorCommandManager.CommandProgress += OnManagerCommandProgress;
-            KimodoEditorCommandManager.CommandCompleted += OnManagerCommandCompleted;
-            KimodoEditorCommandManager.CommandFailed += OnManagerCommandFailed;
-            KimodoEditorCommandManager.CommandCanceled += OnManagerCommandCanceled;
-            managerSubscribed = true;
-        }
-
-        private void UnsubscribeManagerEvents()
-        {
-            if (!managerSubscribed)
-            {
-                return;
-            }
-
-            KimodoEditorCommandManager.CommandProgress -= OnManagerCommandProgress;
-            KimodoEditorCommandManager.CommandCompleted -= OnManagerCommandCompleted;
-            KimodoEditorCommandManager.CommandFailed -= OnManagerCommandFailed;
-            KimodoEditorCommandManager.CommandCanceled -= OnManagerCommandCanceled;
-            managerSubscribed = false;
-        }
-
-        private void OnManagerCommandProgress(KimodoEditorCommandProgressEvent evt)
-        {
-            if (!IsCommandForCurrentClip(evt.Command))
-            {
-                return;
-            }
-
-            if (evt.Command.Kind == KimodoEditorCommandKind.GeneratePlayableClip)
-            {
-                isGenerating = true;
-            }
-
-            lastStatus = evt.Message;
-            RequestThrottledRepaint();
-        }
-
-        private void OnManagerCommandCompleted(KimodoEditorCommandCompletedEvent evt)
-        {
-            if (!IsCommandForCurrentClip(evt.Command))
-            {
-                return;
-            }
-
-            if (evt.Command.Kind == KimodoEditorCommandKind.GeneratePlayableClip)
-            {
-                isGenerating = false;
-                lastError = string.Empty;
-                lastStatus = "Generation complete.";
-                if (evt.Payload is KimodoEditorGenerateResult generateResult &&
-                    !string.IsNullOrWhiteSpace(generateResult.ConstraintsPath))
-                {
-                    lastConstraintsPath = generateResult.ConstraintsPath;
-                }
-
-                lastConstraintMarkers.Clear();
-                var latestMarkers = KimodoPlayableClipGenerationHostService.GetLatestConstraintMarkers();
-                if (latestMarkers != null)
-                {
-                    for (int i = 0; i < latestMarkers.Count; i++)
-                    {
-                        KimodoConstraintMarkerBase marker = latestMarkers[i];
-                        if (marker != null)
-                        {
-                            lastConstraintMarkers.Add(marker);
-                        }
-                    }
-                }
-            }
-
-            RequestThrottledRepaint();
-        }
-
-        private void OnManagerCommandFailed(KimodoEditorCommandFailedEvent evt)
-        {
-            if (!IsCommandForCurrentClip(evt.Command))
-            {
-                return;
-            }
-
-            if (evt.Command.Kind == KimodoEditorCommandKind.GeneratePlayableClip)
-            {
-                isGenerating = false;
-                lastError = evt.Message;
-                lastStatus = "Generation failed.";
-            }
-            else
-            {
-                lastError = evt.Message;
-            }
-
-            RequestThrottledRepaint();
-        }
-
-        private void OnManagerCommandCanceled(KimodoEditorCommandCanceledEvent evt)
-        {
-            if (!IsCommandForCurrentClip(evt.Command))
-            {
-                return;
-            }
-
-            if (evt.Command.Kind == KimodoEditorCommandKind.GeneratePlayableClip ||
-                evt.Command.Kind == KimodoEditorCommandKind.CancelPlayableClipGeneration)
-            {
-                isGenerating = false;
-                lastStatus = "Generation canceled.";
-            }
-
-            RequestThrottledRepaint();
-        }
-
         private void RequestThrottledRepaint()
         {
             if (this == null)
@@ -524,14 +438,53 @@ namespace KimodoBridge.Editor
             Repaint();
         }
 
-        private bool IsCommandForCurrentClip(IKimodoEditorCommand command)
+        private void SyncRequestHandleState()
         {
-            if (command == null || clip == null)
+            if (clip == null || !EditorGenerateSessionRunner.TryGet(clip, out EditorGenerateSession handle) || handle == null)
             {
-                return false;
+                isGenerating = false;
+                return;
             }
 
-            return string.Equals(command.TargetKey, "clip:" + clip.GetInstanceID(), StringComparison.Ordinal);
+            isGenerating = handle.IsRunning;
+            switch (handle.Status)
+            {
+                case KimodoEditorRequestStatus.Running:
+                    lastStatus = string.IsNullOrWhiteSpace(handle.Message) ? "Generating and baking..." : handle.Message;
+                    lastError = string.Empty;
+                    break;
+                case KimodoEditorRequestStatus.Completed:
+                    lastStatus = string.IsNullOrWhiteSpace(handle.Message) ? "Generation complete." : handle.Message;
+                    lastError = string.Empty;
+                    if (handle.Payload is KimodoEditorGenerateResult generateResult &&
+                        !string.IsNullOrWhiteSpace(generateResult.ConstraintsPath))
+                    {
+                        lastConstraintsPath = generateResult.ConstraintsPath;
+                    }
+
+                    lastConstraintMarkers.Clear();
+                    var latestMarkers = KimodoPlayableClipGenerationHostService.GetLatestConstraintMarkers();
+                    if (latestMarkers != null)
+                    {
+                        for (int i = 0; i < latestMarkers.Count; i++)
+                        {
+                            KimodoConstraintMarkerBase marker = latestMarkers[i];
+                            if (marker != null)
+                            {
+                                lastConstraintMarkers.Add(marker);
+                            }
+                        }
+                    }
+                    break;
+                case KimodoEditorRequestStatus.Failed:
+                    lastStatus = "Generation failed.";
+                    lastError = handle.Error;
+                    break;
+                case KimodoEditorRequestStatus.Canceled:
+                    lastStatus = string.IsNullOrWhiteSpace(handle.Message) ? "Generation canceled." : handle.Message;
+                    lastError = string.Empty;
+                    break;
+            }
         }
 
         private void DrawAdvancedCurveFilterSection()
@@ -641,7 +594,7 @@ namespace KimodoBridge.Editor
                 EditorGUILayout.LabelField($"Prompt: {clip.lastGeneratedPrompt}", EditorStyles.miniLabel);
             }
             EditorGUILayout.LabelField(
-                $"Duration: {KimodoInOutConstraintTimingUtility.FrameCountToDurationSeconds(clip.frameCount):F2}s, Frames: {clip.frameCount}, Joints: {clip.jointCount}",
+                $"Duration: {KimodoInOutConstraintAdapter.FrameCountToDurationSeconds(clip.frameCount):F2}s, Frames: {clip.frameCount}, Joints: {clip.jointCount}",
                 EditorStyles.miniLabel);
             if (!string.IsNullOrWhiteSpace(lastConstraintsPath))
             {
@@ -653,6 +606,9 @@ namespace KimodoBridge.Editor
                 Undo.RecordObject(clip, "Reset Kimodo Clip");
                 clip.ResetGeneration();
                 EditorUtility.SetDirty(clip);
+                EditorGenerateSessionRunner.Clear(clip);
+                lastStatus = string.Empty;
+                lastError = string.Empty;
             }
 
             EditorGUILayout.EndVertical();
@@ -666,7 +622,7 @@ namespace KimodoBridge.Editor
                 return;
             }
 
-            float newDuration = KimodoInOutConstraintTimingUtility.FrameCountToDurationSeconds(frames);
+            float newDuration = KimodoInOutConstraintAdapter.FrameCountToDurationSeconds(frames);
             UndoExtensions.RegisterClip(timelineClip, L10n.Tr("Modify Clip Duration"));
             timelineClip.duration = newDuration;
         }
@@ -740,10 +696,10 @@ namespace KimodoBridge.Editor
             }
 
             if (clip.inOutConstraintMode != KimodoInOutConstraintMode.None &&
-                KimodoTimelineInOutConstraintAdapter.TryBuildBoundarySamplesForPreview(
+                KimodoInOutConstraintAdapter.TryBuildBoundarySamplesForPreview(
                     timelineClip,
                     clip.inOutConstraintMode,
-                    KimodoInOutConstraintTimingUtility.ClampFrameCount(clip.generationFrames),
+                    KimodoInOutConstraintAdapter.ClampFrameCount(clip.generationFrames),
                     out KimodoMarkerSampleResult beginBoundaryPose,
                     out KimodoMarkerSampleResult endBoundaryPose,
                     out _))

@@ -81,8 +81,8 @@ namespace KimodoBridge.Editor
 
                 if (!KimodoEditorClipWritebackService.TryMaterializeGeneratedClipCache(
                         result.GeneratedClip,
-                        request.ExportMuscleClip,
-                        request.TargetRetargetAvatar,
+                        request.OutputPlan != null && request.OutputPlan.ExportMuscleClip,
+                        request.OutputPlan != null ? request.OutputPlan.TargetRetargetAvatar : null,
                         forceRefresh: false,
                         out AnimationClip generatedCacheClip,
                         out string cacheError))
@@ -173,7 +173,7 @@ namespace KimodoBridge.Editor
                 return;
             }
 
-            if (!KimodoTimelineInOutConstraintContextUtility.HasPreviousNeighbor(timelineClip))
+            if (!KimodoInOutConstraintAdapter.HasPreviousNeighbor(timelineClip))
             {
                 Debug.LogWarning($"[Kimodo][TimelineOffset] skipped for '{playableClip.name}': no previous neighbor clip.");
                 return;

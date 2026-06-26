@@ -6,9 +6,9 @@ namespace KimodoBridge
 {
     public interface IKimodoGeneratePipeline
     {
-        Task<KimodoBridgeControllerResult> ExecuteAsync(
-            KimodoBridgeControllerRequest request,
-            Action<KimodoBridgeControllerStage, string> progress,
+        Task<KimodoBridgeCommandResult> ExecuteAsync(
+            KimodoBridgeCommandRequest request,
+            Action<KimodoBridgeCommandStage, string> progress,
             CancellationToken token);
     }
 }

@@ -2,7 +2,7 @@
 
 ## Goal
 - Remove generation execution from `KimodoPlayableClipEditor`.
-- Route generation through `KimodoEditorCommandManager -> KimodoEditorRuntimeGeneratePipeline`.
+- Route generation through `EditorGenerateSessionRunner -> KimodoEditorRuntimeGeneratePipeline`.
 - Keep editor behavior unchanged for asset writeback, bake, retarget, and timeline refresh.
 
 ## Current Split

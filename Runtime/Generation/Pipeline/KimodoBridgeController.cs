@@ -4,11 +4,11 @@ using System.Threading.Tasks;
 
 namespace KimodoBridge
 {
-    public sealed class KimodoBridgeController : IKimodoGeneratePipeline
+    public sealed class KimodoBridgeCommand : IKimodoGeneratePipeline
     {
-        public async Task<KimodoBridgeControllerResult> ExecuteAsync(
-            KimodoBridgeControllerRequest request,
-            Action<KimodoBridgeControllerStage, string> progress,
+        public async Task<KimodoBridgeCommandResult> ExecuteAsync(
+            KimodoBridgeCommandRequest request,
+            Action<KimodoBridgeCommandStage, string> progress,
             CancellationToken token)
         {
             if (request == null)
@@ -16,7 +16,7 @@ namespace KimodoBridge
                 throw new ArgumentNullException(nameof(request));
             }
 
-            progress?.Invoke(KimodoBridgeControllerStage.Validate, "Validating generation request...");
+            progress?.Invoke(KimodoBridgeCommandStage.Validate, "Validating generation request...");
 
             if (request.RuntimeSettings == null)
             {
@@ -41,9 +41,9 @@ namespace KimodoBridge
                 throw new InvalidOperationException(result.message ?? "No motion json found in runtime generation result.");
             }
 
-            progress?.Invoke(KimodoBridgeControllerStage.Completed, "Generation backend completed.");
+            progress?.Invoke(KimodoBridgeCommandStage.Completed, "Generation backend completed.");
 
-            return new KimodoBridgeControllerResult
+            return new KimodoBridgeCommandResult
             {
                 MotionJsonCompact = result.motionJsonCompact,
                 Message = result.message ?? string.Empty,
@@ -52,8 +52,8 @@ namespace KimodoBridge
         }
 
         private static async Task<KimodoGenerationResultDto> ExecuteBridgeAsync(
-            KimodoBridgeControllerRequest request,
-            Action<KimodoBridgeControllerStage, string> progress,
+            KimodoBridgeCommandRequest request,
+            Action<KimodoBridgeCommandStage, string> progress,
             CancellationToken token)
         {
             if (request.RuntimeSettings.bridgeSettings == null)
@@ -61,19 +61,19 @@ namespace KimodoBridge
                 throw new InvalidOperationException("Bridge runtime settings are required.");
             }
 
-            progress?.Invoke(KimodoBridgeControllerStage.InvokeBackend, "Starting generation backend...");
+            progress?.Invoke(KimodoBridgeCommandStage.InvokeBackend, "Starting generation backend...");
 
             using var bridgeService = new KimodoBridgeService(request.RuntimeSettings.bridgeSettings);
             _ = await bridgeService.StartAsync(
-                message => progress?.Invoke(KimodoBridgeControllerStage.InvokeBackend, message ?? string.Empty),
+                message => progress?.Invoke(KimodoBridgeCommandStage.InvokeBackend, message ?? string.Empty),
                 token);
 
             token.ThrowIfCancellationRequested();
-            progress?.Invoke(KimodoBridgeControllerStage.InvokeBackend, "Invoking generation backend...");
+            progress?.Invoke(KimodoBridgeCommandStage.InvokeBackend, "Invoking generation backend...");
 
             string motionJson = await bridgeService.GenerateAsync(
                 request.GenerationRequest,
-                message => progress?.Invoke(KimodoBridgeControllerStage.InvokeBackend, message ?? string.Empty),
+                message => progress?.Invoke(KimodoBridgeCommandStage.InvokeBackend, message ?? string.Empty),
                 token);
 
             return new KimodoGenerationResultDto
@@ -85,14 +85,14 @@ namespace KimodoBridge
         }
     }
 
-    public sealed class KimodoBridgeControllerResult
+    public sealed class KimodoBridgeCommandResult
     {
         public string MotionJsonCompact;
         public string Message;
         public string RawStatus;
     }
 
-    public enum KimodoBridgeControllerStage
+    public enum KimodoBridgeCommandStage
     {
         None = 0,
         Validate = 1,
@@ -105,7 +105,7 @@ namespace KimodoBridge
         Completed = 8
     }
 
-    public sealed class KimodoBridgeControllerRequest
+    public sealed class KimodoBridgeCommandRequest
     {
         public KimodoRuntimeGenerationSettings RuntimeSettings;
         public KimodoGenerationRequestDto GenerationRequest;

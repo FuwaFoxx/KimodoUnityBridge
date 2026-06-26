@@ -26,9 +26,9 @@ namespace KimodoBridge.Editor
 
             string modelName = string.IsNullOrWhiteSpace(request.ModelName) ? DefaultModelName : request.ModelName.Trim();
             ThrowIfCanceled(request);
-            request.Progress?.Invoke(KimodoBridgeControllerStage.InvokeBackend, "Generating motion...");
+            request.Progress?.Invoke(KimodoBridgeCommandStage.InvokeBackend, "Generating motion...");
 
-            KimodoBridgeControllerResult runtimeResult = await ExecuteRuntimePipelineAsync(request, prompt, modelName);
+            KimodoBridgeCommandResult runtimeResult = await ExecuteRuntimePipelineAsync(request, prompt, modelName);
             string motionJson = runtimeResult.MotionJsonCompact;
             if (string.IsNullOrWhiteSpace(motionJson))
             {
@@ -43,7 +43,7 @@ namespace KimodoBridge.Editor
             }
 
             ThrowIfCanceled(request);
-            request.Progress?.Invoke(KimodoBridgeControllerStage.Bake, "Baking animation...");
+            request.Progress?.Invoke(KimodoBridgeCommandStage.Bake, "Baking animation...");
             if (!KimodoRetargetToolsEditor.BakeIntoClip(
                     request.TargetClip,
                     motionJson,
@@ -61,27 +61,31 @@ namespace KimodoBridge.Editor
             AnimationClip rawBoneClip = CreateRawBoneWritebackClip(request.TargetClip);
             request.RawBoneClip = rawBoneClip;
             ThrowIfCanceled(request);
-            ResolveOutputPlan(request, modelName);
+            KimodoEditorGenerateOutputPlan outputPlan = ResolveOutputPlan(request, modelName);
+            if (outputPlan == null)
+            {
+                throw new InvalidOperationException("Output plan is null.");
+            }
             ThrowIfCanceled(request);
 
-            if (request.SkipRetarget)
+            if (outputPlan.SkipRetarget)
             {
-                TryFilterGeneratedBoneClip(request.TargetClip, request.TargetRetargetAvatar, request.CurveFilterOptions);
+                TryFilterGeneratedBoneClip(request.TargetClip, outputPlan.TargetRetargetAvatar, outputPlan.CurveFilterOptions);
                 KimodoEditorClipWritebackService.FlushWritebackAssets();
-                request.Progress?.Invoke(KimodoBridgeControllerStage.Retarget, "Skipping retarget: binding hierarchy already matches clip bindings.");
+                request.Progress?.Invoke(KimodoBridgeCommandStage.Retarget, "Skipping retarget: binding hierarchy already matches clip bindings.");
                 return Complete(request, prompt, motionJson, request.TargetClip, rawBoneClip);
             }
 
-            if (!KimodoRetargetCoreUtility.IsValidHumanoid(request.OriginRetargetAvatar))
+            if (!KimodoRetargetCoreUtility.IsValidHumanoid(outputPlan.OriginRetargetAvatar))
             {
                 throw new InvalidOperationException("Retarget requires a valid humanoid origin avatar.");
             }
 
             ThrowIfCanceled(request);
-            request.Progress?.Invoke(KimodoBridgeControllerStage.Retarget, "Retargeting...");
+            request.Progress?.Invoke(KimodoBridgeCommandStage.Retarget, "Retargeting...");
             if (!KimodoRetargetToolsEditor.TryBakeMuscleClipToClip(
                     request.TargetClip,
-                    request.OriginRetargetAvatar,
+                    outputPlan.OriginRetargetAvatar,
                     request.TargetClip,
                     out string muscleCacheError))
             {
@@ -90,7 +94,7 @@ namespace KimodoBridge.Editor
                     : muscleCacheError);
             }
 
-            if (request.ExportMuscleClip)
+            if (outputPlan.ExportMuscleClip)
             {
                 request.TargetClip.EnsureQuaternionContinuity();
                 EditorUtility.SetDirty(request.TargetClip);
@@ -99,7 +103,7 @@ namespace KimodoBridge.Editor
             }
 
             ThrowIfCanceled(request);
-            if (!KimodoRetargetCoreUtility.IsValidHumanoid(request.TargetRetargetAvatar))
+            if (!KimodoRetargetCoreUtility.IsValidHumanoid(outputPlan.TargetRetargetAvatar))
             {
                 throw new InvalidOperationException("Retarget requires a valid humanoid target avatar.");
             }
@@ -107,9 +111,9 @@ namespace KimodoBridge.Editor
             ThrowIfCanceled(request);
             if (!KimodoRetargetCoreUtility.TryRetargetClip(
                     request.TargetClip,
-                    request.OriginRetargetAvatar,
-                    request.TargetRetargetAvatar,
-                    request.ExportMuscleClip,
+                    outputPlan.OriginRetargetAvatar,
+                    outputPlan.TargetRetargetAvatar,
+                    outputPlan.ExportMuscleClip,
                     providedSourceHumanoidClip: request.TargetClip,
                     out AnimationClip retargetClip,
                     out string retargetError))
@@ -126,27 +130,27 @@ namespace KimodoBridge.Editor
             }
 
             ThrowIfCanceled(request);
-            TryFilterGeneratedBoneClip(request.TargetClip, request.TargetRetargetAvatar, request.CurveFilterOptions);
+            TryFilterGeneratedBoneClip(request.TargetClip, outputPlan.TargetRetargetAvatar, outputPlan.CurveFilterOptions);
             KimodoEditorClipWritebackService.FlushWritebackAssets();
             ThrowIfCanceled(request);
 
             return Complete(request, prompt, motionJson, request.TargetClip, rawBoneClip);
         }
 
-        internal static async Task<KimodoBridgeControllerResult> ExecuteRuntimePipelineAsync(
+        internal static async Task<KimodoBridgeCommandResult> ExecuteRuntimePipelineAsync(
             KimodoEditorGenerateRequest request,
             string prompt,
             string modelName)
         {
-            KimodoBridgeControllerRequest pipelineRequest = CreateRuntimePipelineRequest(request, prompt, modelName);
-            IKimodoGeneratePipeline pipeline = new KimodoBridgeController();
+            KimodoBridgeCommandRequest pipelineRequest = CreateRuntimePipelineRequest(request, prompt, modelName);
+            IKimodoGeneratePipeline pipeline = new KimodoBridgeCommand();
             return await pipeline.ExecuteAsync(
                 pipelineRequest,
                 (stage, message) => request.Progress?.Invoke(stage, message),
                 request.Token);
         }
 
-        internal static KimodoBridgeControllerRequest CreateRuntimePipelineRequest(
+        internal static KimodoBridgeCommandRequest CreateRuntimePipelineRequest(
             KimodoEditorGenerateRequest request,
             string prompt,
             string modelName)
@@ -169,7 +173,7 @@ namespace KimodoBridge.Editor
                 constraints_json = request.ConstraintsJson ?? string.Empty
             };
 
-            return new KimodoBridgeControllerRequest
+            return new KimodoBridgeCommandRequest
             {
                 RuntimeSettings = BuildRuntimeSettings(
                     kimodoRootPath,
@@ -219,8 +223,8 @@ namespace KimodoBridge.Editor
             AnimationClip rawBoneClip)
         {
             ThrowIfCanceled(request);
-            request.Progress?.Invoke(KimodoBridgeControllerStage.Finalize, "Finalizing generated assets...");
-            request.Progress?.Invoke(KimodoBridgeControllerStage.Completed, "Generation complete.");
+            request.Progress?.Invoke(KimodoBridgeCommandStage.Finalize, "Finalizing generated assets...");
+            request.Progress?.Invoke(KimodoBridgeCommandStage.Completed, "Generation complete.");
 
             return new KimodoEditorGenerateResult
             {
@@ -255,11 +259,11 @@ namespace KimodoBridge.Editor
             request.TargetClip = clip;
         }
 
-        private static void ResolveOutputPlan(KimodoEditorGenerateRequest request, string modelName)
+        private static KimodoEditorGenerateOutputPlan ResolveOutputPlan(KimodoEditorGenerateRequest request, string modelName)
         {
             if (request == null || request.ResolveOutputPlan == null)
             {
-                return;
+                return request != null ? request.OutputPlan : null;
             }
 
             KimodoEditorGenerateOutputPlan plan = request.ResolveOutputPlan(request.TargetClip, modelName);
@@ -269,11 +273,8 @@ namespace KimodoBridge.Editor
                 throw new InvalidOperationException("Output plan is null.");
             }
 
-            request.OriginRetargetAvatar = plan.OriginRetargetAvatar;
-            request.TargetRetargetAvatar = plan.TargetRetargetAvatar;
-            request.ExportMuscleClip = plan.ExportMuscleClip;
-            request.CurveFilterOptions = plan.CurveFilterOptions;
-            request.SkipRetarget = plan.SkipRetarget;
+            request.OutputPlan = plan;
+            return plan;
         }
 
         private static AnimationClip CreateRawBoneWritebackClip(AnimationClip sourceClip)

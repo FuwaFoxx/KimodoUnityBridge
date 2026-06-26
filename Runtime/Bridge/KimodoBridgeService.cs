@@ -128,23 +128,33 @@ namespace KimodoBridge
             EnsureLauncherExists();
 
             currentPortFilePath = BridgeEndpointResolver.GetServerPortFilePath(settings.runtimeRoot);
+            bool canReuseExistingEndpoint = false;
             if (File.Exists(currentPortFilePath))
             {
                 if (!BridgeEndpointResolver.TryReadServerEndpoint(settings.runtimeRoot, settings.hostFallback, out string host, out int port, out string endpointError))
                 {
-                    throw new InvalidOperationException($"Bridge serverport is invalid. {endpointError}");
+                    EmitProgress(progress, $"Bridge endpoint file is invalid, starting server to recover. {endpointError}");
                 }
-
-                bool reachable = await protocolClient.PingAsync(host, port, token, acceptLoading: true).ConfigureAwait(false);
-                if (!reachable)
+                else
                 {
-                    throw new InvalidOperationException($"Bridge endpoint is unreachable: {host}:{port}");
+                    bool reachable = await protocolClient.PingAsync(host, port, token, acceptLoading: true).ConfigureAwait(false);
+                    if (reachable)
+                    {
+                        currentHost = host;
+                        currentPort = port;
+                        canReuseExistingEndpoint = true;
+                    }
+                    else
+                    {
+                        EmitProgress(progress, $"Bridge endpoint is unreachable, starting server to recover: {host}:{port}");
+                    }
                 }
+            }
 
-                currentHost = host;
-                currentPort = port;
+            if (canReuseExistingEndpoint)
+            {
                 StartLogPump(BridgeEndpointResolver.ResolveAttachLogPath(settings.runtimeRoot), progress);
-                return $"Ready - {settings.modelName} on {host}:{port}";
+                return $"Ready - {settings.modelName} on {currentHost}:{currentPort}";
             }
 
             await InvalidateCurrentEndpointAsync().ConfigureAwait(false);
