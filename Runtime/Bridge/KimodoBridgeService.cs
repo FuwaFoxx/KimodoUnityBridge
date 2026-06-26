@@ -203,7 +203,7 @@ namespace KimodoBridge
             catch
             {
                 await InvalidateCurrentEndpointAsync().ConfigureAwait(false);
-                await StopCoreAsync(CancellationToken.None).ConfigureAwait(false);
+                await DetachCoreAsync().ConfigureAwait(false);
                 throw;
             }
         }

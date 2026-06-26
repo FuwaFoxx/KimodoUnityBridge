@@ -195,18 +195,6 @@ namespace KimodoBridge.Editor
             }
 
             EditorGUI.BeginChangeCheck();
-            bool alwaysKeepServerExperimental = EditorGUILayout.Toggle(
-                new GUIContent(
-                    "Always Keep Server (Experimental)",
-                    "Keep the bridge server alive through compile, assembly reload, and Play Mode transitions. This may leak memory or keep stale runtime state alive."),
-                settings.AlwaysKeepServerExperimental);
-            if (EditorGUI.EndChangeCheck())
-            {
-                settings.AlwaysKeepServerExperimental = alwaysKeepServerExperimental;
-                settings.SaveSettings();
-            }
-
-            EditorGUI.BeginChangeCheck();
             bool keepCpuForceExperimental = EditorGUILayout.Toggle(
                 new GUIContent(
                     "Keep CPU Force (Experimental)",
@@ -218,30 +206,9 @@ namespace KimodoBridge.Editor
                 settings.SaveSettings();
             }
 
-            EditorGUI.BeginChangeCheck();
-            int idleShutdownMinutes = EditorGUILayout.IntField(
-                new GUIContent(
-                    "Idle Shutdown (min)",
-                    "Auto-close bridge server after this many idle minutes. 0 disables idle shutdown. This value is passed to the bridge runtime as KIMODO_IDLE_TIMEOUT_SEC."),
-                settings.ServerIdleShutdownMinutes);
-            if (EditorGUI.EndChangeCheck())
-            {
-                settings.ServerIdleShutdownMinutes = idleShutdownMinutes;
-                settings.SaveSettings();
-            }
-
-            if (settings.AlwaysKeepServerExperimental)
-            {
-                EditorGUILayout.HelpBox(
-                    "Experimental: the bridge server will be kept alive during compile and Play Mode transitions. This may cause memory leaks or stale runtime state. Idle shutdown still depends on bridge runtime behavior while the server is otherwise idle.",
-                    MessageType.Warning);
-            }
-            else if (settings.ServerIdleShutdownMinutes > 0)
-            {
-                EditorGUILayout.HelpBox(
-                    $"Bridge server will auto-close after {settings.ServerIdleShutdownMinutes} idle minute(s).",
-                    MessageType.None);
-            }
+            EditorGUILayout.HelpBox(
+                "Bridge server stays alive through compile, assembly reload, and Play Mode transitions. Use Stop Server to close it manually.",
+                MessageType.Info);
 
             string localModelsPath = settings.LocalModelsPath;
             EditorGUILayout.BeginHorizontal();
