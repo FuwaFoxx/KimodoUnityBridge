@@ -49,6 +49,30 @@
 
 
 
+## 支持的平台与硬件
+
+### 系统平台
+
+- **Windows**：当前最完整、最推荐的使用平台。
+- **macOS**：支持本地运行，GPU 路线走 Apple `MPS`；`motion_correction` 默认可缺省。
+- **Linux**：支持本地运行，适合 CUDA 机器和自定义部署环境。
+
+### 硬件后端
+
+- **NVIDIA CUDA**：当前支持最完整，也是主要推荐路线。`Low` 模式优先走 `NF4`，`High` 模式走 `FP16`。
+- **Apple Silicon / MPS**：支持，走 `FP16` 路线；不走 `NF4`。
+- **CPU**：始终可用，但速度会明显慢于 GPU。
+- **Intel XPU**：当前已开始接入识别与分流，属于实验性支持；现阶段不要默认视为完整优化平台。
+- **AMD / ROCm / 其他 GPU**：当前按通用 GPU 兼容路线处理，属于实验性支持。若运行时自检通过，通常会降级到非 `NF4` 路线继续运行；不建议目前把它视为与 CUDA 等价的正式支持。
+
+### 当前建议
+
+- 想要最稳定、最快的体验：优先使用 **Windows + NVIDIA CUDA**。
+- 使用 Mac：优先准备 **Apple Silicon + MPS** 预期，默认按 `FP16` 使用。
+- 使用非 NVIDIA GPU：建议先按“可兼容运行”理解，而不是按“完整官方支持”理解。
+
+
+
 ## macOS 上的 MotionCorrection
 
 macOS 上缺少 `motion_correction` 通常不会影响 Kimodo 的主生成流程；它主要影响官方的后处理步骤。
