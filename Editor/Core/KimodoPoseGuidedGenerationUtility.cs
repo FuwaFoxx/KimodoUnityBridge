@@ -31,8 +31,8 @@ namespace KimodoBridge.Editor
             int clampedSteps = Mathf.Clamp(steps, 1, 1000);
             string constraintsJson = BuildBoundaryFullBodyConstraintsJson(startPose, endPose, clampedFrames);
 
-            string runtimeRoot = KimodoBridgePipeline.ResolveRuntimeRootOrThrow();
-            string launcherPath = KimodoBridgePipeline.ResolveStartScriptOrThrow(runtimeRoot);
+            string runtimeRoot = KimodoBridgeServerManage.ResolveRuntimeRootOrThrow();
+            string launcherPath = KimodoBridgeServerManage.ResolveStartScriptOrThrow(runtimeRoot);
 
             string resolvedModelName = string.IsNullOrWhiteSpace(modelName)
                 ? "Kimodo-SOMA-RP-v1"
@@ -58,7 +58,7 @@ namespace KimodoBridge.Editor
 
             var pipelineRequest = new KimodoBridgeCommandRequest
             {
-                RuntimeSettings = KimodoEditorRuntimeGeneratePipeline.BuildRuntimeSettings(
+                RuntimeSettings = KimodoEditorGeneratePipeline.BuildRuntimeSettings(
                     runtimeRoot,
                     launcherPath,
                     resolvedModelName,

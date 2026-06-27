@@ -8,6 +8,15 @@ using UnityEngine;
 
 namespace KimodoBridge
 {
+    internal sealed class KimodoBridgeGenerationResult
+    {
+        public string MotionJsonCompact { get; set; }
+        public KimodoRawMotionData MotionData { get; set; }
+        public string MotionFormat { get; set; }
+        public string RawStatus { get; set; }
+        public string Message { get; set; }
+    }
+
     public sealed class KimodoBridgeService : IDisposable
     {
         private const int BridgeMessageLogPumpWaitFileTimeoutMs = 60000;
@@ -208,7 +217,7 @@ namespace KimodoBridge
             }
         }
 
-        public async Task<string> GenerateAsync(
+        internal async Task<KimodoBridgeGenerationResult> GenerateAsync(
             KimodoGenerationRequestDto request,
             Action<string> progress,
             CancellationToken token)
@@ -228,7 +237,7 @@ namespace KimodoBridge
                 $"loopHint={request.loop_hint}, segmentIndex={request.segment_index}, transition={request.transition_duration:F3}, " +
                 $"boundaryPoseLen={(request.boundary_pose_json ?? string.Empty).Length}");
 
-            JObject response;
+            BridgeProtocolResponse response;
             try
             {
                 response = await SendGenerateRequestAsync(request, progress, token).ConfigureAwait(false);
@@ -239,15 +248,40 @@ namespace KimodoBridge
                 throw;
             }
 
-            string status = response?.Value<string>("status") ?? string.Empty;
-            string responseMessage = response?.Value<string>("message") ?? string.Empty;
-            string motionJson = response?.Value<string>("motion_json_compact");
+            JObject header = response?.Header;
+            string status = header?.Value<string>("status") ?? string.Empty;
+            string responseMessage = header?.Value<string>("message") ?? string.Empty;
+            string outputFormat = header?.Value<string>("output_format") ?? string.Empty;
+            string motionJson = header?.Value<string>("motion_json_compact");
             EmitDebugLog(
-                $"[KimodoBridge] Generate response: status='{status}', hasMotion={!string.IsNullOrWhiteSpace(motionJson)}, " +
-                $"message='{responseMessage}'");
+                $"[KimodoBridge] Generate response: status='{status}', format='{outputFormat}', hasJson={!string.IsNullOrWhiteSpace(motionJson)}, " +
+                $"hasBinary={(response?.BinaryPayload != null && response.BinaryPayload.Length > 0)}, message='{responseMessage}'");
             if (!string.Equals(status, "done", StringComparison.OrdinalIgnoreCase))
             {
                 throw new Exception($"Unexpected bridge response status: {status}. message={responseMessage}");
+            }
+
+            if (string.Equals(outputFormat, "flatbuf_motion_v1", StringComparison.OrdinalIgnoreCase))
+            {
+                byte[] payload = response.BinaryPayload;
+                if (payload == null || payload.Length == 0)
+                {
+                    throw new Exception("Bridge completed without FlatBuffer payload bytes.");
+                }
+
+                if (!KimodoRawMotionUtility.TryParseFlatBuffer(payload, out KimodoRawMotionData motionData, out string parseError))
+                {
+                    throw new Exception($"Failed to parse bridge FlatBuffer motion: {parseError}");
+                }
+
+                EmitProgress(progress, "Bridge generation complete.");
+                return new KimodoBridgeGenerationResult
+                {
+                    MotionData = motionData,
+                    MotionFormat = outputFormat,
+                    RawStatus = status,
+                    Message = string.IsNullOrWhiteSpace(responseMessage) ? "Bridge generation complete." : responseMessage
+                };
             }
 
             if (string.IsNullOrWhiteSpace(motionJson))
@@ -256,10 +290,16 @@ namespace KimodoBridge
             }
 
             EmitProgress(progress, "Bridge generation complete.");
-            return motionJson;
+            return new KimodoBridgeGenerationResult
+            {
+                MotionJsonCompact = motionJson,
+                MotionFormat = string.IsNullOrWhiteSpace(outputFormat) ? "json_compact" : outputFormat,
+                RawStatus = status,
+                Message = string.IsNullOrWhiteSpace(responseMessage) ? "Bridge generation complete." : responseMessage
+            };
         }
 
-        private Task<JObject> SendGenerateRequestAsync(
+        private Task<BridgeProtocolResponse> SendGenerateRequestAsync(
             KimodoGenerationRequestDto request,
             Action<string> progress,
             CancellationToken token)

@@ -6,7 +6,6 @@ using System.Threading.Tasks;
 using TimelineInject;
 using UnityEngine;
 using UnityEngine.Animations;
-using Process = System.Diagnostics.Process;
 
 namespace KimodoBridge
 {
@@ -32,6 +31,7 @@ namespace KimodoBridge
         [SerializeField] private int fixedSeed = 42;
         [SerializeField][Min(0.1f)] private float segmentIntervalSeconds = 5f;
         [SerializeField] private bool loopHint = true;
+        [SerializeField][Min(1)] private int overlapConstraintSamples = 4;
         [SerializeField] private bool allowPartialJoints;
         [SerializeField] private bool trimSegmentTail = true;
         [SerializeField][Range(0f, 0.2f)] private float segmentTailTrimPercent = 0.1f;
@@ -49,6 +49,7 @@ namespace KimodoBridge
         private const string KimodoFolderName = "NvlabKimodoQuickServer~";
         private const float MinGenerationDurationSeconds = 1f;
         private const float MaxGenerationDurationSeconds = 10f;
+        private const int MaxOverlapConstraintSamples = 10;
         private static readonly string[] RandomMotionPrompts =
         {
             "A woman walks and says hello.",
@@ -94,7 +95,8 @@ namespace KimodoBridge
         private bool generationInFlight;
         private int segmentIndex;
         private int lastGenerationWaitStatusSegment = -1;
-        private KimodoMarkerSampleResult nextConstraintPose;
+        private readonly List<KimodoMarkerSampleResult> nextConstraintPoses = new List<KimodoMarkerSampleResult>();
+        private readonly List<KimodoMarkerSampleResult> constraintJsonScratch = new List<KimodoMarkerSampleResult>();
         private string promptDraft;
         private string statusMessage = "Idle.";
         private TransformSnapshot initialProfileSnapshot;
@@ -194,7 +196,15 @@ namespace KimodoBridge
 
             if (startedSegment != null)
             {
-                nextConstraintPose = startedSegment.ConstraintTailPose;
+                if (loopHint)
+                {
+                    SetNextConstraintPoses(startedSegment.ConstraintOverlapPoses);
+                }
+                else
+                {
+                    ClearNextConstraintPoses();
+                }
+
                 UpdateStatus($"Playing segment {startedSegment.Index}.");
             }
         }
@@ -240,7 +250,7 @@ namespace KimodoBridge
                 lastGenerationWaitStatusSegment = -1;
                 if (!preserveNextConstraintPoseOnStart)
                 {
-                    nextConstraintPose = null;
+                    ClearNextConstraintPoses();
                 }
 
                 preserveNextConstraintPoseOnStart = false;
@@ -308,11 +318,11 @@ namespace KimodoBridge
             {
                 try
                 {
-                    await bridgeService.StopAsync(CancellationToken.None);
+                    await bridgeService.DetachAsync(CancellationToken.None);
                 }
                 catch (Exception ex)
                 {
-                    Debug.LogWarning($"[KimodoInfiniteMotionDemo] Stop bridge failed: {ex.Message}");
+                    Debug.LogWarning($"[KimodoInfiniteMotionDemo] Detach bridge failed: {ex.Message}");
                 }
 
                 bridgeService.Dispose();
@@ -326,7 +336,7 @@ namespace KimodoBridge
 
             generationInFlight = false;
             lastGenerationWaitStatusSegment = -1;
-            nextConstraintPose = null;
+            ClearNextConstraintPoses();
             motionPlayer.Stop();
             motionPlayer.ResetCompletionState();
             motionPlayer.ClearQueue();
@@ -422,12 +432,21 @@ namespace KimodoBridge
                 };
 
                 OnProgress($"Generating segment {segmentIndex}...");
-                string motionJson = await bridgeService.GenerateAsync(request, OnProgress, token);
+                KimodoBridgeGenerationResult bridgeResult = await bridgeService.GenerateAsync(request, OnProgress, token);
 
                 KimodoRawMotionMetadata metadata = await Task.Run(() =>
                 {
-                    if (!KimodoRawMotionUtility.TryParseAndAnalyze(
-                            motionJson,
+                    var generationResult = new KimodoGenerationResultDto
+                    {
+                        motionJsonCompact = bridgeResult?.MotionJsonCompact,
+                        motionData = bridgeResult?.MotionData,
+                        motionFormat = bridgeResult?.MotionFormat,
+                        rawStatus = bridgeResult?.RawStatus,
+                        message = bridgeResult?.Message
+                    };
+
+                    if (!KimodoRawMotionUtility.TryAnalyzeGenerationResult(
+                            generationResult,
                             modelName,
                             out KimodoRawMotionMetadata parsedMetadata,
                             out string parseError,
@@ -471,16 +490,22 @@ namespace KimodoBridge
                     return;
                 }
 
-                KimodoMarkerSampleResult constraintTailPose = effectiveTailPose.Clone();
-                constraintTailPose.kimodoRootPosition = new Vector3(0f, constraintTailPose.kimodoRootPosition.y, 0f);
-                constraintTailPose.unityRootPos = constraintTailPose.kimodoRootPosition;
+                List<KimodoMarkerSampleResult> constraintOverlapPoses = BuildConstraintOverlapPoses(
+                    metadata.Motion,
+                    effectiveLastFrameIndex);
+                if (constraintOverlapPoses.Count == 0)
+                {
+                    KimodoMarkerSampleResult fallbackPose = effectiveTailPose.Clone();
+                    fallbackPose.sampleTime = 0.0;
+                    constraintOverlapPoses.Add(fallbackPose);
+                }
 
                 motionPlayer.Enqueue(new GeneratedSegment
                 {
                     Index = segmentIndex,
                     PromptText = prompt,
                     Motion = metadata.Motion,
-                    ConstraintTailPose = constraintTailPose,
+                    ConstraintOverlapPoses = constraintOverlapPoses,
                     FirstRootPosition = metadata.FirstRootPosition,
                     LastRootPosition = effectiveLastRootPosition,
                     WorldAccumulatedOffset = Vector3.zero,
@@ -509,18 +534,34 @@ namespace KimodoBridge
 
         private string BuildNextConstraintsJson()
         {
-            if (nextConstraintPose == null)
+            if (!loopHint || nextConstraintPoses.Count == 0)
             {
                 return string.Empty;
             }
 
-            KimodoMarkerSampleResult sample = nextConstraintPose.Clone();
-            sample.constraintType = FullBodyConstraintType;
-            sample.sampleTime = 0.0;
-            sample.kimodoRootPosition = new Vector3(0f, sample.kimodoRootPosition.y, 0f);
-            sample.unityRootPos = sample.kimodoRootPosition;
+            constraintJsonScratch.Clear();
+            for (int i = 0; i < nextConstraintPoses.Count; i++)
+            {
+                KimodoMarkerSampleResult source = nextConstraintPoses[i];
+                if (source == null)
+                {
+                    continue;
+                }
+
+                KimodoMarkerSampleResult sample = source.Clone();
+                sample.constraintType = FullBodyConstraintType;
+                sample.kimodoRootPosition = new Vector3(0f, sample.kimodoRootPosition.y, 0f);
+                sample.unityRootPos = sample.kimodoRootPosition;
+                constraintJsonScratch.Add(sample);
+            }
+
+            if (constraintJsonScratch.Count == 0)
+            {
+                return string.Empty;
+            }
+
             return KimodoConstraintJsonExporter.ToConstraintsJson(
-                new List<KimodoMarkerSampleResult> { sample },
+                constraintJsonScratch,
                 0.0,
                 Mathf.Max(segmentIntervalSeconds, generationFrames / KimodoPlayableClip.FIXED_FRAME_RATE));
         }
@@ -534,19 +575,16 @@ namespace KimodoBridge
                 throw new FileNotFoundException($"Cannot resolve bridge launcher under '{resolvedRuntimeRoot}'.");
             }
 
-            return new BridgeRuntimeSettings
-            {
-                runtimeRoot = resolvedRuntimeRoot,
-                launcherPath = launcherPath,
-                modelName = modelName,
-                highVram = highVram,
-                forceSetup = forceSetup,
-                modelsRoot = string.IsNullOrWhiteSpace(modelsRoot) ? null : Path.GetFullPath(modelsRoot),
-                ownerProcessId = Process.GetCurrentProcess().Id,
-                startupTimeoutMs = Mathf.Max(
+            return BridgeRuntimeSettingsFactory.Create(
+                runtimeRoot: resolvedRuntimeRoot,
+                launcherPath: launcherPath,
+                modelName: modelName,
+                highVram: highVram,
+                forceSetup: forceSetup,
+                modelsRoot: string.IsNullOrWhiteSpace(modelsRoot) ? null : Path.GetFullPath(modelsRoot),
+                startupTimeoutMs: Mathf.Max(
                     BridgeRuntimeSettings.DefaultStartupTimeoutMs,
-                    Mathf.RoundToInt(Mathf.Max(1f, startupTimeoutMinutes) * 60f * 1000f))
-            };
+                    Mathf.RoundToInt(Mathf.Max(1f, startupTimeoutMinutes) * 60f * 1000f)));
         }
 
         private bool ValidateConfiguration(out string error)
@@ -603,40 +641,13 @@ namespace KimodoBridge
         public async Task ResetDemoAsync()
         {
             promptDraft = ResolveInitialPrompt();
-            nextConstraintPose = null;
+            ClearNextConstraintPoses();
             preserveNextConstraintPoseOnStart = false;
             generationRequestVersion++;
             lastGenerationWaitStatusSegment = -1;
             motionPlayer.ClearQueue();
-
-        public void StopDemo()
-        {
-            _ = StopDemoAsync();
         }
 
-        public void ResetDemo()
-        {
-            _ = ResetDemoAsync();
-        }
-
-        public async Task ResetDemoAsync()
-        {
-            bool wasActive = running || startRequested || bridgeService != null;
-            if (wasActive)
-            {
-                UpdateStatus("Prompt reset.");
-                return;
-            }
-
-            if (generationInFlight)
-            {
-                UpdateStatus("Prompt reset. Waiting for current generation to finish.");
-                return;
-            }
-
-            UpdateStatus("Prompt reset. Generating fresh segment.");
-            await GenerateNextSegmentAsync(lifetimeCts.Token);
-        }
 
         private void DrawPromptBar()
         {
@@ -821,6 +832,86 @@ namespace KimodoBridge
             float trimPercent = Mathf.Clamp(segmentTailTrimPercent, 0.05f, 0.2f);
             int trimmedFrameCount = Mathf.FloorToInt(lastFrameIndex * trimPercent);
             return Mathf.Clamp(lastFrameIndex - trimmedFrameCount, 1, lastFrameIndex);
+        }
+
+        private List<KimodoMarkerSampleResult> BuildConstraintOverlapPoses(
+            KimodoRawMotionData motion,
+            int effectiveLastFrameIndex)
+        {
+            int sampleCount = Mathf.Clamp(overlapConstraintSamples, 1, MaxOverlapConstraintSamples);
+            var samples = new List<KimodoMarkerSampleResult>(sampleCount);
+            if (motion == null)
+            {
+                return samples;
+            }
+
+            float frameRate = motion.FrameRate > 1e-6f ? motion.FrameRate : KimodoPlayableClip.FIXED_FRAME_RATE;
+            float constraintFrameRate = KimodoPlayableClip.FIXED_FRAME_RATE > 1e-6f
+                ? KimodoPlayableClip.FIXED_FRAME_RATE
+                : frameRate;
+            int lastSourceFrameIndex = int.MinValue;
+            for (int sampleIndex = 0; sampleIndex < sampleCount; sampleIndex++)
+            {
+                // Keep frame 0 aligned to the previous tail, then sparsely reinforce the next few head frames.
+                int reverseOrdinal = 1 << sampleIndex;
+                int sourceFrameIndex = Mathf.Clamp(
+                    effectiveLastFrameIndex - (reverseOrdinal - 1),
+                    0,
+                    effectiveLastFrameIndex);
+                if (sourceFrameIndex == lastSourceFrameIndex)
+                {
+                    continue;
+                }
+
+                double sampleTime = (reverseOrdinal - 1) / Mathf.Max(1e-6f, constraintFrameRate);
+                if (!KimodoRawMotionUtility.TryExtractMarkerSample(
+                        motion,
+                        modelName,
+                        sourceFrameIndex,
+                        out KimodoMarkerSampleResult sample,
+                        out string sampleError,
+                        FullBodyConstraintType,
+                        sampleTime,
+                        allowPartialJoints))
+                {
+                    if (verboseLogging)
+                    {
+                        Debug.LogWarning(
+                            $"[KimodoInfiniteMotionDemo] Failed to extract overlap sample {sampleIndex} at frame {sourceFrameIndex}: {sampleError}");
+                    }
+
+                    continue;
+                }
+
+                lastSourceFrameIndex = sourceFrameIndex;
+                samples.Add(sample);
+            }
+
+            return samples;
+        }
+
+        private void ClearNextConstraintPoses()
+        {
+            nextConstraintPoses.Clear();
+            constraintJsonScratch.Clear();
+        }
+
+        private void SetNextConstraintPoses(IReadOnlyList<KimodoMarkerSampleResult> poses)
+        {
+            nextConstraintPoses.Clear();
+            if (poses == null)
+            {
+                return;
+            }
+
+            for (int i = 0; i < poses.Count; i++)
+            {
+                KimodoMarkerSampleResult pose = poses[i];
+                if (pose != null)
+                {
+                    nextConstraintPoses.Add(pose);
+                }
+            }
         }
 
         private void CacheInitialTransformSnapshots()

@@ -32,6 +32,8 @@ namespace KimodoBridge
     public sealed class KimodoGenerationResultDto
     {
         public string motionJsonCompact;
+        [NonSerialized] public KimodoRawMotionData motionData;
+        public string motionFormat;
         public string rawStatus;
         public string message;
     }
