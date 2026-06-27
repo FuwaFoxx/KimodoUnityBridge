@@ -1,19 +1,17 @@
-[演示视频](https://www.bilibili.com/video/BV1HG7361Env)
-求star！求star！求star！
+[演示视频](https://www.bilibili.com/video/BV1HG7361Env) . [完整的Demo](https://github.com/OneYoungMean/KimodoUnityBridge_FullDemo)
+
 # License
 [Apache License 2.0](https://github.com/OneYoungMean/KimodoUnityBridge/blob/main/LICENSE)
 
-# 1.1.10更新点速览    
-* **Runtime支持，现在你可以将server打包进入runtime当中运行了**
-* **AnimatorTool 现在单独作为一个工具，你不必再timeline事先bake好动画再移植了**
-* **[完整的Demo](https://github.com/OneYoungMean/KimodoUnityBridge_FullDemo)，你不必再去看lightdemo了！**  
-* 修复了unity 2021 报错的问题.
-* 修复了在linux平台下显存不大于6G无法切换到CPU模式的问题.
+# 1.1.33更新点速览    
+* **大幅度优化Generate pipe不稳定的问题**
+* **小幅度优化Quick Server性能,使用FaltPatten优化QickServer与Bridge通讯机制**
+* 修复了若干前后动画不匹配的问题.
+* 增加了RuntimeDemo新的api,方便用户调用.
 
 
 ## 更新注意事项
-**你可能需要移除所有的KimodoAnimationCache，它们不再受支持，点击ProjectSetting/Kimodo Server Manager/Clear Clip Cache 来解决问题**.  
-**如果遇到卡顿问题,尝试将Max Cached Clip设置为 100**  
+**老用户请删除项目目录\NvlabKimodoQuickServer~,否则运行会报错!**
 ***
 
 # KimodoUnityBridge
