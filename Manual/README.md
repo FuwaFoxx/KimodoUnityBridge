@@ -47,6 +47,12 @@
 - 内存 ≥ 8G，硬盘可用空间 ≥ 10G。
 - NVIDIA 显卡显存 ≥ 6G 时可运行 CUDA 版本（不做强制限制，CPU 也能跑，只是更慢）。
 
+### Linux / macOS 命令行依赖
+
+- **Linux**：首次使用前，建议先在命令行安装 `git` 和 `uv`。
+- **macOS**：首次使用前，建议先在命令行安装 `git` 和 `uv`。
+- 当前 QuickServer **不会自动安装 `git-lfs`**。如果你的使用方式依赖 Git LFS 文件同步，也需要你自己提前安装。
+
 
 
 ## 支持的平台与硬件
@@ -85,17 +91,19 @@
 
 
 
-## macOS 上的 MotionCorrection
+## macOS 上缺少 MotionCorrection解决方案（可选）
 
 macOS 上缺少 `motion_correction` 通常不会影响 Kimodo 的主生成流程；它主要影响官方的后处理步骤。
 
-如果你希望在 macOS 上手动启用 `motion_correction`，可参考作者提供的安装思路：
+当前版本在 macOS 上 **会在 setup 阶段自动尝试编译并安装 `motion_correction`**。QuickServer 会自动补 `cmake`，但如果系统里缺少底层构建依赖，编译仍然可能失败。
 
-1. 先安装依赖：`brew install cmake simde pybind11 eigen`
-2. 进入 QuickServer 内的 `kimodo` 源码目录
-3. 按作者脚本说明完成 `motion_correction` 的构建安装
+如果你在 macOS 上遇到 `motion_correction` 相关编译失败，建议先安装这些依赖：
 
-如果只是先跑通生成流程，可以先忽略这一步；等确认 mac 端确实需要官方后处理时，再补装即可。
+- `brew install simde pybind11 eigen`
+
+装完后重新执行一次 setup / generate，QuickServer 会再次尝试自动构建它。
+
+如果只是先跑通生成流程，可以先忽略这一步；等确认 mac 端确实需要官方后处理时，再处理 `motion_correction` 相关依赖即可。
 
 
 

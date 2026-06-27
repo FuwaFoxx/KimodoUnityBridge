@@ -405,12 +405,16 @@ namespace KimodoBridge.Editor
 
             using (new EditorGUI.DisabledScope(operationInProgress || EditorCompilationStateGate.IsCompilingOrReloading))
             {
-                if (GUILayout.Button(new GUIContent("Try Fix (delete and reconfigure)", "Run bridge self-repair flow: clean broken parts and reconfigure runtime."), GUILayout.Height(24f)))
+                if (GUILayout.Button(new GUIContent("Try Fix (force setup)", "Run bridge self-repair flow: force setup and revalidate the runtime without deleting the runtime root."), GUILayout.Height(24f)))
                 {
                     _ = TryFixRuntimeAsync();
                 }
 
-                if (GUILayout.Button(new GUIContent("Delete All Data", "Delete the full Kimodo runtime folder including downloaded models and cache."), GUILayout.Height(24f)))
+                Color previousColor = GUI.color;
+                GUI.color = new Color(0.9f, 0.3f, 0.3f, 1f);
+                bool deleteAllDataClicked = GUILayout.Button(new GUIContent("Delete All Data", "Delete the full Kimodo runtime folder including downloaded models and cache."), GUILayout.Height(24f));
+                GUI.color = previousColor;
+                if (deleteAllDataClicked)
                 {
                     if (EditorUtility.DisplayDialog("Delete All Data", "Delete entire Kimodo runtime folder? This cannot be undone.", "Delete", "Cancel"))
                     {
@@ -576,8 +580,8 @@ namespace KimodoBridge.Editor
         private Task EnsureRuntimeRootAsync()
         {
             return RunOperationAsync(
-                initialStatus: runtimeExists ? "Reinstalling runtime root..." : "Creating runtime root...",
-                successStatus: runtimeExists ? "Runtime root reinstalled." : "Runtime root ready.",
+                initialStatus: runtimeExists ? "Reinstalling runtime root (keep models)..." : "Creating runtime root...",
+                successStatus: runtimeExists ? "Runtime root reinstalled (models preserved)." : "Runtime root ready.",
                 async _ =>
                 {
                     using (KimodoBridgeServerManage.EnterRuntimeMaintenanceScope())
@@ -636,7 +640,7 @@ namespace KimodoBridge.Editor
         private Task TryFixRuntimeAsync()
         {
             return RunOperationAsync(
-                initialStatus: "TryFix running...",
+                initialStatus: "Force setup running...",
                 successStatus: "TryFix completed.",
                 async progress =>
                 {
@@ -652,12 +656,6 @@ namespace KimodoBridge.Editor
                         if (!Directory.Exists(runtimeRootPath))
                         {
                             throw new DirectoryNotFoundException($"Runtime root not found: {runtimeRootPath}");
-                        }
-
-                        Directory.Delete(runtimeRootPath, recursive: true);
-                        if (!KimodoBridgeServerManage.BootstrapRuntimeRootIfMissing())
-                        {
-                            throw new InvalidOperationException("TryFix failed: cannot bootstrap runtime.");
                         }
 
                         await KimodoBridgeServerManage.StartServerAsync(
