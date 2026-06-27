@@ -49,6 +49,20 @@
 
 
 
+## macOS 上的 MotionCorrection
+
+macOS 上缺少 `motion_correction` 通常不会影响 Kimodo 的主生成流程；它主要影响官方的后处理步骤。
+
+如果你希望在 macOS 上手动启用 `motion_correction`，可参考作者提供的安装思路：
+
+1. 先安装依赖：`brew install cmake simde pybind11 eigen`
+2. 进入 QuickServer 内的 `kimodo` 源码目录
+3. 按作者脚本说明完成 `motion_correction` 的构建安装
+
+如果只是先跑通生成流程，可以先忽略这一步；等确认 mac 端确实需要官方后处理时，再补装即可。
+
+
+
 ## 提交反馈
 
 如果遇到本手册没有覆盖的问题，欢迎提交日志帮助改进，具体方式见 [常见问题与报错处理](常见问题与报错处理.md) 的"提交 Bug"一节。
