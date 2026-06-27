@@ -71,6 +71,18 @@
 - 使用 Mac：优先准备 **Apple Silicon + MPS** 预期，默认按 `FP16` 使用。
 - 使用非 NVIDIA GPU：建议先按“可兼容运行”理解，而不是按“完整官方支持”理解。
 
+### AMD 显卡参考
+
+下表仅用于帮助 AMD 用户快速判断是否值得尝试 Windows / Linux 本地 GPU 路线，不代表所有型号都已在 Kimodo 上做过完整验证。
+
+| 显卡型号 | 平台 | 是否支持 | 备注 |
+| --- | --- | --- | --- |
+| Radeon RX 7000 / RX 9000 系列（官方 Windows 兼容表中的受支持型号） | Windows | 支持 | 通常需要安装 [HIP SDK / ROCm for Windows](https://rocm.docs.amd.com/projects/install-on-windows/en/latest/index.html) |
+| Radeon PRO W7000 / W9000 部分型号 | Windows | 支持 | 通常需要安装 [HIP SDK / ROCm for Windows](https://rocm.docs.amd.com/projects/install-on-windows/en/latest/index.html) |
+| Ryzen AI Max 部分型号 | Windows | 支持 | 通常需要安装 [HIP SDK / ROCm for Windows](https://rocm.docs.amd.com/projects/install-on-windows/en/latest/index.html) |
+| Radeon RX 6000 系列 | Windows | 不建议按正式支持理解 | 不建议默认视为官方稳支持平台；即使可尝试，也不要按开箱即用预期理解。 |
+| 支持 ROCm 的 AMD GPU | Linux | 支持 | 一般需要先安装 [ROCm](https://rocm.docs.amd.com/en/latest/) ，再配置对应的 PyTorch / 运行环境。 |
+
 
 
 ## macOS 上的 MotionCorrection
