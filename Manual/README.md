@@ -47,13 +47,23 @@
 - 内存 ≥ 8G，硬盘可用空间 ≥ 10G。
 - NVIDIA 显卡显存 ≥ 6G 时可运行 CUDA 版本（不做强制限制，CPU 也能跑，只是更慢）。
 
-### Linux / macOS 命令行依赖
+### 安装UV（环境配置工具）
 
-- **Linux**：首次使用前，建议先在命令行安装 `git` 和 `uv`。
-- **macOS**：首次使用前，建议先在命令行安装 `git` 和 `uv`。
-- 当前 QuickServer **不会自动安装 `git-lfs`**。如果你的使用方式依赖 Git LFS 文件同步，也需要你自己提前安装。
+- **Linux/macOS**：首次使用前，建议先在命令行安装 `uv`。
 
+首次手动安装 `uv` 时，可直接使用下面的命令：
 
+```bash
+# macOS / Linux
+curl -LsSf https://astral.sh/uv/install.sh | sh
+```
+
+Windows通常会下载离线版，如果自动安装失败或超时，也可以先手动执行下面的命令，再回到 Unity 继续 setup / generate。
+
+```powershell
+# Windows PowerShell
+powershell -ExecutionPolicy Bypass -c "irm https://astral.sh/uv/install.ps1 | iex"
+```
 
 ## 支持的平台与硬件
 

@@ -405,6 +405,11 @@ namespace KimodoBridge.Editor
 
             using (new EditorGUI.DisabledScope(operationInProgress || EditorCompilationStateGate.IsCompilingOrReloading))
             {
+                if (GUILayout.Button(new GUIContent("Open Folder", "Open the Kimodo runtime root folder in Explorer/Finder."), GUILayout.Height(24f)))
+                {
+                    TryOpenRuntimeRootFolder();
+                }
+
                 if (GUILayout.Button(new GUIContent("Try Fix (force setup)", "Run bridge self-repair flow: force setup and revalidate the runtime without deleting the runtime root."), GUILayout.Height(24f)))
                 {
                     _ = TryFixRuntimeAsync();
@@ -424,6 +429,32 @@ namespace KimodoBridge.Editor
             }
 
             EditorGUILayout.EndVertical();
+        }
+
+        private void TryOpenRuntimeRootFolder()
+        {
+            lastError = string.Empty;
+
+            try
+            {
+                if (string.IsNullOrWhiteSpace(runtimeRoot))
+                {
+                    lastError = "Runtime root is empty.";
+                    return;
+                }
+
+                if (!Directory.Exists(runtimeRoot))
+                {
+                    lastError = $"Runtime root not found: {runtimeRoot}";
+                    return;
+                }
+
+                EditorUtility.RevealInFinder(runtimeRoot);
+            }
+            catch (Exception e)
+            {
+                lastError = $"Open runtime root failed: {e.Message}";
+            }
         }
 
         private void TryDeleteModelDirectory(string path, string modelName)
