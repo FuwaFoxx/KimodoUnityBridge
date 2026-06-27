@@ -1,19 +1,17 @@
-[演示视频](https://www.bilibili.com/video/BV1HG7361Env)
-求star！求star！求star！
+[演示视频](https://www.bilibili.com/video/BV1HG7361Env) . [完整的Demo](https://github.com/OneYoungMean/KimodoUnityBridge_FullDemo)
+
 # License
 [Apache License 2.0](https://github.com/OneYoungMean/KimodoUnityBridge/blob/main/LICENSE)
 
-# 1.1.10更新点速览    
-* **Runtime支持，现在你可以将server打包进入runtime当中运行了**
-* **AnimatorTool 现在单独作为一个工具，你不必再timeline事先bake好动画再移植了**
-* **[完整的Demo](https://github.com/OneYoungMean/KimodoUnityBridge_FullDemo)，你不必再去看lightdemo了！**  
-* 修复了unity 2021 报错的问题.
-* 修复了在linux平台下显存不大于6G无法切换到CPU模式的问题.
+# 1.1.33更新点速览    
+* **大幅度优化Generate pipe不稳定的问题**
+* **小幅度优化Quick Server性能,使用FaltPatten优化QickServer与Bridge通讯机制**
+* 修复了若干前后动画不匹配的问题.
+* 增加了RuntimeDemo新的api,方便用户调用.
 
 
 ## 更新注意事项
-**你可能需要移除所有的KimodoAnimationCache，它们不再受支持，点击ProjectSetting/Kimodo Server Manager/Clear Clip Cache 来解决问题**.  
-**如果遇到卡顿问题,尝试将Max Cached Clip设置为 100**  
+**老用户请删除项目目录\NvlabKimodoQuickServer~并重新运行，代码会自动拉取最新的包！否则运行会报错!**
 ***
 
 # KimodoUnityBridge
@@ -33,7 +31,7 @@
    c. 等待完成，如果一切正常，你会在菜单栏看到kimodo的菜单.   
    <img width="1061" height="526" alt="Unity_uAULwLfP7W" src="https://github.com/user-attachments/assets/5f18b33e-4a21-42cf-8acd-57c0e548d44d" />  
 2. 通过安装包安装：  
-   a. 下载https://github.com/OneYoungMean/KimodoUnityBridge/releases/download/v1.1.10/KimodoUnityBridge-v1.1.10.zip （如果有更新的版本先下载更新的，我还在研究怎么打latest version）  
+   a. 下载https://github.com/OneYoungMean/KimodoUnityBridge/releases/latest的第一个压缩包
    b. 解压到项目/Packages目录下面  
    c. 切换回unity等待完成，如果一切正常，你会在菜单栏看到kimodo的菜单.  
 3. 下载FullDemo  
@@ -49,7 +47,8 @@
 4. 在场景中找到Timeline游戏对象，打开上面挂载的PlayableDirector脚本当中的timeline资产  
 5. 在timeline 窗口当中选择一个timeline clip  
 6. 在inspector面板中点击生成(建议勾选一下random，不然动画会和原来一样）  
-7. 运行查看效果  
+   a.目前第一次生成需要下载模型/环境(约10G),时间较长(30-60分钟),偶遇网络波动可能会导致启动失败,届时重新生成一下即可.   
+8. 运行查看效果  
 <img width="3840" height="2064" alt="微信图片_20260623111822_83_24" src="https://github.com/user-attachments/assets/3d01af83-712c-45a9-99f6-8f33fa8dba6e" />  
 ***
 
@@ -85,11 +84,11 @@
 
 ### 说明书
 
-施工中...
+[使用说明](https://github.com/OneYoungMean/KimodoUnityBridge/tree/main/Manual)
+目前施工进度50%
 
 ### 已知问题
-CUDA平台生成clip的时候有小概率会走CPU生成管线.重启一下unity一般能解决问题.  
-第一次Generator有小概率会失败，重新生成可以解决一下问题.  
+
 Constraint Edit保存的的时候有概率没有写入成功.  
 
 ### Bug Report
