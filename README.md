@@ -1,4 +1,4 @@
-[演示视频](https://www.bilibili.com/video/BV1HG7361Env) . [完整的Demo](https://github.com/OneYoungMean/KimodoUnityBridge_FullDemo) . [使用说明](https://github.com/OneYoungMean/KimodoUnityBridge/tree/main/Manual)
+[演示视频](https://www.bilibili.com/video/BV1HG7361Env) . [完整的Demo](https://github.com/OneYoungMean/KimodoUnityBridge_FullDemo) . [使用说明](https://github.com/OneYoungMean/KimodoUnityBridge/blob/main/Manual/README.md)
 
 # License
 [Apache License 2.0](https://github.com/OneYoungMean/KimodoUnityBridge/blob/main/LICENSE)
