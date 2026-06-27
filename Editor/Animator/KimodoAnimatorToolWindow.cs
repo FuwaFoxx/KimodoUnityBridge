@@ -233,7 +233,7 @@ namespace KimodoBridge.Editor
                                 EditorGenerateSessionRunner.UpdateProgress(requestTarget, session.RequestId, stage, message);
                             });
 
-                        KimodoEditorGenerateResult result = await KimodoEditorRuntimeGeneratePipeline.ExecuteAsync(request);
+                        KimodoEditorGenerateResult result = await KimodoEditorGeneratePipeline.ExecuteAsync(request);
                         KimodoTimelinePreviewRefreshUtility.RefreshIfPreviewing();
                         return (IKimodoEditorCommandResult)result;
                     },

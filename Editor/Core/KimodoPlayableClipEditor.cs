@@ -188,7 +188,7 @@ namespace KimodoBridge.Editor
 
             bool disableGenerate =
                 isGenerating ||
-                KimodoBridgePipeline.IsRuntimeMaintenanceInProgress ||
+                KimodoBridgeServerManage.IsRuntimeMaintenanceInProgress ||
                 EditorCompilationStateGate.IsCompilingOrReloading;
             GUI.enabled = !disableGenerate;
             if (GUILayout.Button(new GUIContent("Generate & Bake", "Generate motion using current settings and bake result back into this playable clip."), GUILayout.Height(32)))
@@ -212,7 +212,7 @@ namespace KimodoBridge.Editor
                                 EditorGenerateSessionRunner.UpdateProgress(clip, session.RequestId, stage, message);
                             };
 
-                            KimodoEditorGenerateResult result = await KimodoEditorRuntimeGeneratePipeline.ExecuteAsync(request);
+                            KimodoEditorGenerateResult result = await KimodoEditorGeneratePipeline.ExecuteAsync(request);
                             token.ThrowIfCancellationRequested();
                             KimodoPlayableClipGenerationHostService.FinalizeGeneration(clip, request, result);
                             return (IKimodoEditorCommandResult)result;
@@ -303,7 +303,7 @@ namespace KimodoBridge.Editor
             }
 
             _ = forceRefresh;
-            ServerStatusSnapshot snapshot = KimodoBridgePipeline.GetServerStatusSnapshot();
+            ServerStatusSnapshot snapshot = KimodoBridgeServerManage.GetServerStatusSnapshot();
             bridgeStatusReady = snapshot.Ready;
             bridgeRunningCached = snapshot.Running;
             bridgePortDiscoveredCached = snapshot.HasPort;
@@ -367,7 +367,7 @@ namespace KimodoBridge.Editor
         private void DrawBridgeModelSelector()
         {
             string current = KimodoPlayableClip.NormalizeBridgeModelName(bridgeModelName.stringValue);
-            string[] options = KimodoBridgePipeline.SupportedModelNames;
+            string[] options = KimodoBridgeServerManage.SupportedModelNames;
             int idx = Array.IndexOf(options, current);
             if (idx < 0)
             {
@@ -380,11 +380,11 @@ namespace KimodoBridge.Editor
 
         private void DrawEstimatedSetupTimeHint()
         {
-            string runtimeRoot = KimodoBridgePipeline.GetRuntimeRootPath();
+            string runtimeRoot = KimodoBridgeServerManage.GetRuntimeRootPath();
             bool highVram = clip != null && clip.bridgeVramMode == KimodoBridgeVramMode.High;
             string modelName = clip == null ? KimodoPlayableClip.DefaultBridgeModelName : KimodoPlayableClip.NormalizeBridgeModelName(clip.bridgeModelName);
             string modelsRootOverride = KimodoPlayableClipGenerationSettings.instance.LocalModelsPath?.Trim();
-            if (!KimodoBridgePipeline.TryGetModelMissingSetupMinutes(runtimeRoot, highVram, modelName, modelsRootOverride, out int minutes))
+            if (!KimodoBridgeServerManage.TryGetModelMissingSetupMinutes(runtimeRoot, highVram, modelName, modelsRootOverride, out int minutes))
             {
                 return;
             }

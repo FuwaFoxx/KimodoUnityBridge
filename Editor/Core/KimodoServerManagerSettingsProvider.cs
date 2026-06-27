@@ -76,7 +76,7 @@ namespace KimodoBridge.Editor
         {
             if (string.IsNullOrWhiteSpace(runtimeRoot))
             {
-                runtimeRoot = KimodoBridgePipeline.GetRuntimeRootPath();
+                runtimeRoot = KimodoBridgeServerManage.GetRuntimeRootPath();
             }
 
             PullServerStatusFromController(forceRefresh: false);
@@ -134,7 +134,7 @@ namespace KimodoBridge.Editor
             EditorGUILayout.LabelField("Startup", EditorStyles.boldLabel);
             EditorGUILayout.BeginVertical("box");
 
-            string[] options = KimodoBridgePipeline.SupportedModelNames;
+            string[] options = KimodoBridgeServerManage.SupportedModelNames;
             int idx = Array.IndexOf(options, selectedModel);
             if (idx < 0)
             {
@@ -245,7 +245,7 @@ namespace KimodoBridge.Editor
                 $"Estimated VRAM for selected mode: ~{totalVramGb} GB (core 2 GB + encoder {encoderVramGb} GB).",
                 MessageType.Info);
 
-            if (KimodoBridgePipeline.TryGetModelMissingSetupMinutes(
+            if (KimodoBridgeServerManage.TryGetModelMissingSetupMinutes(
                 runtimeRoot,
                 selectedVramMode == KimodoBridgeVramMode.High,
                 selectedModel,
@@ -283,7 +283,7 @@ namespace KimodoBridge.Editor
             else
             {
                 EditorGUILayout.HelpBox("Server is not running.", MessageType.None);
-                ServerStatusSnapshot staleSnapshot = KimodoBridgePipeline.GetServerStatusSnapshot();
+                ServerStatusSnapshot staleSnapshot = KimodoBridgeServerManage.GetServerStatusSnapshot();
                 if (staleSnapshot.HasPort)
                 {
                     EditorGUILayout.HelpBox("Detected stale endpoint file (serverport). Process is not alive.", MessageType.None);
@@ -298,7 +298,7 @@ namespace KimodoBridge.Editor
                 EditorGUILayout.LabelField("Status", serverState == ServerState.Enabled ? "enable" : "disable", EditorStyles.miniLabel);
             }
 
-            bool inMaintenance = KimodoBridgePipeline.IsRuntimeMaintenanceInProgress;
+            bool inMaintenance = KimodoBridgeServerManage.IsRuntimeMaintenanceInProgress;
             bool stopMode = serverState == ServerState.Enabled;
             string buttonLabel = (operationInProgress || inMaintenance) ? "Processing..." : (stopMode ? "Stop Server" : "Start Server");
 
@@ -485,7 +485,7 @@ namespace KimodoBridge.Editor
 
         private void Refresh()
         {
-            runtimeRoot = KimodoBridgePipeline.GetRuntimeRootPath();
+            runtimeRoot = KimodoBridgeServerManage.GetRuntimeRootPath();
             runtimeExists = Directory.Exists(runtimeRoot);
             setupProfile = "unknown";
             if (runtimeExists && KimodoServerRuntimeUtil.TryReadSetupProfile(runtimeRoot, out string profile))
@@ -529,7 +529,7 @@ namespace KimodoBridge.Editor
             try
             {
                 List<ModelDirectoryInfo> source =
-                    KimodoBridgePipeline.QueryDisplayableModelDirectories(resolvedModelsRoot);
+                    KimodoBridgeServerManage.QueryDisplayableModelDirectories(resolvedModelsRoot);
                 for (int i = 0; i < source.Count; i++)
                 {
                     ModelDirectoryInfo item = source[i];
@@ -566,7 +566,7 @@ namespace KimodoBridge.Editor
             }
 
             _ = forceRefresh;
-            ServerStatusSnapshot snapshot = KimodoBridgePipeline.GetServerStatusSnapshot();
+            ServerStatusSnapshot snapshot = KimodoBridgeServerManage.GetServerStatusSnapshot();
             serverHost = snapshot.Host;
             serverPort = snapshot.Port;
             serverState = snapshot.Running ? ServerState.Enabled : ServerState.Disabled;
@@ -579,7 +579,7 @@ namespace KimodoBridge.Editor
                 successStatus: "Runtime root ready.",
                 async _ =>
                 {
-                    if (!KimodoBridgePipeline.BootstrapRuntimeRootIfMissing())
+                    if (!KimodoBridgeServerManage.BootstrapRuntimeRootIfMissing())
                     {
                         throw new InvalidOperationException("Failed to create runtime root from package template.");
                     }
@@ -596,11 +596,11 @@ namespace KimodoBridge.Editor
                 progress =>
                 {
                     string runtimeRootPath = runtimeRoot;
-                    string launcherPath = KimodoBridgePipeline.ResolveStartScriptOrThrow(runtimeRootPath);
+                    string launcherPath = KimodoBridgeServerManage.ResolveStartScriptOrThrow(runtimeRootPath);
                     string modelName = string.IsNullOrWhiteSpace(selectedModel) ? "Kimodo-SOMA-RP-v1" : selectedModel.Trim();
                     bool highVram = selectedVramMode == KimodoBridgeVramMode.High;
                     string modelsRoot = ResolveModelsRootForServer();
-                    return KimodoBridgePipeline.StartServerAsync(
+                    return KimodoBridgeServerManage.StartServerAsync(
                         launcherPath,
                         modelName,
                         highVram,
@@ -624,7 +624,7 @@ namespace KimodoBridge.Editor
             return RunOperationAsync(
                 initialStatus: "Stopping server...",
                 successStatus: "Server stopped.",
-                async _ => await KimodoBridgePipeline.StopServerAsync(CancellationToken.None));
+                async _ => await KimodoBridgeServerManage.StopServerAsync(CancellationToken.None));
         }
 
         private Task TryFixRuntimeAsync()
@@ -635,26 +635,26 @@ namespace KimodoBridge.Editor
                 async progress =>
                 {
                     string runtimeRootPath = runtimeRoot;
-                    string launcherPath = KimodoBridgePipeline.ResolveStartScriptOrThrow(runtimeRootPath);
+                    string launcherPath = KimodoBridgeServerManage.ResolveStartScriptOrThrow(runtimeRootPath);
                     string modelName = string.IsNullOrWhiteSpace(selectedModel) ? "Kimodo-SOMA-RP-v1" : selectedModel.Trim();
                     bool highVram = selectedVramMode == KimodoBridgeVramMode.High;
                     string modelsRoot = ResolveModelsRootForServer();
 
-                    using (KimodoBridgePipeline.EnterRuntimeMaintenanceScope())
+                    using (KimodoBridgeServerManage.EnterRuntimeMaintenanceScope())
                     {
-                        await KimodoBridgePipeline.StopServerAsync(CancellationToken.None);
+                        await KimodoBridgeServerManage.StopServerAsync(CancellationToken.None);
                         if (!Directory.Exists(runtimeRootPath))
                         {
                             throw new DirectoryNotFoundException($"Runtime root not found: {runtimeRootPath}");
                         }
 
                         Directory.Delete(runtimeRootPath, recursive: true);
-                        if (!KimodoBridgePipeline.BootstrapRuntimeRootIfMissing())
+                        if (!KimodoBridgeServerManage.BootstrapRuntimeRootIfMissing())
                         {
                             throw new InvalidOperationException("TryFix failed: cannot bootstrap runtime.");
                         }
 
-                        await KimodoBridgePipeline.StartServerAsync(
+                        await KimodoBridgeServerManage.StartServerAsync(
                             launcherPath,
                             modelName,
                             highVram,
@@ -675,9 +675,9 @@ namespace KimodoBridge.Editor
                 successStatus: "Runtime data deleted.",
                 async _ =>
                 {
-                    using (KimodoBridgePipeline.EnterRuntimeMaintenanceScope())
+                    using (KimodoBridgeServerManage.EnterRuntimeMaintenanceScope())
                     {
-                        await KimodoBridgePipeline.StopServerAsync(CancellationToken.None);
+                        await KimodoBridgeServerManage.StopServerAsync(CancellationToken.None);
                         if (!Directory.Exists(runtimeRootPath))
                         {
                             throw new DirectoryNotFoundException($"Runtime root not found: {runtimeRootPath}");

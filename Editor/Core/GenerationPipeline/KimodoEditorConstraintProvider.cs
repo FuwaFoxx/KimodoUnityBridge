@@ -60,7 +60,7 @@ namespace KimodoBridge.Editor
                 return null;
             }
 
-            if (!KimodoTimelineInOutConstraintContextUtility.TryResolveDirector(
+            if (!KimodoInOutConstraintAdapter.TryResolveDirector(
                     sourceClip,
                     track,
                     out PlayableDirector director,

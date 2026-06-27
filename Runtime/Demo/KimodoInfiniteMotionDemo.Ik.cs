@@ -79,7 +79,7 @@ namespace KimodoBridge
             public int Index;
             public string PromptText;
             public KimodoRawMotionData Motion;
-            public KimodoMarkerSampleResult ConstraintTailPose;
+            public List<KimodoMarkerSampleResult> ConstraintOverlapPoses;
             public Vector3 FirstRootPosition;
             public Vector3 LastRootPosition;
             public Vector3 WorldAccumulatedOffset;
