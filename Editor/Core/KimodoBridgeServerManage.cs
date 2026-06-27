@@ -75,7 +75,6 @@ namespace KimodoBridge.Editor
         private static int shutdownTicket;
         private static int runtimeMaintenanceDepth;
         private static readonly object sharedServiceGate = new object();
-
         static KimodoBridgeServerManage()
         {
             EditorApplication.delayCall += RecoverBridgeAfterDomainReload;
@@ -422,15 +421,9 @@ namespace KimodoBridge.Editor
                     port: -1);
             }
 
-            bool reachable = BridgeRuntimeControl.CanConnect(
-                host,
-                port,
-                BridgeRuntimeSettings.DefaultStatusConnectTimeoutMs,
-                CancellationToken.None);
-
             return new ServerStatusSnapshot(
                 ready: true,
-                running: reachable,
+                running: true,
                 hasPort: true,
                 queryInFlight: false,
                 host: host,

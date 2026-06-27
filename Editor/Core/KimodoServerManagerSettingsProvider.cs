@@ -79,7 +79,7 @@ namespace KimodoBridge.Editor
                 runtimeRoot = KimodoBridgeServerManage.GetRuntimeRootPath();
             }
 
-            PullServerStatusFromController(forceRefresh: false);
+            PullServerStatusFromController();
 
             EditorGUILayout.LabelField("Kimodo Server Manager", EditorStyles.boldLabel);
             EditorGUILayout.Space(4f);
@@ -89,7 +89,7 @@ namespace KimodoBridge.Editor
             if (GUILayout.Button(new GUIContent("Refresh", "Rescan runtime/model folders and request latest bridge server status."), GUILayout.Width(100f)))
             {
                 Refresh();
-                PullServerStatusFromController(forceRefresh: true);
+                PullServerStatusFromController();
             }
 
             if (GUILayout.Button(
@@ -286,8 +286,7 @@ namespace KimodoBridge.Editor
             else
             {
                 EditorGUILayout.HelpBox("Server is not running.", MessageType.None);
-                ServerStatusSnapshot staleSnapshot = KimodoBridgeServerManage.GetServerStatusSnapshot();
-                if (staleSnapshot.HasPort)
+                if (serverPort > 0)
                 {
                     EditorGUILayout.HelpBox("Detected stale endpoint file (serverport). Process is not alive.", MessageType.None);
                 }
@@ -560,7 +559,7 @@ namespace KimodoBridge.Editor
             return Path.GetFullPath(customPath);
         }
 
-        private void PullServerStatusFromController(bool forceRefresh)
+        private void PullServerStatusFromController()
         {
             if (!runtimeExists)
             {
@@ -568,7 +567,6 @@ namespace KimodoBridge.Editor
                 return;
             }
 
-            _ = forceRefresh;
             ServerStatusSnapshot snapshot = KimodoBridgeServerManage.GetServerStatusSnapshot();
             serverHost = snapshot.Host;
             serverPort = snapshot.Port;
@@ -620,7 +618,7 @@ namespace KimodoBridge.Editor
                 },
                 onSuccess: () =>
                 {
-                    PullServerStatusFromController(forceRefresh: true);
+                    PullServerStatusFromController();
                     operationStatus = serverState == ServerState.Enabled
                         ? $"Running at {serverHost}:{serverPort}"
                         : "Start completed.";
@@ -731,7 +729,7 @@ namespace KimodoBridge.Editor
                 });
 
                 Refresh();
-                PullServerStatusFromController(forceRefresh: true);
+                PullServerStatusFromController();
                 onSuccess?.Invoke();
                 if (!string.IsNullOrWhiteSpace(successStatus))
                 {
@@ -748,7 +746,7 @@ namespace KimodoBridge.Editor
                 lastError = ex.Message;
                 operationStatus = "Failed.";
                 Refresh();
-                PullServerStatusFromController(forceRefresh: true);
+                PullServerStatusFromController();
             }
             finally
             {
