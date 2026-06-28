@@ -3,12 +3,16 @@
 # License
 [Apache License 2.0](https://github.com/OneYoungMean/KimodoUnityBridge/blob/main/LICENSE)
 
-# 1.1.33更新点速览    
+# 1.2.0更新点速览    
+* **支持amd显卡，xpu显卡支持（Experimental）**
+* **增加Mac 平台支持，现在Linux，windows，mac 都可以正常工作了（Experimental）**
+* **大幅优化服务器体积**
+* **更完整的报错，更流畅的反馈机制**
 * **大幅度优化Generate pipe不稳定的问题**
 * **小幅度优化Quick Server性能,使用FaltPatten优化QickServer与Bridge通讯机制**
 * 修复了若干前后动画不匹配的问题.
 * 增加了RuntimeDemo新的api,方便用户调用.
-
+* 完善了说明书.
 
 ## 更新注意事项
 **老用户请删除项目目录\NvlabKimodoQuickServer~并重新运行，代码会自动拉取最新的包！否则运行会报错!**
