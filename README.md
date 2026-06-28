@@ -1,4 +1,4 @@
-[演示视频](https://www.bilibili.com/video/BV1HG7361Env) . [完整的Demo](https://github.com/OneYoungMean/KimodoUnityBridge_FullDemo) .[快速开始](FastBegin.md)  [使用说明](Manual/README.md)
+[演示视频](https://www.bilibili.com/video/BV1HG7361Env) . [完整的Demo](https://github.com/OneYoungMean/KimodoUnityBridge_FullDemo) .[快速开始](FastBegin.md) . [使用说明](Manual/README.md)
 
 # License
 [Apache License 2.0](https://github.com/OneYoungMean/KimodoUnityBridge/blob/main/LICENSE)
@@ -20,8 +20,7 @@
 
 # KimodoUnityBridge
 ![](Manual/Kimodo%20Unity%20Bridge_01.png)
-
-**开箱即用，完全运行在本地的免费 AI 人形动画生成系统**. 
+**开箱即用，完全运行在本地的免费 AI 人形动画生成系统**[快速开始](FastBegin.md) .   
 * 基于 https://github.com/nv-tlabs/kimodo 
 * 基于 https://github.com/OneYoungMean/NvlabKimodoQuickServer (感谢[Aero-Ex](https://gist.github.com/Aero-Ex) 他的文档解决了我很大问题)
 * CPU/GPU模式自适应（CUDA大约5秒，CPU大约1一分钟）兼容Windows/Linux平台.
