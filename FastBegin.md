@@ -14,7 +14,7 @@
 |---|---|---|
 | 是什么 | 插件内置的 Sample，一个极简 Timeline 场景 + 几段示例 clip | 一个完整的独立 Unity 工程 |
 | 适合谁 | 已有自己的工程，想把插件接进去 | **第一次用 Kimodo，想最快看到效果** |
-| 怎么拿 | Package Manager → Samples → Import | 下载整个工程 Zip 直接打开 |
+| 怎么获取 | Package Manager → Samples → Import | 下载整个工程 Zip 直接打开 |
 | 渲染管线 | 默认管线（Built-in RP） | 已配好 |
 
 **结论**：第一次用就下 FullDemo；想了解最小集成方式再看 Light Sample。
@@ -28,6 +28,7 @@
 2. 打开项目的 **Package Manager**，点左上角 **+** → **Add package from git URL...**，粘贴上面的地址。
 3. 等待完成。一切正常的话，菜单栏会出现 **Kimodo** 菜单。
 
+![Install](Manual/611555932-5f18b33e-4a21-42cf-8acd-57c0e548d44d.gif)
 ### 方式二：通过安装包
 1. 到 [Releases](https://github.com/OneYoungMean/KimodoUnityBridge/releases/latest) 下载第一个压缩包。
 2. 解压到 `项目/Packages` 目录下。
@@ -63,7 +64,7 @@
 4. 打开场景后，在 **Hierarchy** 窗口里找到名为 **Timeline** 的游戏对象（同场景还有 `Main Camera` 和 `Directional Light`）。
 5. 选中 **Timeline** 对象，它身上挂着一个 **PlayableDirector** 脚本。在 Inspector 里点开它引用的 **Timeline 资产**（即 `Sample Timeline.playable`），打开 Timeline 窗口。
 6. 在 Timeline 窗口里，**选中其中一个 Kimodo 片段（clip）**。选中后，Inspector 会显示该片段的全部生成设置。
-
+![Install](Manual/611566669-3d01af83-712c-45a9-99f6-8f33fa8dba6e.png)
 ---
 
 ## 3. 基本参数设置（Inspector → Generate Motion）
@@ -125,10 +126,5 @@
 - 首次慢是在下约 10G 模型，只发生一次；报错多半是网络，重点一次即可。
 - 长动画/循环：用 **InOut Constraint** 逐段接力（设 Outside 对齐上一段结尾）。
 
-**进阶手册（`Manual/` 目录）**
-- `Timeline Tool 说明书.md` — 时间轴生成的完整玩法
-- `Constraint Tool 说明书.md` — 用约束 Marker 精确控制姿势 / 手脚位置 / 轨迹
-- `Animator Tool 说明书.md` — 在状态机里替换 / 衔接动作
-- `Runtime 配置与 API 说明书.md` — 发布版运行时实时生成
-- `Kimodo Server Manager 说明书.md` — 本地服务器与模型管理
-- `常见问题与报错处理.md` — 按场景分组的报错与解决方案
+**进阶手册（`Manual/` 目录）**  
+ [Kimodo Manual](Manual/README.md)，
